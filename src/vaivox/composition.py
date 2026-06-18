@@ -112,6 +112,10 @@ def build(
     telemetry = build_telemetry_sink(config)
     clock = SystemClock()
     snapper = build_phrase_snapper(config, recorder, reporter)
+    # The structured-vocabulary store is on the routing path now (ADR-0006/0004): a matched
+    # command stamps usage on the credited entries. It reads the per-user data dir lazily, so
+    # it is harmless (a no-op) when nothing has been migrated/seeded there yet.
+    vocabulary_repository = JsonlVocabularyRepository(config.app_data_location)
 
     start_recording = StartRecording(recorder, reporter)
     stop_and_reconcile = StopAndReconcile(
@@ -124,6 +128,7 @@ def build(
         clock,
         telemetry,
         snapper,
+        vocabulary_repository,
     )
     shutdown = Shutdown(request_shutdown, reporter)
 
@@ -153,9 +158,7 @@ def build(
 
     api_server: IntrospectionServer | None = None
     if config.get_bool_setting("api_enabled", False):
-        data_dir = config.app_data_location
-        telemetry_reader = JsonlTelemetryReader(data_dir)
-        vocabulary_repository = JsonlVocabularyRepository(data_dir)
+        telemetry_reader = JsonlTelemetryReader(config.app_data_location)
         api_server = IntrospectionServer(
             DescribeStatus(recorder, config),
             DryRunReconcile(config),
@@ -164,7 +167,16 @@ def build(
             DescribeVocabulary(vocabulary_repository),
             refresh_vocabulary,
             ReloadVocabulary(apply_phrase_index, reporter),
-            SimulateUtterance(config, snapper, command_sink, kneeboard_sink, telemetry, reporter),
+            SimulateUtterance(
+                config,
+                snapper,
+                command_sink,
+                kneeboard_sink,
+                telemetry,
+                reporter,
+                vocabulary_repository,
+                clock,
+            ),
             host=config.get_setting("api_host", VAIVOX.api_host),
             port=config.get_int_setting("api_port", VAIVOX.api_port),
             token=config.get_setting("api_token", ""),

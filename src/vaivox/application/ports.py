@@ -20,7 +20,7 @@ from typing import Protocol, runtime_checkable
 
 from vaivox.domain.reconciliation.model import Transcription
 from vaivox.domain.reconciliation.snapper import SnapResult
-from vaivox.domain.telemetry.model import ReconciliationOutcome
+from vaivox.domain.telemetry.model import MatchOutcome, ReconciliationOutcome
 from vaivox.domain.vocabulary.model import GovernedEntry, VocabularyEntry, VocabularyKind
 
 
@@ -62,8 +62,19 @@ class AudioRecorder(Protocol):
 class CommandSink(Protocol):
     """Driven port: dispatch a recognized command to VoiceAttack."""
 
-    def send(self, command: str) -> None:
-        """Send ``command`` to VoiceAttack for matching and dispatch."""
+    def send(self, command: str) -> MatchOutcome | None:
+        """Send ``command`` to VoiceAttack and return its match outcome (ADR-0006).
+
+        The dispatch is synchronous request/response on one connection: the adapter sends
+        the command, then reads the plugin's reply back on the *same* socket.
+
+        Returns:
+            The :class:`~vaivox.domain.telemetry.model.MatchOutcome` the plugin reported,
+            or ``None`` when the outcome is **unknown** — no reply (a pre-return-channel
+            plugin that closes the socket), a read timeout, or a malformed reply. A
+            ``None`` outcome is recorded as unknown telemetry and never stamps vocabulary
+            usage, so the routing flow degrades cleanly against an un-rebuilt plugin.
+        """
 
 
 @runtime_checkable

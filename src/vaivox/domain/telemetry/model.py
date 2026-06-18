@@ -15,13 +15,18 @@ from dataclasses import dataclass
 class MatchOutcome:
     """The result of VoiceAttack's match attempt for a dispatched command.
 
-    Returned by the plugin's synchronous reply channel (ADR-0006). Until the plugin
-    reply is wired in Phase 5 the sink reports ``None`` (unknown), which telemetry
-    records without stamping vocabulary usage.
+    Returned by the plugin's synchronous reply channel (ADR-0006): the command sink
+    reads one JSON line back on the same socket right after dispatch and parses it into
+    this value object. A ``None`` outcome (not an instance of this class) means the
+    result is *unknown* — no reply at all (a pre-return-channel plugin), a read timeout,
+    or a malformed reply — which telemetry records without stamping vocabulary usage. A
+    populated outcome with ``matched`` true stamps usage on the credited entries
+    (ADR-0004 attribution).
 
     Attributes:
         matched: Whether VoiceAttack found and dispatched a command for the text.
-        resolved_command: The command VoiceAttack resolved to, when matched.
+        resolved_command: The command VoiceAttack resolved to, when matched (the received
+            text, since ``Command.Exists`` is an exact-name check); ``None`` otherwise.
     """
 
     matched: bool
