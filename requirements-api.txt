@@ -1,0 +1,12 @@
+ttkbootstrap
+keyboard
+pyperclip
+rapidfuzz
+sounddevice
+soundfile
+text2digits
+pystray
+pillow
+pid
+darkdetect
+wcwidth

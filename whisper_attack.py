@@ -8,7 +8,7 @@ from tkinter import PhotoImage, font, LEFT, DISABLED, WORD, W, NSEW
 import darkdetect
 from pystray import Icon, Menu, MenuItem
 from ttkbootstrap import Window, Toplevel, Button, Label, Style
-from ttkbootstrap.scrolled import ScrolledText
+from ttkbootstrap.widgets.scrolled import ScrolledText
 from ttkbootstrap.constants import *
 from PIL import Image
 from pid import PidFile, PidFileError
@@ -39,7 +39,7 @@ os.makedirs(WHISPER_APPDATA_DIR, exist_ok=True)
 
 def start_logging() -> None:
     """
-    Start logging to the %LOCALAPPDATA%\WhisperAttack directory.
+    Start logging to the %LOCALAPPDATA%\\WhisperAttack directory.
     """
     log_file = os.path.join(WHISPER_APPDATA_DIR, "WhisperAttack.log")
     logging.basicConfig(
@@ -101,7 +101,7 @@ class WhisperAttack:
         self.writer = WhisperAttackWriter(theme, text_area)
 
         self.writer.write("Loaded configuration:", TAG_BLUE)
-        self.writer.write_dict(self.config.get_configuration(), TAG_GREY)
+        self.writer.write_dict(self.config.get_safe_configuration(), TAG_GREY)
         self.writer.write("Loaded word mappings:", TAG_BLUE)
         self.writer.write_dict(self.config.get_word_mappings(), TAG_GREY)
         self.writer.write("Loaded fuzzy words:", TAG_BLUE)

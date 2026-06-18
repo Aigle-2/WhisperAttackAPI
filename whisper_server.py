@@ -16,6 +16,9 @@ from rapidfuzz import process
 from text2digits import text2digits
 from wcwidth import wcswidth
 from configuration import WhisperAttackConfiguration
+from stt_backends.base import SpeechToTextBackendError
+from stt_backends.factory import create_stt_backend
+from stt_backends.keyterms import PHONETIC_ALPHABET
 from writer import WhisperAttackWriter
 from theme import TAG_BLUE, TAG_GREEN, TAG_GREY, TAG_ORANGE, TAG_RED
 
@@ -36,12 +39,7 @@ SAMPLE_RATE = 16000
 ###############################################################################
 # PHONETIC ALPHABET
 ###############################################################################
-phonetic_alphabet = [
-    "Alpha", "Bravo", "Charlie", "Delta", "Echo", "Foxtrot", "Golf",
-    "Hotel", "India", "Juliet", "Kilo", "Lima", "Mike", "November",
-    "Oscar", "Papa", "Quebec", "Romeo", "Sierra", "Tango", "Uniform",
-    "Victor", "Whiskey", "X-ray", "Yankee", "Zulu",
-]
+phonetic_alphabet = PHONETIC_ALPHABET
 
 ###############################################################################
 # FUZZY MATCH + CLEANUP
@@ -191,7 +189,7 @@ class WhisperServer:
         self.writer = writer
         self.exit_event = exit_event
         self.shutdown = shutdown
-        self.model = None
+        self.stt_backend = None
         self.recording = False
         self.audio_file = AUDIO_FILE
         self.wave_file = None
@@ -200,44 +198,17 @@ class WhisperServer:
         self.voiceattack_host = self.config.get_voiceattack_host()
         self.voiceattack_port = self.config.get_voiceattack_port()
 
-    def load_whisper_model(self, config: WhisperAttackConfiguration) -> None:
+    def load_stt_backend(self, config: WhisperAttackConfiguration) -> None:
         """
-        Loads the Whisper model.
+        Loads the configured speech-to-text backend.
         """
-        whisper_model = config.get_whisper_model()
-        whisper_device = config.get_whisper_device()
-        whisper_compute_type = config.get_whisper_compute_type()
-        whisper_core_type = config.get_whisper_core_type()
-        self.writer.write(f"Loading Whisper model ({whisper_model}), device={whisper_device} ...")
-        import torch
-        from faster_whisper import WhisperModel
-
-        if whisper_device.upper() == "GPU":
-            if torch.cuda.is_available():
-                compute_type = whisper_compute_type
-                if whisper_core_type.lower() == "standard":
-                    compute_type = "int8"
-                    logging.info("whisper_core_type is 'standard' so using compute_type '%s'", compute_type)
-                device = torch.device("cuda")
-                capability = torch.cuda.get_device_capability(device)
-                major, minor = capability
-                logging.info("GPU has cuda capability major=%s minor=%s", major, minor)
-                # Tensor Cores are available on devices with compute capability 7.0 or higher
-                if whisper_core_type.lower() == "tensor" and major < 7:
-                    compute_type = "int8"
-                    logging.warning("GPU does not have tensor cores, major=%s, minor=%s so using compute_type '%s'", major, minor, compute_type)
-                logging.info("Loading Whisper model (%s), device=%s, core_type=%s, compute_type=%s ...", whisper_model, whisper_device, whisper_core_type, compute_type)
-                self.model = WhisperModel(whisper_model, device="cuda", compute_type=compute_type)
-                logging.info('Successfully loaded Whisper model')
-                self.writer.write('Successfully loaded Whisper model', TAG_GREEN)
-                return None
-
-            logging.error("cuda not available so using CPU")
-            self.writer.write("cuda not available so using CPU", TAG_RED)
-
-        compute_type = "int8"
-        logging.info("Loading Whisper model (%s), device=%s, compute_type=%s ...", whisper_model, "cpu", compute_type)
-        self.model = WhisperModel(whisper_model, device="cpu", compute_type=compute_type)
+        backend_name = config.get_stt_backend()
+        logging.info("Loading STT backend '%s' ...", backend_name)
+        self.writer.write(f"Loading STT backend ({backend_name}) ...")
+        self.stt_backend = create_stt_backend(config)
+        self.stt_backend.load()
+        logging.info("Successfully loaded STT backend '%s'", backend_name)
+        self.writer.write(f"Successfully loaded STT backend ({backend_name})", TAG_GREEN)
         return None
 
     def start_recording(self) -> None:
@@ -316,30 +287,10 @@ class WhisperServer:
         try:
             logging.info("Transcribing audio...")
             start_time = datetime.now()
-            segments, _ = self.model.transcribe(
-                audio_path,
-                language='en',
-                beam_size=5,
-                suppress_tokens=[0,11,13,30,986],
-                initial_prompt=(
-                    "This is aviation-related speech for DCS Digital Combat Simulator, "
-                    "Expect references to airports in Caucasus Georgia and Russia. Expect callsigns like Enfield, Springfield, Uzi, Colt, Dodge, "
-                    "Ford, Chevy, Pontiac, Army Air, Apache, Crow, Sioux, Gatling, Gunslinger, "
-                    "Hammerhead, Bootleg, Palehorse, Carnivor, Saber, Hawg, Boar, Pig, Tusk, Viper, "
-                    "Venom, Lobo, Cowboy, Python, Rattler, Panther, Wolf, Weasel, Wild, Ninja, Jedi, "
-                    "Hornet, Squid, Ragin, Roman, Sting, Jury, Joker, Ram, Hawk, Devil, Check, Snake, "
-                    "Dude, Thud, Gunny, Trek, Sniper, Sled, Best, Jazz, Rage, Tahoe, Bone, Dark, Vader, "
-                    "Buff, Dump, Kenworth, Heavy, Trash, Cargo, Ascot, Overlord, Magic, Wizard, Focus, "
-                    "Darkstar, Texaco, Arco, Shell, Axeman, Darknight, Warrior, Pointer, Eyeball, "
-                    "Moonbeam, Whiplash, Finger, Pinpoint, Ferret, Shaba, Playboy, Hammer, Jaguar, "
-                    "Deathstar, Anvil, Firefly, Mantis, Badger. Also expect usage of the phonetic "
-                    "alphabet Alpha, Bravo, Charlie, X-ray."
-                )
-            )
-
-            raw_text = ""
-            for segment in segments:
-                raw_text += f"{segment.text}"
+            if self.stt_backend is None:
+                raise SpeechToTextBackendError("STT backend is not loaded.")
+            result = self.stt_backend.transcribe(audio_path)
+            raw_text = result.text
 
             end_time = datetime.now()
             duration = end_time - start_time
@@ -423,7 +374,16 @@ class WhisperServer:
         """
         Starts a socket server and listens for incoming commands.
         """
-        self.load_whisper_model(self.config)
+        try:
+            self.load_stt_backend(self.config)
+        except SpeechToTextBackendError as e:
+            logging.error("Failed to load STT backend: %s", e)
+            self.writer.write(f"Failed to load STT backend: {e}", TAG_RED)
+            return None
+        except Exception as e:
+            logging.exception("Unexpected failure while loading STT backend.")
+            self.writer.write(f"Failed to load STT backend: {e}", TAG_RED)
+            return None
 
         logging.info("Server started and listening on %s:%s", HOST, PORT)
         self.writer.write(f"Server started and listening on {HOST}:{PORT}", TAG_GREEN)

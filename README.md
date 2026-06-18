@@ -1,6 +1,8 @@
-# WhisperAttack - OpenAI Whisper for VoiceAttack
+# WhisperAttackAPI - STT Backends for VoiceAttack
 
-This repository provides a single-server approach for using OpenAI Whisper locally with VoiceAttack, replacing Windows Speech Recognition with a fully offline, GPU-accelerated blazing fast and accurate AI speech recognition engine
+This repository provides a single-server approach for using modern speech-to-text (STT) backends with VoiceAttack, replacing Windows Speech Recognition with accurate push-to-talk transcription.
+
+This fork keeps the WhisperAttack workflow but adds a provider-agnostic STT backend layer. The default backend is ElevenLabs Scribe v2 for API-based transcription that does not consume the GPU DCS needs. The original local `faster_whisper` workflow remains available as a configurable fallback.
 
 This is a fork for further integration of **KneeboardWhisper** by the amazing creator [@BojoteX](https://github.com/BojoteX). A special thank you goes to [@hradec](https://github.com/hradec), whose original script used Google Voice Recognition, [@SeaTechNerd83](https://github.com/SeaTechNerd83) for helping combine the two approaches and creating a VA plugin and finally [@sleighzy](https://github.com/sleighzy) for VAICOM implementation and the lengthy list of bug fixes and enchancements that would fill this page
 
@@ -10,20 +12,22 @@ In short, SeaTechNerd83 and I combined the two scripts to run voice commands thr
 
 ## Features
 
-- **OpenAI Whisper models**:
-  - Loads the Whisper model once on GPU or CPU.
+- **Provider-agnostic STT backends**:
   - Records mic audio on demand (via socket commands).
-  - Transcribes the `.wav` file using Whisper.
+  - Transcribes the `.wav` file using the configured backend.
   - Sends recognized text into VoiceAttack.
   - Pushes transcribed text to clipboard - (perfect for voice to text DCS Chat...)
+  - Supports the original local `faster_whisper` backend.
+  - Supports ElevenLabs Scribe v2 via API.
 
 - **VoiceAttack Command Plugin**
   - Sends "start", "stop", or "shutdown" commands to the server directly through VoiceAttack.
 
 - **Advantages:**
-  - No repeated model loads (faster, especially with larger Whisper models).
+  - API-backed STT avoids using GPU resources needed by DCS.
+  - Local Whisper can still be used offline when preferred.
   - Push-to-Talk style workflow with VoiceAttack press & release.
-  - Extremely accurate voice recognition (No more VoiceAttack misunderstanding you!)
+  - STT keyterms can bias recognition toward DCS, VAICOM, ATC, callsigns, and airfields.
 
 ---
 
@@ -40,15 +44,56 @@ Instructions for integrating with VAICOM can be located in the [VAICOM INTEGRATI
   - Plugins Enabled
 
 - **GPU (Optional, but Recommended)**
-  - Whisper runs faster on an NVIDIA GPU with CUDA.
-  - When using GPU if CUDA is not available then an error will be logged and this will fallback to CPU
+  - Only required when using the `faster_whisper` backend.
+  - API-backed providers do not use local GPU resources.
+
+- **API key (ElevenLabs backend)**
+  - Create an ElevenLabs API key.
+  - Set it in your environment as `ELEVENLABS_API_KEY`.
+  - Do not put API keys in `settings.cfg` or commit them to the repository.
 
 ---
 
 ## Installation
 
-1. Download the latest release [WhisperAttack v1.2.2.zip file from the Google drive](https://drive.google.com/drive/folders/1Op3aNXtz8kGjsbROV74DPjq2em_34--c?usp=sharing) and unarchive anywhere on your computer, e.g. `C:\Program Files\WhisperAttack`
-1. A shortcut can be created to the `WhisperAttack.exe` application
+These instructions are for normal users. You do not need Python, Git, Visual Studio, CUDA, or any developer tooling when using the release ZIP.
+
+1. Download the latest `WhisperAttackAPI` release ZIP from GitHub Releases.
+1. Extract the ZIP anywhere on your computer, for example:
+
+```console
+C:\Program Files\WhisperAttackAPI
+```
+
+or:
+
+```console
+C:\Users\yourname\Desktop\WhisperAttackAPI
+```
+
+1. Open the extracted folder.
+1. Double-click `Set ElevenLabs API Key.cmd` once and paste your ElevenLabs API key.
+1. Double-click `WhisperAttackAPI.exe`.
+1. Create a shortcut to `WhisperAttackAPI.exe` if desired.
+
+Keep the folder structure intact. Do not move only the `.exe` file elsewhere; it must stay beside `_internal`, `settings.cfg`, `fuzzy_words.txt`, `word_mappings.txt`, and the icon files.
+
+The release folder is expected to look like this:
+
+```console
+WhisperAttackAPI v1.2.2-api.1\
+  _internal\
+  WhisperAttackAPI.exe
+  settings.cfg
+  fuzzy_words.txt
+  word_mappings.txt
+  whisper_attack_icon.png
+  add_icon.png
+  Set ElevenLabs API Key.cmd
+  README_FIRST.txt
+```
+
+VoiceAttack and VAICOM setup stays the same as WhisperAttack when the VoiceAttack plugin connects to `127.0.0.1:65432`.
 
 ---
 
@@ -68,6 +113,18 @@ The `settings.cfg` file contains configuration for WhisperAttack.
 
 The default values should cover most cases but can be changed:
 
+- `stt_backend` - The speech-to-text backend to use, `elevenlabs` by default in this fork.
+  - Supported values: `elevenlabs`, `faster_whisper`
+- `stt_language` - Language hint for transcription, `en` by default for VAICOM English commands.
+- `stt_timeout_seconds` - API request timeout in seconds.
+- `stt_keyterm_sources` - Comma-separated sources used to build provider keyterms without duplicating vocabulary in `settings.cfg`.
+  - Supported values: `phonetic_alphabet`, `fuzzy_words`, `word_mapping_replacements`, `word_mapping_aliases`, `dcs_default`, `custom`
+- `stt_keyterms_extra` - Optional comma-separated extra provider keyterms. Prefer `fuzzy_words.txt` for domain vocabulary.
+- `elevenlabs_api_key_env` - Environment variable containing the ElevenLabs API key. Defaults to `ELEVENLABS_API_KEY`.
+- `elevenlabs_model` - ElevenLabs model ID, `scribe_v2` by default.
+- `elevenlabs_no_verbatim` - Removes filler words and false starts when supported. Defaults to `true`.
+- `elevenlabs_tag_audio_events` - Enables or disables audio event tags. Defaults to `false`.
+- `elevenlabs_timestamps_granularity` - Timestamp granularity. Defaults to `none` because VoiceAttack only needs text.
 - `whisper_model` - The Whisper model to use, `small.en` by default. See the table at the bottom of the README file for options.
   - A smaller size can be specified for reducing the amount of VRAM used, e.g. `base.en` or `tiny.en`
 - `whisper_device` - Which device to run the Whisper transcription process on, `GPU` (default) or `CPU`
@@ -75,6 +132,107 @@ The default values should cover most cases but can be changed:
   - `default` - this will use the current theme you have set for Windows
   - `dark` - dark mode
   - `light` - light mode
+
+### ElevenLabs API setup
+
+For release users, use the helper included beside the exe:
+
+```console
+Set ElevenLabs API Key.cmd
+```
+
+This stores the key in your Windows user environment as `ELEVENLABS_API_KEY`. The key is not written to `settings.cfg`.
+
+PowerShell alternative:
+
+```console
+setx ELEVENLABS_API_KEY "your-api-key"
+```
+
+Restart WhisperAttackAPI after setting the environment variable.
+
+### ElevenLabs cost estimate
+
+Pricing can change, so check the official [ElevenLabs API pricing page](https://elevenlabs.io/pricing/api) before publishing guidance to users. The [ElevenLabs Speech-to-Text docs](https://elevenlabs.io/docs/overview/capabilities/speech-to-text) describe Scribe v2, language support, and keyterm prompting. The estimate below was checked on 2026-06-18.
+
+WhisperAttackAPI currently uses `scribe_v2` in batch Speech-to-Text mode, not `Scribe v2 Realtime`. The default configuration sends DCS/VAICOM keyterms, so the estimate includes keyterm prompting.
+
+Assumptions:
+
+- Scribe v1/v2 Speech-to-Text: `$0.22` per transcribed audio hour.
+- Keyterm prompting: `+$0.05` per transcribed audio hour.
+- Entity detection is not used.
+- Realtime transcription is not used.
+- Estimated total: `$0.27` per transcribed audio hour, before taxes.
+
+With `$5`:
+
+```console
+$5 / $0.27 = 18.5 hours of transcribed audio
+```
+
+This is not the same as 18.5 hours of gameplay. WhisperAttackAPI only sends audio while push-to-talk is recording.
+
+| Usage style | Transcribed audio per gameplay hour | Estimated cost per gameplay hour | $5 covers about |
+| --- | ---: | ---: | ---: |
+| Light radio use | 30 seconds | $0.00225 | 2200 gameplay hours |
+| Normal VAICOM use | 2 minutes | $0.009 | 555 gameplay hours |
+| Intensive radio use | 5 minutes | $0.0225 | 222 gameplay hours |
+| Very chatty / dictation | 15 minutes | $0.0675 | 74 gameplay hours |
+| Push-to-talk nearly always held | 60 minutes | $0.27 | 18.5 gameplay hours |
+
+A typical 3-second command costs roughly:
+
+```console
+$0.27 / 3600 * 3 = $0.000225
+```
+
+So `$5` covers about `22,000` short 3-second commands under the straight audio-duration estimate.
+
+Important caveat: ElevenLabs documents Speech-to-Text as billed per audio minute, but the public pricing page does not clearly state whether many very short API requests are rounded up individually. If each short push-to-talk clip were rounded up to one full minute, `$5` would cover about `1,111` commands instead. The safest validation is to send a small number of test commands, then check usage in the ElevenLabs developer dashboard.
+
+### Building the executable (maintainers only)
+
+Normal users should download the release ZIP and should not run this step. The recommended maintainer build is the API-only executable. It avoids bundling Torch and faster-whisper, so the package is smaller and DCS keeps priority on the GPU.
+
+Double-click:
+
+```console
+build_api_only.cmd
+```
+
+The executable is created at:
+
+```console
+dist\release\WhisperAttackAPI v1.2.2-api.1\WhisperAttackAPI.exe
+```
+
+The distributable ZIP is created beside it:
+
+```console
+dist\release\WhisperAttackAPI v1.2.2-api.1.zip
+```
+
+Any intermediate PyInstaller output is kept under `build`; only `dist\release` is meant to be published.
+
+The release folder follows the original WhisperAttack layout: the exe, `_internal`, `settings.cfg`, `fuzzy_words.txt`, `word_mappings.txt`, icons, and a small API-key helper are all at the top level.
+
+To build the larger offline-capable executable that includes the local `faster_whisper` backend, double-click:
+
+```console
+build_full.cmd
+```
+
+### Local Whisper setup
+
+To run fully offline, update `settings.cfg`:
+
+```console
+stt_backend=faster_whisper
+whisper_model=small.en
+```
+
+This requires the full executable built with `build_full.cmd` or a Python environment installed from `requirements.txt`.
 
 ### word_mappings.txt
 
@@ -93,14 +251,14 @@ WhisperAttack needs to be restarted after making changes to this file. New word 
 
 ## Running the Whisper Server
 
-Double click the `WhisperAttack.exe` file or shortcut. This will open an application window and start the server.
+Double click the `WhisperAttackAPI.exe` file or shortcut. This will open an application window and start the server.
 
 The application window will display startup logging information, the raw text transcribed from the speech, and the final cleaned up command ot text that was sent to VoiceAttack or DCS. The window can be closed, and then shown again from the menu in the WhisperAttack icon in the Windows system tray. WhisperAttack will continue running even when the window is closed.
 
 WhisperAttack will have completed loading once the "Server started and listening" message is displayed.
 
 ```
-Loading Whisper model (small.en), device=GPU ...
+Loading STT backend (elevenlabs) ...
 Server started and listening on 127.0.0.1:65432...
 ```
 
@@ -244,9 +402,17 @@ whisper_core_type=standard
 
 ## Performance (AI Model)
 
-If WhisperAttack is causing significant studders, It is likely that the current model is overloading your VRAM. If this is the case, studders can be alleviated by changing the model size (extra information on the models is available in the table below) in the `settings.cfg` file as follows:
+If DCS is GPU constrained, use an API backend such as ElevenLabs so transcription does not consume VRAM. This is the default in WhisperAttackAPI:
 
 ```console
+stt_backend=elevenlabs
+elevenlabs_model=scribe_v2
+```
+
+If you use the local `faster_whisper` backend and WhisperAttack is causing significant studders, it is likely that the current model is overloading your VRAM. In that case, reduce the local Whisper model size:
+
+```console
+stt_backend=faster_whisper
 whisper_model=base.en
 ```
 
