@@ -102,15 +102,82 @@ class WhisperAttack:
 
         self.writer.write("Loaded configuration:", TAG_BLUE)
         self.writer.write_dict(self.config.get_safe_configuration(), TAG_GREY)
-        self.writer.write("Loaded word mappings:", TAG_BLUE)
-        self.writer.write_dict(self.config.get_word_mappings(), TAG_GREY)
-        self.writer.write("Loaded fuzzy words:", TAG_BLUE)
-        self.writer.write(f"{self.config.get_fuzzy_words()}", TAG_GREY)
+        self.write_startup_context()
 
         self.whisper_server = WhisperServer(self.config, self.writer, self.shutdown, exit_event)
 
         threading.excepthook = self.handle_exception
         threading.Thread(daemon=True, target=lambda: icon.run(setup=self.startup)).start()
+
+    def write_startup_context(self) -> None:
+        """
+        Write the startup vocabulary summary to the UI.
+        """
+        word_mappings = self.config.get_word_mappings()
+        fuzzy_words = self.config.get_fuzzy_words()
+
+        self.writer.write("Loaded post-processing word mappings:", TAG_BLUE)
+        self.writer.write(f"{len(word_mappings)} mappings", TAG_GREY)
+        self.writer.write_dict(word_mappings, TAG_GREY)
+
+        self.writer.write("Loaded fuzzy correction words:", TAG_BLUE)
+        self.writer.write(f"{len(fuzzy_words)} words: {', '.join(fuzzy_words)}", TAG_GREY)
+
+        self.write_stt_keyterm_context()
+
+    def write_stt_keyterm_context(self) -> None:
+        """
+        Write the effective STT keyterm context without dumping the whole VAICOM list.
+        """
+        provider = self.config.get_stt_backend()
+        source_counts = self.config.get_stt_keyterm_source_counts()
+        all_keyterms = self.config.get_stt_keyterms()
+        budget = self.config.get_provider_stt_keyterm_budget(provider)
+        budgeted = self.config.get_provider_budgeted_stt_keyterm_details(provider, log_result=False)
+        supported_providers = {"elevenlabs", "deepgram", "openai"}
+
+        source_summary = ", ".join(
+            f"{source}={count}" for source, count in source_counts.items()
+        ) or "none"
+        limit_summary = self.format_keyterm_budget(budget)
+
+        self.writer.write("Loaded STT keyterm context:", TAG_BLUE)
+        self.writer.write(f"provider: {provider}", TAG_GREY)
+        self.writer.write(f"sources: {source_summary}", TAG_GREY)
+        self.writer.write(f"available: {len(all_keyterms)} unique terms", TAG_GREY)
+
+        if provider not in supported_providers:
+            self.writer.write(f"effective: not used by {provider}", TAG_GREY)
+            return
+        if provider == "openai" and not self.config.get_provider_bool("openai", "include_keyterms_in_prompt", True):
+            self.writer.write("effective: disabled by openai_include_keyterms_in_prompt", TAG_GREY)
+            return
+
+        target = "OpenAI prompt" if provider == "openai" else provider
+        self.writer.write(f"effective: {len(budgeted.keyterms)} terms sent to {target}", TAG_GREY)
+        if limit_summary:
+            self.writer.write(f"limits: {limit_summary}", TAG_GREY)
+        if budgeted.skipped_too_long or budgeted.omitted_by_term_limit or budgeted.omitted_by_char_limit:
+            self.writer.write(
+                "omitted by budget: "
+                f"too_long={budgeted.skipped_too_long}, "
+                f"term_limit={budgeted.omitted_by_term_limit}, "
+                f"char_limit={budgeted.omitted_by_char_limit}",
+                TAG_GREY,
+            )
+        preview = ", ".join(budgeted.keyterms[:25])
+        if preview:
+            self.writer.write(f"preview: {preview}", TAG_GREY)
+
+    def format_keyterm_budget(self, budget) -> str:
+        limits = []
+        if budget.max_terms is not None:
+            limits.append(f"max_terms={budget.max_terms}")
+        if budget.max_term_chars is not None:
+            limits.append(f"max_term_chars={budget.max_term_chars}")
+        if budget.max_total_chars is not None:
+            limits.append(f"max_total_chars={budget.max_total_chars}")
+        return ", ".join(limits)
 
     def shutdown(self) -> None:
         """

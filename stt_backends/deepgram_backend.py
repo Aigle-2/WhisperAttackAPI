@@ -25,7 +25,7 @@ class DeepgramBackend(SpeechToTextBackend):
         self.smart_format = config.get_provider_bool("deepgram", "smart_format", True)
         self.detect_language = config.get_provider_bool("deepgram", "detect_language", False)
         self.max_keyterms = config.get_provider_int("deepgram", "max_keyterms", 100)
-        self.keyterms = config.get_stt_keyterms()
+        self.keyterms = config.get_budgeted_stt_keyterms(self.provider_name, max_terms=self.max_keyterms)
         self.api_key = ""
 
     def load(self) -> None:
@@ -83,7 +83,7 @@ class DeepgramBackend(SpeechToTextBackend):
         elif self.language:
             query.append(("language", self.language))
 
-        for keyterm in self.keyterms[:max(self.max_keyterms, 0)]:
+        for keyterm in self.keyterms:
             query.append(("keyterm", keyterm))
 
         return parse.urlunparse(parsed._replace(query=parse.urlencode(query)))

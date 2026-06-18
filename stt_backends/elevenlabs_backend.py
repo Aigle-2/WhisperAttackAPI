@@ -27,7 +27,13 @@ class ElevenLabsBackend(SpeechToTextBackend):
         self.tag_audio_events = config.get_provider_bool("elevenlabs", "tag_audio_events", False)
         self.timestamps_granularity = config.get_provider_setting("elevenlabs", "timestamps_granularity", "none")
         self.temperature = config.get_provider_setting("elevenlabs", "temperature", "")
-        self.keyterms = config.get_stt_keyterms()
+        self.max_keyterms = config.get_provider_int("elevenlabs", "max_keyterms", 900)
+        self.max_keyterm_chars = config.get_provider_int("elevenlabs", "max_keyterm_chars", 50)
+        self.keyterms = config.get_budgeted_stt_keyterms(
+            self.provider_name,
+            max_terms=self.max_keyterms,
+            max_term_chars=self.max_keyterm_chars,
+        )
         self.api_key = ""
 
     def load(self) -> None:

@@ -121,17 +121,20 @@ The default values should cover most cases but can be changed:
 - `stt_language` - Language hint for transcription, `en` by default for VAICOM English commands.
 - `stt_timeout_seconds` - API request timeout in seconds.
 - `stt_keyterm_sources` - Comma-separated sources used to build provider keyterms without duplicating vocabulary in `settings.cfg`.
-  - Supported values: `phonetic_alphabet`, `fuzzy_words`, `word_mapping_replacements`, `word_mapping_aliases`, `dcs_default`, `custom`
+  - Supported values: `custom`, `phonetic_alphabet`, `fuzzy_words`, `word_mapping_replacements`, `word_mapping_aliases`, `dcs_default`, `vaicom`
 - `stt_keyterms_extra` - Optional comma-separated extra provider keyterms. Prefer `fuzzy_words.txt` for domain vocabulary.
 - `elevenlabs_api_key_env` - Environment variable containing the ElevenLabs API key. Defaults to `ELEVENLABS_API_KEY`.
 - `elevenlabs_model` - ElevenLabs model ID, `scribe_v2` by default.
 - `elevenlabs_no_verbatim` - Removes filler words and false starts when supported. Defaults to `true`.
 - `elevenlabs_tag_audio_events` - Enables or disables audio event tags. Defaults to `false`.
 - `elevenlabs_timestamps_granularity` - Timestamp granularity. Defaults to `none` because VoiceAttack only needs text.
+- `elevenlabs_max_keyterms` - Maximum generated keyterms to send to ElevenLabs. Defaults to `900`.
+- `elevenlabs_max_keyterm_chars` - Maximum characters per ElevenLabs keyterm. Defaults to `50`.
 - `openai_api_key_env` - Environment variable containing the OpenAI API key. Defaults to `OPENAI_API_KEY`.
 - `openai_model` - OpenAI transcription model ID, `gpt-4o-transcribe` by default.
 - `openai_include_keyterms_in_prompt` - Adds generated DCS/VAICOM keyterms to the OpenAI transcription prompt.
 - `openai_max_prompt_keyterms` - Maximum generated keyterms to include in the OpenAI prompt.
+- `openai_prompt_keyterm_char_budget` - Maximum generated keyterm text length to add to the OpenAI prompt.
 - `deepgram_api_key_env` - Environment variable containing the Deepgram API key. Defaults to `DEEPGRAM_API_KEY`.
 - `deepgram_model` - Deepgram model ID, `nova-3` by default.
 - `deepgram_smart_format` - Enables Deepgram smart formatting. Defaults to `true`.
@@ -165,6 +168,26 @@ setx DEEPGRAM_API_KEY "your-api-key"
 
 Restart WhisperAttackAPI after setting the environment variable.
 
+### VAICOM keyterms
+
+The generated VAICOM vocabulary lives in `stt_backends/vaicom_keyterms.txt`. It was built from the local VAICOMPRO install at:
+
+```console
+E:\Jeux\steamapps\common\VoiceAttack 2\Apps\VAICOMPRO
+```
+
+The checked-in list is a curated provider shortlist capped at 850 terms. It is post-processed into unique words: composed phrases, numeric tokens, low-value UI words, and code-only terms such as ICAO identifiers are removed. Technical acronyms such as `IFF`, `TV`, and `TACAN` are placed first, high-value command words such as `boresight`, `clearance`, and `wheelchocks` follow, then callsigns, common DCS terms, and selected proper names. It is generated from VAICOM command phrases, recipients, callsigns, ATC/airfield aliases, RIO/WSO/George commands, and current F10/mission menu terms where available.
+
+Spelled aviation codes are normalized after transcription, so the keyterm list does not need to include every code. For example, `U L M B`, `U-L-M-B`, or `E.S.N.J` are compacted to `ULMB` and `ESNJ` before text is sent to VoiceAttack.
+
+To refresh it from a local VAICOM install:
+
+```console
+python tools\generate_vaicom_keyterms.py --vaicom-root "E:\Jeux\steamapps\common\VoiceAttack 2\Apps\VAICOMPRO" --saved-games "C:\Users\esteb\Saved Games\DCS"
+```
+
+Use `--max-terms` to raise or lower the generated shortlist size.
+
 ### Optional STT providers
 
 ElevenLabs remains the default because it has worked well for DCS/VAICOM push-to-talk with French-accented English. Users can switch providers by editing `settings.cfg`:
@@ -173,13 +196,13 @@ ElevenLabs remains the default because it has worked well for DCS/VAICOM push-to
 stt_backend=openai
 ```
 
-OpenAI uses the official transcription endpoint with `gpt-4o-transcribe` by default. WhisperAttackAPI sends the DCS/VAICOM prompt and generated keyterms as transcription context. See the official [OpenAI Speech-to-Text guide](https://developers.openai.com/api/docs/guides/speech-to-text) and [transcription API reference](https://developers.openai.com/api/reference/resources/audio/subresources/transcriptions/methods/create/).
+OpenAI uses the official transcription endpoint with `gpt-4o-transcribe` by default. WhisperAttackAPI sends the DCS/VAICOM prompt and a budgeted set of generated keyterms as transcription context. See the official [OpenAI Speech-to-Text guide](https://developers.openai.com/api/docs/guides/speech-to-text) and [transcription API reference](https://developers.openai.com/api/reference/resources/audio/subresources/transcriptions/methods/create/).
 
 ```console
 stt_backend=deepgram
 ```
 
-Deepgram uses prerecorded transcription with `nova-3` by default. WhisperAttackAPI sends generated DCS/VAICOM keyterms as Deepgram `keyterm` query parameters. See the official [Deepgram prerecorded audio guide](https://developers.deepgram.com/docs/pre-recorded-audio), [Nova-3 model overview](https://developers.deepgram.com/docs/models-languages-overview), and [Keyterm Prompting docs](https://developers.deepgram.com/docs/keyterm).
+Deepgram uses prerecorded transcription with `nova-3` by default. WhisperAttackAPI sends a budgeted set of generated DCS/VAICOM keyterms as Deepgram `keyterm` query parameters. See the official [Deepgram prerecorded audio guide](https://developers.deepgram.com/docs/pre-recorded-audio), [Nova-3 model overview](https://developers.deepgram.com/docs/models-languages-overview), and [Keyterm Prompting docs](https://developers.deepgram.com/docs/keyterm).
 
 ### ElevenLabs cost estimate
 
@@ -283,11 +306,16 @@ WhisperAttack needs to be restarted after making changes to this file. New word 
 
 Double click the `WhisperAttackAPI.exe` file or shortcut. This will open an application window and start the server.
 
-The application window will display startup logging information, the raw text transcribed from the speech, and the final cleaned up command ot text that was sent to VoiceAttack or DCS. The window can be closed, and then shown again from the menu in the WhisperAttack icon in the Windows system tray. WhisperAttack will continue running even when the window is closed.
+The application window will display startup logging information, including the effective STT keyterm context, the raw text transcribed from the speech, and the final cleaned up command text that was sent to VoiceAttack or DCS. The window can be closed, and then shown again from the menu in the WhisperAttack icon in the Windows system tray. WhisperAttack will continue running even when the window is closed.
 
 WhisperAttack will have completed loading once the "Server started and listening" message is displayed.
 
 ```
+Loaded STT keyterm context:
+provider: elevenlabs
+sources: custom=0, phonetic_alphabet=26, fuzzy_words=..., word_mapping_replacements=..., dcs_default=24, vaicom=850
+available: ... unique terms
+effective: ... terms sent to elevenlabs
 Loading STT backend (elevenlabs) ...
 Server started and listening on 127.0.0.1:65432...
 ```

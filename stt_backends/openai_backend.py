@@ -26,8 +26,13 @@ class OpenAIBackend(SpeechToTextBackend):
         self.response_format = config.get_provider_setting("openai", "response_format", "json").strip().lower()
         self.temperature = config.get_provider_setting("openai", "temperature", "")
         self.include_keyterms_in_prompt = config.get_provider_bool("openai", "include_keyterms_in_prompt", True)
-        self.max_prompt_keyterms = config.get_provider_int("openai", "max_prompt_keyterms", 100)
-        self.keyterms = config.get_stt_keyterms()
+        self.max_prompt_keyterms = config.get_provider_int("openai", "max_prompt_keyterms", 300)
+        self.prompt_keyterm_char_budget = config.get_provider_int("openai", "prompt_keyterm_char_budget", 6000)
+        self.keyterms = config.get_budgeted_stt_keyterms(
+            self.provider_name,
+            max_terms=self.max_prompt_keyterms,
+            max_total_chars=self.prompt_keyterm_char_budget,
+        )
         self.api_key = ""
 
     def load(self) -> None:
@@ -85,10 +90,9 @@ class OpenAIBackend(SpeechToTextBackend):
         if not self.include_keyterms_in_prompt or not self.keyterms:
             return prompt
 
-        keyterms = self.keyterms[:max(self.max_prompt_keyterms, 0)]
-        if not keyterms:
+        if not self.keyterms:
             return prompt
-        return f"{prompt} Expected DCS/VAICOM keyterms and phrases: {', '.join(keyterms)}."
+        return f"{prompt} Expected DCS/VAICOM keyterms and phrases: {', '.join(self.keyterms)}."
 
     def _validate_response_format(self) -> None:
         supported_formats = self._supported_response_formats()

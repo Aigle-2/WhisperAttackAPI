@@ -19,7 +19,11 @@
 - `stt_backends/deepgram_backend.py` implements Deepgram prerecorded transcription over HTTPS.
 - `stt_backends/faster_whisper_backend.py` keeps the previous local Whisper behavior behind the same contract.
 - `whisper_server.py` now loads one STT backend and keeps the existing cleanup, fuzzy matching, clipboard, VoiceAttack, and kneeboard flow.
-- `configuration.py` exposes generic, provider-specific, and safe redacted settings accessors.
+- `configuration.py` exposes generic, provider-specific, budgeted keyterm, and safe redacted settings accessors.
+- `stt_backends/keyterms.py` owns source vocabulary loading and provider keyterm/context budgets.
+- `stt_backends/vaicom_keyterms.txt` is generated from the local VAICOMPRO install, then post-processed into a ranked 850-term provider shortlist for DCS/VAICOM vocabulary biasing.
+- `tools/generate_vaicom_keyterms.py` refreshes the generated VAICOM keyterm source from local VAICOM files.
+- `transcription_postprocess.py` compacts spelled-letter codes such as `U L M B` into `ULMB` after STT returns.
 - `settings.cfg` documents the default ElevenLabs backend, source-driven keyterms, and the local Whisper fallback.
 - `build_exe.ps1` creates API-only or full PyInstaller executables.
 
@@ -28,7 +32,9 @@
 - Generic STT settings use `stt_*`.
 - Provider settings use `{provider}_*`.
 - Provider settings override generic settings where both exist.
-- Provider keyterms are generated from configured sources such as `fuzzy_words.txt`, `word_mappings.txt`, the phonetic alphabet, and DCS defaults.
+- Provider keyterms are generated from configured sources such as `fuzzy_words.txt`, `word_mappings.txt`, the phonetic alphabet, DCS defaults, and the generated VAICOM keyterm file.
+- Backends should request keyterms through `get_budgeted_stt_keyterms` so provider count, per-term length, and prompt-context limits are applied consistently.
+- Code-only identifiers should be handled by postprocessing rather than added to provider keyterm lists.
 - Secrets are referenced through environment variable names such as `elevenlabs_api_key_env`.
 - Direct secret values should never be stored in `settings.cfg`.
 

@@ -1,8 +1,10 @@
 import os
+import re
 import tempfile
 import unittest
 
 from configuration import WhisperAttackConfiguration
+from stt_backends.keyterms import KeytermBudget, apply_keyterm_budget
 
 
 class WhisperAttackConfigurationTests(unittest.TestCase):
@@ -55,6 +57,108 @@ class WhisperAttackConfigurationTests(unittest.TestCase):
         self.assertIn("request startup", keyterms)
         self.assertIn("Texaco", keyterms)
         self.assertNotIn("inter", keyterms)
+
+    def test_vaicom_keyterms_source_is_loaded(self):
+        config = self.create_config("stt_keyterm_sources=vaicom\n")
+
+        keyterms = config.get_stt_keyterms()
+
+        self.assertIn("Texaco", keyterms)
+        self.assertIn("TACAN", keyterms)
+        self.assertIn("George", keyterms)
+        self.assertIn("Asad", keyterms)
+        self.assertIn("startup", keyterms)
+        self.assertLess(len(keyterms), 1000)
+        self.assertNotIn("ULMB", keyterms)
+        self.assertNotIn("ESNJ", keyterms)
+        self.assertNotIn("SESDE", keyterms)
+        self.assertNotIn("Subtitles", keyterms)
+        self.assertNotIn("Little", keyterms)
+        self.assertNotIn("Request Startup", keyterms)
+        self.assertNotIn("TACAN Tune Texaco", keyterms)
+
+    def test_vaicom_keyterms_are_single_words_without_numbers(self):
+        config = self.create_config("stt_keyterm_sources=vaicom\n")
+
+        keyterms = config.get_stt_keyterms()
+
+        self.assertTrue(keyterms)
+        self.assertFalse(any(" " in keyterm for keyterm in keyterms))
+        self.assertFalse(any(any(character.isdigit() for character in keyterm) for keyterm in keyterms))
+        self.assertLess(keyterms.index("boresight"), keyterms.index("Texaco"))
+        self.assertLess(keyterms.index("clearance"), keyterms.index("Qeshm"))
+        self.assertLess(keyterms.index("wheelchocks"), keyterms.index("Otkrytka"))
+        self.assertLess(keyterms.index("startup"), keyterms.index("Qeshm"))
+
+    def test_vaicom_keyterms_put_technical_acronyms_before_proper_names(self):
+        config = self.create_config("stt_keyterm_sources=vaicom\n")
+
+        keyterms = config.get_stt_keyterms()
+
+        self.assertLess(keyterms.index("IFF"), keyterms.index("Otkrytka"))
+        self.assertLess(keyterms.index("TV"), keyterms.index("Qeshm"))
+        technical_words = {
+            "AAA", "ADF", "APX", "ATC", "AVTR", "AWACS", "BATH", "BDA", "CMS", "DCS", "ECM",
+            "FARP", "GBU", "GCA", "HMD", "IFF", "IFR", "ILS", "INS", "JTAC",
+            "LAV", "LSO", "NVG", "PAR", "RIO", "RTB", "RWS", "SAM", "STT", "TACAN",
+            "TV", "TWS", "VFR", "VHF", "VSL", "UHF", "WSO",
+        }
+        self.assertFalse(
+            any(re.fullmatch(r"[A-Z]{3,6}", keyterm) and keyterm not in technical_words for keyterm in keyterms)
+        )
+
+    def test_budgeted_stt_keyterms_apply_provider_limits(self):
+        config = self.create_config(
+            "\n".join([
+                "stt_keyterm_sources=custom",
+                "stt_keyterms=Alpha, Very Long Phrase, Bravo, Golf",
+            ])
+        )
+
+        keyterms = config.get_budgeted_stt_keyterms("test", max_terms=2, max_term_chars=7)
+
+        self.assertEqual(keyterms, ["Alpha", "Bravo"])
+
+    def test_provider_budgeted_keyterm_details_use_configured_limits(self):
+        config = self.create_config(
+            "\n".join([
+                "stt_keyterm_sources=custom",
+                "stt_keyterms=Alpha, Bravo, Charlie",
+                "elevenlabs_max_keyterms=2",
+                "elevenlabs_max_keyterm_chars=5",
+            ])
+        )
+
+        result = config.get_provider_budgeted_stt_keyterm_details("elevenlabs", log_result=False)
+
+        self.assertEqual(result.keyterms, ["Alpha", "Bravo"])
+        self.assertEqual(result.skipped_too_long, 1)
+        self.assertEqual(result.omitted_by_term_limit, 0)
+
+    def test_stt_keyterm_source_counts_are_reported(self):
+        config = self.create_config(
+            "\n".join([
+                "stt_keyterm_sources=phonetic_alphabet,fuzzy_words,word_mapping_replacements,custom",
+                "stt_keyterms=Texaco, Overlord",
+            ])
+        )
+
+        counts = config.get_stt_keyterm_source_counts()
+
+        self.assertEqual(counts["phonetic_alphabet"], 26)
+        self.assertEqual(counts["fuzzy_words"], 1)
+        self.assertEqual(counts["word_mapping_replacements"], 1)
+        self.assertEqual(counts["custom"], 2)
+
+    def test_apply_keyterm_budget_reports_omissions(self):
+        result = apply_keyterm_budget(
+            ["Alpha", "Very Long Phrase", "Bravo", "Golf"],
+            KeytermBudget(max_terms=2, max_term_chars=7),
+        )
+
+        self.assertEqual(result.keyterms, ["Alpha", "Bravo"])
+        self.assertEqual(result.skipped_too_long, 1)
+        self.assertEqual(result.omitted_by_term_limit, 1)
 
     def test_safe_configuration_redacts_direct_secret_values_but_not_env_names(self):
         config = self.create_config(

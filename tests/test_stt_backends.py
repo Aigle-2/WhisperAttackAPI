@@ -104,6 +104,19 @@ class SttBackendTests(unittest.TestCase):
         self.assertIn(b"Texaco", body)
         self.assertIn(b"request rejoin", body)
 
+    def test_elevenlabs_keyterms_are_budgeted(self):
+        config = self.create_config(
+            "\n".join([
+                "stt_backend=elevenlabs",
+                "stt_keyterm_sources=custom",
+                "stt_keyterms=Alpha, Bravo, Charlie",
+                "elevenlabs_max_keyterms=2",
+            ])
+        )
+        backend = ElevenLabsBackend(config)
+
+        self.assertEqual(backend.keyterms, ["Alpha", "Bravo"])
+
     def test_openai_load_requires_api_key_environment_variable(self):
         config = self.create_config(
             "\n".join([
@@ -148,6 +161,25 @@ class SttBackendTests(unittest.TestCase):
         self.assertIn("English DCS radio command.", prompt)
         self.assertIn("Texaco", prompt)
         self.assertIn("request rejoin", prompt)
+
+    def test_openai_prompt_keyterms_are_budgeted_by_context_chars(self):
+        config = self.create_config(
+            "\n".join([
+                "stt_backend=openai",
+                "stt_keyterm_sources=custom",
+                "stt_keyterms=Alpha, Bravo, Charlie",
+                "stt_prompt=English DCS radio command.",
+                "openai_max_prompt_keyterms=10",
+                "openai_prompt_keyterm_char_budget=12",
+            ])
+        )
+        backend = OpenAIBackend(config)
+
+        prompt = backend._build_prompt()
+
+        self.assertIn("Alpha", prompt)
+        self.assertIn("Bravo", prompt)
+        self.assertNotIn("Charlie", prompt)
 
     def test_openai_extracts_text(self):
         config = self.create_config("stt_backend=openai\n")
