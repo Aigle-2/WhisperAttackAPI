@@ -38,7 +38,7 @@ class ElevenLabsBackend(SpeechToTextBackend):
                 f"Missing ElevenLabs API key. Set the {self.api_key_env} environment variable."
             )
         if self.config.get_stt_prompt():
-            logging.warning("ElevenLabs does not support stt_prompt; use stt_keyterms for provider-side biasing.")
+            logging.warning("ElevenLabs does not support stt_prompt; use keyterm sources for provider-side biasing.")
         logging.info("Loaded ElevenLabs backend with model '%s'", self.model)
 
     def transcribe(self, audio_path: str) -> SpeechToTextResult:
@@ -130,4 +130,3 @@ class ElevenLabsBackend(SpeechToTextBackend):
 
     def _bool_value(self, value: bool) -> str:
         return "true" if value else "false"
-

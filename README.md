@@ -57,7 +57,7 @@ Instructions for integrating with VAICOM can be located in the [VAICOM INTEGRATI
 ## Installation
 
 1. Download the latest release [WhisperAttack v1.2.2.zip file from the Google drive](https://drive.google.com/drive/folders/1Op3aNXtz8kGjsbROV74DPjq2em_34--c?usp=sharing) and unarchive anywhere on your computer, e.g. `C:\Program Files\WhisperAttack`
-1. A shortcut can be created to the `WhisperAttack.exe` application
+1. A shortcut can be created to the `WhisperAttackAPI.exe` application
 
 ---
 
@@ -81,7 +81,9 @@ The default values should cover most cases but can be changed:
   - Supported values: `elevenlabs`, `faster_whisper`
 - `stt_language` - Language hint for transcription, `en` by default for VAICOM English commands.
 - `stt_timeout_seconds` - API request timeout in seconds.
-- `stt_keyterms` - Comma-separated provider-side biasing terms for supported API backends.
+- `stt_keyterm_sources` - Comma-separated sources used to build provider keyterms without duplicating vocabulary in `settings.cfg`.
+  - Supported values: `phonetic_alphabet`, `fuzzy_words`, `word_mapping_replacements`, `word_mapping_aliases`, `dcs_default`, `custom`
+- `stt_keyterms_extra` - Optional comma-separated extra provider keyterms. Prefer `fuzzy_words.txt` for domain vocabulary.
 - `elevenlabs_api_key_env` - Environment variable containing the ElevenLabs API key. Defaults to `ELEVENLABS_API_KEY`.
 - `elevenlabs_model` - ElevenLabs model ID, `scribe_v2` by default.
 - `elevenlabs_no_verbatim` - Removes filler words and false starts when supported. Defaults to `true`.
@@ -105,6 +107,28 @@ setx ELEVENLABS_API_KEY "your-api-key"
 
 Restart WhisperAttackAPI after setting the environment variable.
 
+### Building the executable
+
+The recommended deployment is the API-only executable. It avoids bundling Torch and faster-whisper, so the package is smaller and DCS keeps priority on the GPU.
+
+Double-click:
+
+```console
+build_api_only.cmd
+```
+
+The executable is created at:
+
+```console
+dist\WhisperAttackAPI\WhisperAttackAPI.exe
+```
+
+To build the larger offline-capable executable that includes the local `faster_whisper` backend, double-click:
+
+```console
+build_full.cmd
+```
+
 ### Local Whisper setup
 
 To run fully offline, update `settings.cfg`:
@@ -113,6 +137,8 @@ To run fully offline, update `settings.cfg`:
 stt_backend=faster_whisper
 whisper_model=small.en
 ```
+
+This requires the full executable built with `build_full.cmd` or a Python environment installed from `requirements.txt`.
 
 ### word_mappings.txt
 
@@ -131,7 +157,7 @@ WhisperAttack needs to be restarted after making changes to this file. New word 
 
 ## Running the Whisper Server
 
-Double click the `WhisperAttack.exe` file or shortcut. This will open an application window and start the server.
+Double click the `WhisperAttackAPI.exe` file or shortcut. This will open an application window and start the server.
 
 The application window will display startup logging information, the raw text transcribed from the speech, and the final cleaned up command ot text that was sent to VoiceAttack or DCS. The window can be closed, and then shown again from the menu in the WhisperAttack icon in the Windows system tray. WhisperAttack will continue running even when the window is closed.
 

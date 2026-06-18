@@ -34,7 +34,27 @@ python whisper_attack.py
 
 ## Creating the executable file
 
-The commands below will build an executable version of the WhisperAttack server.
+The recommended build is the API-only executable. It excludes Torch, faster-whisper, and related local model dependencies so the package is smaller and does not reserve GPU resources that DCS needs.
+
+Double-click:
+
+```console
+build_api_only.cmd
+```
+
+This creates:
+
+```console
+dist\WhisperAttackAPI\WhisperAttackAPI.exe
+```
+
+To build the larger offline-capable executable with local `faster_whisper` support, double-click:
+
+```console
+build_full.cmd
+```
+
+The commands below document the manual PyInstaller flow if you need to debug the build script.
 
 ### PowerShell
 
@@ -102,13 +122,13 @@ Copy the following files into the `dist\whisper_attack` directory as these must 
 - whisper_attack_icon.png
 - add_icon.png
 
-The `whisper_attack` folder, and all its contents (including the `_internal` folder), can be moved to the location of your choice. Rename `whisper_attack.exe` to `WhisperAttack.exe`.
+The `whisper_attack` folder, and all its contents (including the `_internal` folder), can be moved to the location of your choice. Rename `whisper_attack.exe` to `WhisperAttackAPI.exe`.
 
 The contents of the `whisper_attack` folder can be zipped up if needing to distribute.
 
 ### Running the application
 
-Double-click the `WhisperAttack.exe` file to run it. It may take a little while the first time it runs, especially if it is downloading the Whisper model if it was not already installed.
+Double-click the `WhisperAttackAPI.exe` file to run it. The full build may take a little while the first time it runs, especially if it is downloading the Whisper model if it was not already installed.
 
 An application window will be opened when it has started up and display logging information information. Full information is also logged to the `C:\Users\username\AppData\Local\WhisperAttack\WhisperAttack.log` file. You may need to close and reopen the log file if your editor does not automatically update when lines are added to the file.
 
@@ -122,4 +142,4 @@ Once you are happy with the executable and do not need to rebuild with any furth
 .\.venv\Scripts\deactivate.bat
 ```
 
-Delete the `.venv`, `build`, and `dist` directories.
+Delete the `.venv`, `.venv-build-api`, `.venv-build-full`, `build`, and `dist` directories.

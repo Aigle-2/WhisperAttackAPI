@@ -27,6 +27,7 @@ class WhisperAttackConfigurationTests(unittest.TestCase):
                 "stt_backend=elevenlabs",
                 "stt_language=en",
                 "stt_timeout_seconds=42",
+                "stt_keyterm_sources=custom",
                 "stt_keyterms=Texaco, Overlord, request startup",
                 "elevenlabs_no_verbatim=true",
             ])
@@ -37,6 +38,23 @@ class WhisperAttackConfigurationTests(unittest.TestCase):
         self.assertEqual(config.get_stt_timeout_seconds(), 42)
         self.assertEqual(config.get_stt_keyterms(), ["Texaco", "Overlord", "request startup"])
         self.assertTrue(config.get_provider_bool("elevenlabs", "no_verbatim", False))
+
+    def test_stt_keyterms_are_built_from_configured_sources(self):
+        config = self.create_config(
+            "\n".join([
+                "stt_keyterm_sources=phonetic_alphabet,fuzzy_words,word_mapping_replacements,dcs_default,custom",
+                "stt_keyterms_extra=Texaco",
+            ])
+        )
+
+        keyterms = config.get_stt_keyterms()
+
+        self.assertIn("Alpha", keyterms)
+        self.assertIn("Kobuleti", keyterms)
+        self.assertIn("Enter", keyterms)
+        self.assertIn("request startup", keyterms)
+        self.assertIn("Texaco", keyterms)
+        self.assertNotIn("inter", keyterms)
 
     def test_safe_configuration_redacts_direct_secret_values_but_not_env_names(self):
         config = self.create_config(
@@ -54,4 +72,3 @@ class WhisperAttackConfigurationTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-

@@ -1,5 +1,8 @@
 import os
 import logging
+from collections.abc import Iterable
+
+from stt_backends.keyterms import DEFAULT_DCS_KEYTERMS, DEFAULT_STT_KEYTERM_SOURCES, PHONETIC_ALPHABET
 from theme import THEME_DEFAULT
 
 class ConfigurationError(Exception):
@@ -237,12 +240,53 @@ class WhisperAttackConfiguration:
         """
         return self.config.get("stt_prompt", "").strip()
 
+    def get_stt_keyterm_sources(self) -> list[str]:
+        """
+        Returns the configured sources used to build provider keyterms.
+        """
+        sources = self.config.get("stt_keyterm_sources", ",".join(DEFAULT_STT_KEYTERM_SOURCES))
+        return [source.strip().lower() for source in sources.split(",") if source.strip()]
+
     def get_stt_keyterms(self) -> list[str]:
         """
         Returns keyterms used by STT backends that support provider-side biasing.
         """
-        keyterms = self.config.get("stt_keyterms", "")
+        keyterms: list[str] = []
+        for source in self.get_stt_keyterm_sources():
+            if source == "phonetic_alphabet":
+                keyterms.extend(PHONETIC_ALPHABET)
+            elif source == "fuzzy_words":
+                keyterms.extend(self.fuzzy_words)
+            elif source in ("word_mapping_replacements", "word_mappings"):
+                keyterms.extend(self.word_mappings.values())
+            elif source == "word_mapping_aliases":
+                keyterms.extend(self.word_mappings.keys())
+            elif source in ("dcs_default", "dcs_defaults"):
+                keyterms.extend(DEFAULT_DCS_KEYTERMS)
+            elif source in ("custom", "settings"):
+                keyterms.extend(self._parse_keyterm_setting("stt_keyterms"))
+                keyterms.extend(self._parse_keyterm_setting("stt_keyterms_extra"))
+            else:
+                logging.warning("Unknown stt_keyterm_sources entry '%s'.", source)
+        return self._dedupe_keyterms(keyterms)
+
+    def _parse_keyterm_setting(self, key: str) -> list[str]:
+        keyterms = self.config.get(key, "")
         return [keyterm.strip() for keyterm in keyterms.split(",") if keyterm.strip()]
+
+    def _dedupe_keyterms(self, keyterms: Iterable[str]) -> list[str]:
+        deduped = []
+        seen = set()
+        for keyterm in keyterms:
+            normalized_keyterm = keyterm.strip()
+            if not normalized_keyterm:
+                continue
+            lower_keyterm = normalized_keyterm.lower()
+            if lower_keyterm in seen:
+                continue
+            seen.add(lower_keyterm)
+            deduped.append(normalized_keyterm)
+        return deduped
 
     def get_stt_timeout_seconds(self) -> int:
         """

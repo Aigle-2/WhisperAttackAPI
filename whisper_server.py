@@ -18,6 +18,7 @@ from wcwidth import wcswidth
 from configuration import WhisperAttackConfiguration
 from stt_backends.base import SpeechToTextBackendError
 from stt_backends.factory import create_stt_backend
+from stt_backends.keyterms import PHONETIC_ALPHABET
 from writer import WhisperAttackWriter
 from theme import TAG_BLUE, TAG_GREEN, TAG_GREY, TAG_ORANGE, TAG_RED
 
@@ -38,12 +39,7 @@ SAMPLE_RATE = 16000
 ###############################################################################
 # PHONETIC ALPHABET
 ###############################################################################
-phonetic_alphabet = [
-    "Alpha", "Bravo", "Charlie", "Delta", "Echo", "Foxtrot", "Golf",
-    "Hotel", "India", "Juliet", "Kilo", "Lima", "Mike", "November",
-    "Oscar", "Papa", "Quebec", "Romeo", "Sierra", "Tango", "Uniform",
-    "Victor", "Whiskey", "X-ray", "Yankee", "Zulu",
-]
+phonetic_alphabet = PHONETIC_ALPHABET
 
 ###############################################################################
 # FUZZY MATCH + CLEANUP

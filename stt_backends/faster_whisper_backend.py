@@ -1,7 +1,7 @@
 import logging
 
 from configuration import WhisperAttackConfiguration
-from stt_backends.base import SpeechToTextBackend, SpeechToTextResult
+from stt_backends.base import SpeechToTextBackend, SpeechToTextBackendError, SpeechToTextResult
 from stt_backends.prompts import DEFAULT_DCS_PROMPT
 
 
@@ -21,8 +21,14 @@ class FasterWhisperBackend(SpeechToTextBackend):
         whisper_compute_type = self.config.get_whisper_compute_type()
         whisper_core_type = self.config.get_whisper_core_type()
 
-        import torch
-        from faster_whisper import WhisperModel
+        try:
+            import torch
+            from faster_whisper import WhisperModel
+        except ImportError as import_error:
+            raise SpeechToTextBackendError(
+                "The faster_whisper backend requires the full build with torch and faster-whisper installed. "
+                "Use the API build with stt_backend=elevenlabs, or rebuild with the full profile."
+            ) from import_error
 
         if whisper_device.upper() == "GPU":
             if torch.cuda.is_available():
@@ -70,4 +76,3 @@ class FasterWhisperBackend(SpeechToTextBackend):
         for segment in segments:
             text += f"{segment.text}"
         return SpeechToTextResult(text=text)
-
