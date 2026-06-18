@@ -1,0 +1,22 @@
+# Normalize line endings so the Windows working tree and the Linux CI agree.
+# Source and config files are stored with LF in the repository.
+*.py    text eol=lf
+*.toml  text eol=lf
+*.cfg   text eol=lf
+*.ini   text eol=lf
+*.md    text eol=lf
+*.yml   text eol=lf
+*.yaml  text eol=lf
+*.txt   text eol=lf
+*.json  text eol=lf
+
+# Windows-only helper scripts keep CRLF.
+*.cmd   text eol=crlf
+*.ps1   text eol=crlf
+*.bat   text eol=crlf
+
+# Binary assets must never be line-ending converted.
+*.png   binary
+*.ico   binary
+*.wav   binary
+*.vap   binary

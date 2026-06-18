@@ -20,6 +20,7 @@ __pycache__/
 .mypy_cache/
 .pyre/
 .ruff_cache/
+.import_linter_cache/
 .tox/
 .nox/
 .coverage

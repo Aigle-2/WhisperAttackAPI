@@ -1,2 +1,1 @@
-"""Unit tests for WhisperAttackAPI."""
-
+"""Test suite for VAIVOX."""

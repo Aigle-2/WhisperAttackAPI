@@ -1,0 +1,53 @@
+# Pre-commit hooks for the VAIVOX quality gates (ADR-0007).
+#
+# ruff / mypy / import-linter run as `system` hooks so they use the exact tools and
+# pyproject configuration from your environment (install with `pip install -e .[dev]`).
+# `--force-exclude` makes ruff honour the pyproject `extend-exclude` even when
+# pre-commit passes explicit (staged) file paths, so legacy modules are never touched.
+#
+# Install once with:  pre-commit install
+default_language_version:
+  python: python3
+
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: check-toml
+      - id: check-yaml
+      - id: check-merge-conflict
+      # Mutating hooks are scoped to the new tree to avoid churning legacy files.
+      - id: end-of-file-fixer
+        files: ^src/
+      - id: trailing-whitespace
+        files: ^src/
+
+  - repo: local
+    hooks:
+      - id: ruff-check
+        name: ruff (lint)
+        entry: ruff check --force-exclude
+        language: system
+        types_or: [python, pyi]
+        require_serial: true
+
+      - id: ruff-format
+        name: ruff (format)
+        entry: ruff format --force-exclude
+        language: system
+        types_or: [python, pyi]
+        require_serial: true
+
+      - id: mypy
+        name: mypy (strict, src/vaivox)
+        entry: mypy
+        language: system
+        pass_filenames: false
+        always_run: true
+
+      - id: import-linter
+        name: import-linter (architecture contracts)
+        entry: python -c "import sys; sys.path.insert(0, 'src'); from importlinter.cli import lint_imports; raise SystemExit(lint_imports(config_filename='pyproject.toml', no_cache=True))"
+        language: system
+        pass_filenames: false
+        always_run: true
