@@ -111,6 +111,9 @@ class WhisperAttackApp:
             request_shutdown=self._close,
         )
         self.control_server = wired.control_server
+        self.api_server = wired.api_server
+        if self.api_server is not None:
+            self.api_server.start()
 
         image = Image.open(path.join(app_path, "whisper_attack_icon.png"))
         self.icon = Icon(
@@ -238,6 +241,8 @@ class WhisperAttackApp:
         """Close the application: stop the server loop, the tray, and the window."""
         _LOGGER.info("Closing application...")
         self.exit_event.set()
+        if self.api_server is not None:
+            self.api_server.stop()
         self.icon.visible = False
         self.icon.stop()
         self.window.destroy()

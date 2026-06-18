@@ -90,14 +90,18 @@ model into `domain/`, pure and fully unit-tested. Old modules call into the new
 domain.
 **Exit:** domain has no I/O imports; unit tests cover the pipeline; behavior parity.
 
-### Phase 3 — Ports, use cases, adapters
-Define the driven ports; move STT/audio/VA/kneeboard/inbound into adapters; add the
-use cases and `composition.py`; `main.py` becomes the only entry point. Add an STT
-**contract test** run against every adapter (LSP). Land a minimal read-only
-**introspection API** (status + `dry-run reconcile`, ADR-0010) so agentic debugging
-is available from here on.
-**Exit:** app runs end-to-end on the new architecture at full parity; integration
-tests pass.
+### Phase 3 — Ports, use cases, adapters ✅
+Defined the driven ports (`application/ports.py`); moved STT/audio/VA/kneeboard/inbound/
+config/UI into `infrastructure/` adapters; added the use cases (`record_command`,
+`shutdown`, `queries`) and `composition.py`; `vaivox.main` is now the only entry point
+(wired as the `vaivox` console script and the PyInstaller target). An STT **contract
+test** runs against every adapter (LSP), and a minimal read-only **introspection API**
+(status + `POST /reconcile/dry-run`, ADR-0010 — off by default, localhost) is in place.
+The legacy top-level modules are thin re-export/launcher shims that delegate into
+`src/vaivox/`.
+**Exit:** ✅ app runs end-to-end on the new architecture at full parity (verified via
+the use-case integration tests through fakes); contract + integration tests pass; all
+gates green.
 
 ### Phase 4 — Identity & rebrand
 Introduce `ProductIdentity` (VAIVOX, new GUID, `%LOCALAPPDATA%\VAIVOX`, ports,

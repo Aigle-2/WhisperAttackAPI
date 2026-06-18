@@ -77,7 +77,7 @@ if (!(Test-Path $PythonPath)) {
     @ExcludeModules `
     @DataFiles `
     --paths src `
-    whisper_attack.py
+    src\vaivox\main.py
 
 $Assets = @(
     "settings.cfg",

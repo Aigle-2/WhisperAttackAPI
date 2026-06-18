@@ -10,9 +10,10 @@ mid-rewrite from an amateur layout to a hexagonal one. Decisions live in
 ```
 src/vaivox/
 ├── domain/          pure logic, NO I/O (reconciliation, vocabulary, telemetry, shared)
-├── application/     use cases + driven-port interfaces
+├── application/     use cases (record_command, shutdown, queries) + driven ports
 └── infrastructure/  adapters — the only layer touching the outside world
-    composition.py / main.py   wiring + entry point (populated in Phase 3)
+                     (stt, audio, voiceattack, kneeboard, inbound, api, config, ui, …)
+    composition.py / main.py   wiring + the single entry point
 ```
 
 The **dependency rule** is enforced by `import-linter` (contracts in `pyproject.toml`):
@@ -30,13 +31,23 @@ but never anything that does I/O (sockets, files, mic, network, UI).
 - **Phase 2** ✅ Domain extracted: `domain/reconciliation/` (normalization, numbers,
   spelled-codes, fuzzy, pipeline, model) and `domain/vocabulary/keyterms.py`. The legacy
   modules now **delegate** to the domain (single source of truth).
-- **Next — Phase 3:** define driven ports, move STT/audio/VA/kneeboard/inbound into
-  adapters, add use cases + `composition.py`, make `main.py` the only entry point.
+- **Phase 3** ✅ Ports, use cases, adapters. Driven ports in `application/ports.py`
+  (`SpeechToText`, `AudioRecorder`, `CommandSink`, `KneeboardSink`, `StatusReporter`,
+  `TelemetrySink`, `Clock`, `ConfigProvider`); use cases (`record_command`, `shutdown`,
+  `queries`); adapters under `infrastructure/` (`stt`, `audio`, `voiceattack`,
+  `kneeboard`, `inbound`, `config`, `ui`, `api`, `telemetry`, `vocabulary`).
+  `composition.py` wires everything and `vaivox.main` is the single entry point
+  (`vaivox` console script). An STT **contract test** runs against every adapter and a
+  minimal **introspection API** (status + `POST /reconcile/dry-run`, off by default,
+  localhost) ships per ADR-0010.
+- **Next — Phase 4:** identity & rebrand (`ProductIdentity`, VAIVOX naming, new GUID,
+  `%LOCALAPPDATA%\VAIVOX`, ports); stop shipping VAICOM-derived data (ADR-0005).
 
 During the migration the legacy top-level modules (`whisper_attack.py`,
-`whisper_server.py`, `configuration.py`, `stt_backends/`, …) still run the app and
-**delegate into `src/vaivox/`**. New behavior goes in the domain; legacy modules stay
-thin shims until their phase moves them.
+`whisper_server.py`, `configuration.py`, `stt_backends/`, …) are thin re-export/launcher
+**shims that delegate into `src/vaivox/`** (the single source of truth). `whisper_attack.py`
+now just launches `vaivox.main`; `whisper_server.py` is superseded and kept only as a
+short-lived rollback reference. New behavior goes in `src/vaivox/`.
 
 ## Quality gates (ADR-0007)
 
@@ -62,18 +73,21 @@ pip install -e .[dev]       # toolchain + runtime deps
 pre-commit install          # optional: run the gates on commit
 ```
 
-Running from source uses a small `sys.path` shim in `whisper_attack.py` so the in-repo
-`src/vaivox` package is importable; the PyInstaller build passes `--paths src`. Tests get
-`src` via the pytest `pythonpath` setting — no install required just to run the gates.
+Running from source uses a small `sys.path` shim in `vaivox.main` (and the
+`whisper_attack.py` launcher) so the in-repo `src/vaivox` package is importable; the
+PyInstaller build targets `src/vaivox/main.py` and passes `--paths src`. Tests get `src`
+via the pytest `pythonpath` setting — no install required just to run the gates.
 
 ## Conventions
 
 - **Python 3.10+** (`X | None` typing is used). Type everything in `src/vaivox/`; mypy is
   strict there.
 - **Google-style docstrings** on public modules/classes/functions in `src/vaivox/`.
-- **Tests** live under `tests/{unit,integration,architecture}`; the docstring/annotation
-  rules are relaxed for them. When changing reconciliation behavior, update the **golden
-  characterization tests** in `tests/unit/test_reconciliation.py` deliberately — they pin
-  parity with the original implementation.
+- **Tests** live under `tests/{unit,contract,integration,architecture}`; the
+  docstring/annotation rules are relaxed for them. The STT **contract test**
+  (`tests/contract/test_stt_contract.py`) pins every adapter to the `SpeechToText` port.
+  When changing reconciliation behavior, update the **golden characterization tests** in
+  `tests/unit/test_reconciliation.py` deliberately — they pin parity with the original
+  implementation.
 - Don't reformat or tighten types on legacy modules just to satisfy a gate; they're
   excluded on purpose until their migration phase.

@@ -18,8 +18,14 @@ from vaivox.application.ports import (
     StatusLevel,
     StatusReporter,
 )
+from vaivox.application.queries import DescribeStatus, DryRunReconcile
 from vaivox.application.record_command import StartRecording, StopAndReconcile
 from vaivox.application.shutdown import Shutdown
+from vaivox.infrastructure.api.introspection import (
+    DEFAULT_API_HOST,
+    DEFAULT_API_PORT,
+    IntrospectionServer,
+)
 from vaivox.infrastructure.audio.recorder import SoundDeviceRecorder
 from vaivox.infrastructure.config.settings import WhisperAttackConfiguration
 from vaivox.infrastructure.inbound.control_server import (
@@ -42,9 +48,11 @@ class WiredApp:
 
     Attributes:
         control_server: The inbound control socket server, ready to ``run()``.
+        api_server: The introspection API server, or ``None`` when disabled.
     """
 
     control_server: ControlSocketServer
+    api_server: IntrospectionServer | None = None
 
 
 def build(
@@ -104,7 +112,18 @@ def build(
         host=host,
         port=port,
     )
-    return WiredApp(control_server=control_server)
+
+    api_server: IntrospectionServer | None = None
+    if config.get_bool_setting("api_enabled", False):
+        api_server = IntrospectionServer(
+            DescribeStatus(recorder, config),
+            DryRunReconcile(config),
+            host=config.get_setting("api_host", DEFAULT_API_HOST),
+            port=config.get_int_setting("api_port", DEFAULT_API_PORT),
+            token=config.get_setting("api_token", ""),
+        )
+
+    return WiredApp(control_server=control_server, api_server=api_server)
 
 
 def load_speech_to_text(
