@@ -49,7 +49,7 @@ Instructions for integrating with VAICOM can be located in the [VAICOM INTEGRATI
   - Only required when using the `faster_whisper` backend.
   - API-backed providers do not use local GPU resources.
 
-- **API key (ElevenLabs backend)**
+- **API key (API backends)**
   - Create an API key for the provider configured in `settings.cfg`.
   - Set it with `Set STT API Key.cmd` from the release folder.
   - Do not put API keys in `settings.cfg` or commit them to the repository.

@@ -23,7 +23,7 @@ class OpenAIBackend(SpeechToTextBackend):
         self.api_key_env = config.get_provider_setting("openai", "api_key_env", "OPENAI_API_KEY")
         self.language = config.get_stt_language()
         self.timeout_seconds = config.get_provider_int("openai", "timeout_seconds", config.get_stt_timeout_seconds())
-        self.response_format = config.get_provider_setting("openai", "response_format", "json")
+        self.response_format = config.get_provider_setting("openai", "response_format", "json").strip().lower()
         self.temperature = config.get_provider_setting("openai", "temperature", "")
         self.include_keyterms_in_prompt = config.get_provider_bool("openai", "include_keyterms_in_prompt", True)
         self.max_prompt_keyterms = config.get_provider_int("openai", "max_prompt_keyterms", 100)
@@ -36,6 +36,7 @@ class OpenAIBackend(SpeechToTextBackend):
             raise SpeechToTextBackendError(
                 f"Missing OpenAI API key. Set the {self.api_key_env} environment variable."
             )
+        self._validate_response_format()
         logging.info("Loaded OpenAI backend with model '%s'", self.model)
 
     def transcribe(self, audio_path: str) -> SpeechToTextResult:
@@ -69,7 +70,7 @@ class OpenAIBackend(SpeechToTextBackend):
         except error.URLError as url_error:
             raise SpeechToTextBackendError(f"OpenAI request failed: {url_error}") from url_error
 
-        if self.response_format == "text":
+        if self.response_format in ("text", "srt", "vtt"):
             return SpeechToTextResult(text=response_body.strip())
 
         try:
@@ -88,6 +89,27 @@ class OpenAIBackend(SpeechToTextBackend):
         if not keyterms:
             return prompt
         return f"{prompt} Expected DCS/VAICOM keyterms and phrases: {', '.join(keyterms)}."
+
+    def _validate_response_format(self) -> None:
+        supported_formats = self._supported_response_formats()
+        if self.response_format not in supported_formats:
+            supported = ", ".join(sorted(supported_formats))
+            raise SpeechToTextBackendError(
+                f"OpenAI model '{self.model}' does not support response_format "
+                f"'{self.response_format}'. Supported values: {supported}."
+            )
+
+    def _supported_response_formats(self) -> set[str]:
+        model = self.model.strip().lower()
+        if model in (
+            "gpt-4o-transcribe",
+            "gpt-4o-mini-transcribe",
+            "gpt-4o-mini-transcribe-2025-12-15",
+        ):
+            return {"json"}
+        if model == "gpt-4o-transcribe-diarize":
+            return {"json", "text", "diarized_json"}
+        return {"json", "text", "srt", "verbose_json", "vtt"}
 
     def _extract_text(self, payload: dict) -> str:
         if "text" in payload:

@@ -116,6 +116,22 @@ class SttBackendTests(unittest.TestCase):
         with self.assertRaises(SpeechToTextBackendError):
             backend.load()
 
+    def test_openai_load_rejects_unsupported_response_format_for_default_model(self):
+        os.environ["WHISPERATTACK_TEST_OPENAI_KEY"] = "test-key"
+        self.addCleanup(lambda: os.environ.pop("WHISPERATTACK_TEST_OPENAI_KEY", None))
+        config = self.create_config(
+            "\n".join([
+                "stt_backend=openai",
+                "openai_api_key_env=WHISPERATTACK_TEST_OPENAI_KEY",
+                "openai_model=gpt-4o-transcribe",
+                "openai_response_format=text",
+            ])
+        )
+        backend = OpenAIBackend(config)
+
+        with self.assertRaisesRegex(SpeechToTextBackendError, "does not support response_format"):
+            backend.load()
+
     def test_openai_prompt_includes_generated_keyterms(self):
         config = self.create_config(
             "\n".join([
