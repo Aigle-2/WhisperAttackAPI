@@ -45,7 +45,8 @@ build_api_only.cmd
 This creates:
 
 ```console
-dist\WhisperAttackAPI\WhisperAttackAPI.exe
+dist\release\WhisperAttackAPI v1.2.2-api.1\WhisperAttackAPI.exe
+dist\release\WhisperAttackAPI v1.2.2-api.1.zip
 ```
 
 To build the larger offline-capable executable with local `faster_whisper` support, double-click:
@@ -121,6 +122,8 @@ Copy the following files into the `dist\whisper_attack` directory as these must 
 - word_mappings.txt
 - whisper_attack_icon.png
 - add_icon.png
+- Set ElevenLabs API Key.cmd
+- README_FIRST.txt
 
 The `whisper_attack` folder, and all its contents (including the `_internal` folder), can be moved to the location of your choice. Rename `whisper_attack.exe` to `WhisperAttackAPI.exe`.
 

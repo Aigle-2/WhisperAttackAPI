@@ -56,7 +56,7 @@ Instructions for integrating with VAICOM can be located in the [VAICOM INTEGRATI
 
 ## Installation
 
-1. Download the latest release [WhisperAttack v1.2.2.zip file from the Google drive](https://drive.google.com/drive/folders/1Op3aNXtz8kGjsbROV74DPjq2em_34--c?usp=sharing) and unarchive anywhere on your computer, e.g. `C:\Program Files\WhisperAttack`
+1. Download the latest `WhisperAttackAPI` release ZIP from GitHub Releases and unarchive it anywhere on your computer, e.g. `C:\Program Files\WhisperAttackAPI`
 1. A shortcut can be created to the `WhisperAttackAPI.exe` application
 
 ---
@@ -120,8 +120,16 @@ build_api_only.cmd
 The executable is created at:
 
 ```console
-dist\WhisperAttackAPI\WhisperAttackAPI.exe
+dist\release\WhisperAttackAPI v1.2.2-api.1\WhisperAttackAPI.exe
 ```
+
+The distributable ZIP is created beside it:
+
+```console
+dist\release\WhisperAttackAPI v1.2.2-api.1.zip
+```
+
+The release folder follows the original WhisperAttack layout: the exe, `_internal`, `settings.cfg`, `fuzzy_words.txt`, `word_mappings.txt`, icons, and a small API-key helper are all at the top level.
 
 To build the larger offline-capable executable that includes the local `faster_whisper` backend, double-click:
 
