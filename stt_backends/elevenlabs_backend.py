@@ -1,12 +1,11 @@
 import json
 import logging
-import mimetypes
 import os
-import uuid
 from urllib import error, parse, request
 
 from configuration import WhisperAttackConfiguration
 from stt_backends.base import SpeechToTextBackend, SpeechToTextBackendError, SpeechToTextResult
+from stt_backends.http_utils import build_multipart_body
 
 
 class ElevenLabsBackend(SpeechToTextBackend):
@@ -89,34 +88,7 @@ class ElevenLabsBackend(SpeechToTextBackend):
         return parse.urlunparse(parsed._replace(query=parse.urlencode(query)))
 
     def _build_multipart_body(self, fields: list[tuple[str, str]], audio_path: str) -> tuple[bytes, str]:
-        boundary = f"----WhisperAttackAPI{uuid.uuid4().hex}"
-        lines: list[bytes] = []
-
-        for name, value in fields:
-            if value is None or value == "":
-                continue
-            lines.extend([
-                f"--{boundary}".encode("utf-8"),
-                f'Content-Disposition: form-data; name="{name}"'.encode("utf-8"),
-                b"",
-                str(value).encode("utf-8"),
-            ])
-
-        file_name = os.path.basename(audio_path)
-        content_type = mimetypes.guess_type(audio_path)[0] or "audio/wav"
-        with open(audio_path, "rb") as audio_file:
-            audio_bytes = audio_file.read()
-        lines.extend([
-            f"--{boundary}".encode("utf-8"),
-            f'Content-Disposition: form-data; name="file"; filename="{file_name}"'.encode("utf-8"),
-            f"Content-Type: {content_type}".encode("utf-8"),
-            b"",
-            audio_bytes,
-            f"--{boundary}--".encode("utf-8"),
-            b"",
-        ])
-
-        return b"\r\n".join(lines), f"multipart/form-data; boundary={boundary}"
+        return build_multipart_body(fields, audio_path)
 
     def _extract_text(self, payload: dict) -> str:
         if "text" in payload:

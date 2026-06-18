@@ -80,6 +80,7 @@ $Assets = @(
     "word_mappings.txt",
     "whisper_attack_icon.png",
     "add_icon.png",
+    "Set STT API Key.cmd",
     "Set ElevenLabs API Key.cmd",
     "README_FIRST.txt"
 )
@@ -104,6 +105,7 @@ $ExpectedReleaseItems = @(
     "word_mappings.txt",
     "whisper_attack_icon.png",
     "add_icon.png",
+    "Set STT API Key.cmd",
     "Set ElevenLabs API Key.cmd",
     "README_FIRST.txt"
 )

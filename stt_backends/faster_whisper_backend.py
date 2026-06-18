@@ -27,7 +27,7 @@ class FasterWhisperBackend(SpeechToTextBackend):
         except ImportError as import_error:
             raise SpeechToTextBackendError(
                 "The faster_whisper backend requires the full build with torch and faster-whisper installed. "
-                "Use the API build with stt_backend=elevenlabs, or rebuild with the full profile."
+                "Use the API build with stt_backend=elevenlabs, openai, or deepgram; or rebuild with the full profile."
             ) from import_error
 
         if whisper_device.upper() == "GPU":

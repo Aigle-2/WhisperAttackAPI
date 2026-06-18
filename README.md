@@ -19,6 +19,8 @@ In short, SeaTechNerd83 and I combined the two scripts to run voice commands thr
   - Pushes transcribed text to clipboard - (perfect for voice to text DCS Chat...)
   - Supports the original local `faster_whisper` backend.
   - Supports ElevenLabs Scribe v2 via API.
+  - Supports OpenAI `gpt-4o-transcribe` via API.
+  - Supports Deepgram Nova-3 via API.
 
 - **VoiceAttack Command Plugin**
   - Sends "start", "stop", or "shutdown" commands to the server directly through VoiceAttack.
@@ -48,8 +50,8 @@ Instructions for integrating with VAICOM can be located in the [VAICOM INTEGRATI
   - API-backed providers do not use local GPU resources.
 
 - **API key (ElevenLabs backend)**
-  - Create an ElevenLabs API key.
-  - Set it in your environment as `ELEVENLABS_API_KEY`.
+  - Create an API key for the provider configured in `settings.cfg`.
+  - Set it with `Set STT API Key.cmd` from the release folder.
   - Do not put API keys in `settings.cfg` or commit them to the repository.
 
 ---
@@ -72,7 +74,7 @@ C:\Users\yourname\Desktop\WhisperAttackAPI
 ```
 
 1. Open the extracted folder.
-1. Double-click `Set ElevenLabs API Key.cmd` once and paste your ElevenLabs API key.
+1. Double-click `Set STT API Key.cmd` once and paste your provider API key.
 1. Double-click `WhisperAttackAPI.exe`.
 1. Create a shortcut to `WhisperAttackAPI.exe` if desired.
 
@@ -89,6 +91,7 @@ WhisperAttackAPI v1.2.2-api.1\
   word_mappings.txt
   whisper_attack_icon.png
   add_icon.png
+  Set STT API Key.cmd
   Set ElevenLabs API Key.cmd
   README_FIRST.txt
 ```
@@ -114,7 +117,7 @@ The `settings.cfg` file contains configuration for WhisperAttack.
 The default values should cover most cases but can be changed:
 
 - `stt_backend` - The speech-to-text backend to use, `elevenlabs` by default in this fork.
-  - Supported values: `elevenlabs`, `faster_whisper`
+  - Supported values: `elevenlabs`, `openai`, `deepgram`, `faster_whisper`
 - `stt_language` - Language hint for transcription, `en` by default for VAICOM English commands.
 - `stt_timeout_seconds` - API request timeout in seconds.
 - `stt_keyterm_sources` - Comma-separated sources used to build provider keyterms without duplicating vocabulary in `settings.cfg`.
@@ -125,6 +128,15 @@ The default values should cover most cases but can be changed:
 - `elevenlabs_no_verbatim` - Removes filler words and false starts when supported. Defaults to `true`.
 - `elevenlabs_tag_audio_events` - Enables or disables audio event tags. Defaults to `false`.
 - `elevenlabs_timestamps_granularity` - Timestamp granularity. Defaults to `none` because VoiceAttack only needs text.
+- `openai_api_key_env` - Environment variable containing the OpenAI API key. Defaults to `OPENAI_API_KEY`.
+- `openai_model` - OpenAI transcription model ID, `gpt-4o-transcribe` by default.
+- `openai_include_keyterms_in_prompt` - Adds generated DCS/VAICOM keyterms to the OpenAI transcription prompt.
+- `openai_max_prompt_keyterms` - Maximum generated keyterms to include in the OpenAI prompt.
+- `deepgram_api_key_env` - Environment variable containing the Deepgram API key. Defaults to `DEEPGRAM_API_KEY`.
+- `deepgram_model` - Deepgram model ID, `nova-3` by default.
+- `deepgram_smart_format` - Enables Deepgram smart formatting. Defaults to `true`.
+- `deepgram_detect_language` - Lets Deepgram detect the spoken language instead of sending `stt_language`.
+- `deepgram_max_keyterms` - Maximum generated keyterms to send as Deepgram `keyterm` parameters.
 - `whisper_model` - The Whisper model to use, `small.en` by default. See the table at the bottom of the README file for options.
   - A smaller size can be specified for reducing the amount of VRAM used, e.g. `base.en` or `tiny.en`
 - `whisper_device` - Which device to run the Whisper transcription process on, `GPU` (default) or `CPU`
@@ -133,23 +145,41 @@ The default values should cover most cases but can be changed:
   - `dark` - dark mode
   - `light` - light mode
 
-### ElevenLabs API setup
+### API key setup
 
 For release users, use the helper included beside the exe:
 
 ```console
-Set ElevenLabs API Key.cmd
+Set STT API Key.cmd
 ```
 
-This stores the key in your Windows user environment as `ELEVENLABS_API_KEY`. The key is not written to `settings.cfg`.
+This stores the selected provider key in your Windows user environment. The key is not written to `settings.cfg`.
 
 PowerShell alternative:
 
 ```console
 setx ELEVENLABS_API_KEY "your-api-key"
+setx OPENAI_API_KEY "your-api-key"
+setx DEEPGRAM_API_KEY "your-api-key"
 ```
 
 Restart WhisperAttackAPI after setting the environment variable.
+
+### Optional STT providers
+
+ElevenLabs remains the default because it has worked well for DCS/VAICOM push-to-talk with French-accented English. Users can switch providers by editing `settings.cfg`:
+
+```console
+stt_backend=openai
+```
+
+OpenAI uses the official transcription endpoint with `gpt-4o-transcribe` by default. WhisperAttackAPI sends the DCS/VAICOM prompt and generated keyterms as transcription context. See the official [OpenAI Speech-to-Text guide](https://developers.openai.com/api/docs/guides/speech-to-text) and [transcription API reference](https://developers.openai.com/api/reference/resources/audio/subresources/transcriptions/methods/create/).
+
+```console
+stt_backend=deepgram
+```
+
+Deepgram uses prerecorded transcription with `nova-3` by default. WhisperAttackAPI sends generated DCS/VAICOM keyterms as Deepgram `keyterm` query parameters. See the official [Deepgram prerecorded audio guide](https://developers.deepgram.com/docs/pre-recorded-audio), [Nova-3 model overview](https://developers.deepgram.com/docs/models-languages-overview), and [Keyterm Prompting docs](https://developers.deepgram.com/docs/keyterm).
 
 ### ElevenLabs cost estimate
 

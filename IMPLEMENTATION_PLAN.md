@@ -15,6 +15,8 @@
 - `stt_backends/base.py` defines the normalized STT contract.
 - `stt_backends/factory.py` selects the backend from `stt_backend`.
 - `stt_backends/elevenlabs_backend.py` implements ElevenLabs Scribe v2 over HTTPS.
+- `stt_backends/openai_backend.py` implements OpenAI Audio API transcription over HTTPS.
+- `stt_backends/deepgram_backend.py` implements Deepgram prerecorded transcription over HTTPS.
 - `stt_backends/faster_whisper_backend.py` keeps the previous local Whisper behavior behind the same contract.
 - `whisper_server.py` now loads one STT backend and keeps the existing cleanup, fuzzy matching, clipboard, VoiceAttack, and kneeboard flow.
 - `configuration.py` exposes generic, provider-specific, and safe redacted settings accessors.
@@ -44,7 +46,7 @@
 
 - OpenAI `gpt-4o-transcribe`: strong candidate for accented English and prompt-based domain context.
 - AssemblyAI Universal-3 Pro: strong candidate when natural-language prompting and large keyterm lists matter.
-- Deepgram or Soniox: candidates if low-latency streaming becomes more important than push-to-talk file transcription.
+- Soniox: candidate if low-latency streaming becomes more important than push-to-talk file transcription.
 
 ## Review Notes
 

@@ -122,6 +122,7 @@ Copy the following files into the `dist\whisper_attack` directory as these must 
 - word_mappings.txt
 - whisper_attack_icon.png
 - add_icon.png
+- Set STT API Key.cmd
 - Set ElevenLabs API Key.cmd
 - README_FIRST.txt
 
