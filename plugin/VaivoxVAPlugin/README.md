@@ -38,26 +38,34 @@ never breaks dispatch. The Python side reads it in
 ## Building
 
 The project file (`VaivoxVAPlugin.csproj`) targets **.NET Framework 4.8** (the runtime
-VoiceAttack 2 loads) and pins the assembly name to `VaivoxVAPlugin.dll` (VoiceAttack loads
-by file name). The plugin uses only the late-bound `dynamic vaProxy` API, so it builds
-**with or without** a local VoiceAttack install — `VoiceAttack.dll` is referenced when
-present and skipped otherwise (the build also stays reproducible in CI via the
-`Microsoft.NETFramework.ReferenceAssemblies` build-time package).
+VoiceAttack 2 loads — verified against VoiceAttack 2.1.8, runtime `v4.0.30319`) and pins the
+assembly name to `VaivoxVAPlugin.dll` (VoiceAttack loads by file name). The plugin uses only
+the late-bound `dynamic vaProxy` API, so it builds **with or without** a local VoiceAttack
+install — `VoiceAttack.dll` is referenced when present and skipped otherwise (the build also
+stays reproducible in CI via the `Microsoft.NETFramework.ReferenceAssemblies` build-time
+package).
+
+Point the build at your VoiceAttack install with `-p:VoiceAttackDir=...` or the
+`VOICEATTACK_DIR` environment variable (Steam installs live under
+`<library>\steamapps\common\VoiceAttack 2`):
 
 ```powershell
-dotnet build plugin\VaivoxVAPlugin\VaivoxVAPlugin.csproj -c Release
-# VoiceAttack installed somewhere non-default? point the build at it:
-dotnet build plugin\VaivoxVAPlugin\VaivoxVAPlugin.csproj -c Release -p:VoiceAttackDir="D:\Games\VoiceAttack"
+dotnet build plugin\VaivoxVAPlugin\VaivoxVAPlugin.csproj -c Release -p:VoiceAttackDir="E:\Jeux\steamapps\common\VoiceAttack 2"
+# ...or set it once and just `dotnet build ... -c Release`:
+setx VOICEATTACK_DIR "E:\Jeux\steamapps\common\VoiceAttack 2"
 ```
 
 Then copy `plugin\VaivoxVAPlugin\bin\Release\net48\VaivoxVAPlugin.dll` into
-`VoiceAttack\Apps\VAIVOX\`.
+`<VoiceAttack>\Apps\VAIVOX\` (create the folder; one DLL per app, mirroring the other
+`Apps\*` plugins). Restart VoiceAttack to load it.
 
 ## VoiceAttack setup
 
 1. Import `VAIVOX - VA Profile.vap` (the bundled profile template).
 2. Because the plugin GUID changed, **re-point** each command's *Execute an external
-   plugin function* to the **VAIVOX** plugin (expected one-time step; ADR-0002).
+   plugin function* to the **VAIVOX** plugin (expected one-time step; ADR-0002). The `.vap`
+   is a binary/encrypted VoiceAttack export — there is no plaintext GUID to swap, so this
+   **must be done in the VoiceAttack GUI**, not by editing the file.
 3. Bind your push-to-talk buttons to the two commands the plugin matches on:
    - `Start Whisper Recording` → sends `start`
    - `Stop Whisper Recording` → sends `stop`

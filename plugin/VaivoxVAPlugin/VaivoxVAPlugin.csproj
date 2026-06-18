@@ -11,8 +11,10 @@
 
     Build (on a machine with VoiceAttack installed):
         dotnet build -c Release
-        dotnet build -c Release -p:VoiceAttackDir="D:\Games\VoiceAttack"   # non-default path
-    Then copy bin\Release\net48\VaivoxVAPlugin.dll into VoiceAttack\Apps\VAIVOX\.
+        dotnet build -c Release -p:VoiceAttackDir="E:\Jeux\steamapps\common\VoiceAttack 2"  # non-default
+        setx VOICEATTACK_DIR "E:\Jeux\steamapps\common\VoiceAttack 2"   # ...or set it once
+    Then copy bin\Release\net48\VaivoxVAPlugin.dll into <VoiceAttack>\Apps\VAIVOX\.
+    Verified against VoiceAttack 2.1.8 (.NET Framework runtime v4.0.30319).
   -->
 
   <PropertyGroup>
@@ -23,7 +25,16 @@
     <Nullable>disable</Nullable>
     <AutoGenerateBindingRedirects>true</AutoGenerateBindingRedirects>
     <GenerateAssemblyInfo>true</GenerateAssemblyInfo>
-    <!-- Override on the command line if VoiceAttack lives elsewhere (see header). -->
+    <!-- VoiceAttack hosts the plugin in its own AppDomain, so the `dynamic` calls bind
+         against the Microsoft.CSharp it loads at runtime; the compile-time version conflict
+         between VoiceAttack.dll's newer Microsoft.CSharp and the net48 reference assemblies
+         is therefore irrelevant. Quiet that one benign resolution warning. -->
+    <MSBuildWarningsAsMessages>MSB3277</MSBuildWarningsAsMessages>
+    <!-- Resolve VoiceAttack's location in priority order: an explicit
+         -p:VoiceAttackDir=..., then the VOICEATTACK_DIR environment variable, then the
+         default install path. (Steam installs land somewhere like
+         <library>\steamapps\common\VoiceAttack 2, so set one of the first two.) -->
+    <VoiceAttackDir Condition="'$(VoiceAttackDir)' == ''">$(VOICEATTACK_DIR)</VoiceAttackDir>
     <VoiceAttackDir Condition="'$(VoiceAttackDir)' == ''">C:\Program Files\VoiceAttack</VoiceAttackDir>
   </PropertyGroup>
 

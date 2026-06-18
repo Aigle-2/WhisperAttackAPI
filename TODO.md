@@ -41,12 +41,14 @@ degrades cleanly to "unknown" against the old (pre-return-channel) plugin (behav
 - [ ] **Tier 2 counterfactual attribution (ADR-0004).** Pipeline-replay + phrase-index
   oracle on ambiguous matches. Larger; needs the match signal **and** the pipeline reading
   vocab from `VocabularyRepository` (so attribution can credit by exact edit, not surface form).
-- [x] **C# `dotnet` build — reproducible.** `plugin/VaivoxVAPlugin/VaivoxVAPlugin.csproj`
-  (net48, pinned `VaivoxVAPlugin.dll` name, optional `VoiceAttack.dll` reference via
-  `-p:VoiceAttackDir`, CI-buildable via `Microsoft.NETFramework.ReferenceAssemblies`) builds
-  the DLL standalone (the plugin is all late-bound `dynamic`). *Hardware-gated:* re-point the
-  commands in `VAIVOX - VA Profile.vap` to the new plugin GUID inside VoiceAttack and copy the
-  built DLL into `VoiceAttack\Apps\VAIVOX\`.
+- [x] **C# `dotnet` build + deploy — done on the dev rig.** `VaivoxVAPlugin.csproj` (net48,
+  pinned `VaivoxVAPlugin.dll`, `VoiceAttack.dll` via `-p:VoiceAttackDir` / `VOICEATTACK_DIR`,
+  CI-buildable via `Microsoft.NETFramework.ReferenceAssemblies`) built **0 warnings / 0
+  errors** against real VoiceAttack **2.1.8** (runtime `v4.0.30319`); the DLL was copied into
+  `…\VoiceAttack 2\Apps\VAIVOX\` and its entry points (`VA_Id` / `VA_Init1` / `VA_Invoke1` /
+  `VA_Exit1` / …) verified by reflection. *GUI-only remainder:* re-point the commands in
+  `VAIVOX - VA Profile.vap` to the VAIVOX plugin inside VoiceAttack — the `.vap` is a
+  binary/encrypted export, so there is no text GUID to script.
 - [ ] **DCS end-to-end smoke (ADR-0006/0002).** With VoiceAttack + VAICOM + DCS: PTT a known
   command → fires in-game + `matched=true` + a usage hit in `%LOCALAPPDATA%\VAIVOX\
   <kind>.usage.json` + `GET /metrics` shows a real `match`; PTT an unknown command →
