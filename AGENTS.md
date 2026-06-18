@@ -128,6 +128,25 @@ PyInstaller build (`build_exe.ps1`) targets `src/vaivox/main.py` and passes `--p
 extra path setup; the pytest `pythonpath` setting still exposes the legacy top-level
 shims.
 
+## Runtime introspection API (ADR-0010)
+
+For fast debug — *why did command X not fire?* — VAIVOX exposes a **read-only localhost
+HTTP/JSON introspection API** over the `application/queries.py` use cases (a driver
+adapter in `infrastructure/api/introspection.py`, stdlib `http.server`, no extra
+dependency). It is **off by default**, binds **127.0.0.1 only**, never mutates state,
+never returns secrets (config via the redacted accessor), and takes an **optional
+bearer token**. Enable it in the per-user `settings.cfg` with `api_enabled = true`
+(optional `api_host` / `api_port` / `api_token`).
+
+Endpoints: `GET /healthz`, `GET /status`, `GET /metrics` (match/wrong-match/not-found/
+unknown/abstain counts + rates over recorded telemetry), `GET /reconciliations?limit=N`
+(recent provenance), `GET /vocabulary` (entries + usage by kind), and the killer
+`POST /reconcile/dry-run {"text": "..."}` (full pipeline, no mic/VoiceAttack).
+
+The full debug recipes (curl examples, the dry-run workflow, deferred MCP adapter +
+mutating actions) live in the Claude Code skill
+[`.claude/skills/vaivox-debug/SKILL.md`](.claude/skills/vaivox-debug/SKILL.md).
+
 ## Conventions
 
 - **Python 3.12** (single supported version; `requires-python = ">=3.12"`, ruff/mypy
