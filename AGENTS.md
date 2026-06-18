@@ -57,7 +57,9 @@ but never anything that does I/O (sockets, files, mic, network, UI).
   - **A — Governance** (ADR-0004) ✅ core: `domain/vocabulary/` `VocabularyEntry` +
     `VocabularyGovernor` (rank by recency/hits, LRU eviction with DEFAULT protection +
     grace window, Tier 1 token-provenance attribution), the `VocabularyRepository` port,
-    and a JSONL source + usage-sidecar adapter.
+    and a JSONL source + usage-sidecar adapter. A one-shot migration
+    (`infrastructure/vocabulary/migration.py` + `tools/migrate_vocabulary.py`) seeds the
+    JSONL source from the legacy `fuzzy_words.txt` / `word_mappings.txt`.
   - **C — Telemetry** (ADR-0006) ✅ §1: `JsonlTelemetrySink` appends each
     `ReconciliationOutcome` to `%LOCALAPPDATA%\VAIVOX`, config-gated (`telemetry_enabled`,
     default on).
@@ -70,8 +72,10 @@ but never anything that does I/O (sockets, files, mic, network, UI).
     The eval recovers every near-miss with `wrong_match == 0` held. The keyterm +
     phrase-index **generator** (`tools/generate_vaicom_keyterms.py`, ADR-0005)
     auto-discovers a VAICOM install and emits both files to `%LOCALAPPDATA%\VAIVOX`
-    (unit-tested on synthetic fixtures; end-to-end needs a real install). *Deferred:*
-    recipient segmentation; thresholds-in-settings.
+    (unit-tested on synthetic fixtures; end-to-end needs a real install). The `HIGH` /
+    `LOW` / `MARGIN` thresholds are overridable in `settings.cfg` (`snap_high` / `snap_low`
+    / `snap_margin`); the composition injects the builder so a hot-reload keeps the
+    calibration. *Deferred:* recipient segmentation.
   - **Background vocabulary generation** (ADR-0005) ✅: `RefreshVocabulary`
     (`application/refresh_vocabulary.py`) over the `VocabularyGenerator` port +
     `VaicomVocabularyGenerator` adapter (lazy/defensive wrap of the `tools/` generator)

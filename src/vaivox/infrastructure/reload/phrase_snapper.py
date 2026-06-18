@@ -35,6 +35,10 @@ class ReloadablePhraseSnapper:
             :class:`~vaivox.infrastructure.reload.idle_gated.IdleGatedSwap`.
         on_reload: Optional observer invoked with the new phrase count each time an index
             actually swaps in (ADR-0009 surfaces "vocabulary refreshed: N phrases").
+        build: How to build a snapper from a phrase list on reload. Defaults to the
+            conservative-default :func:`~vaivox.domain.reconciliation.snapper.build_snapper`;
+            the composition root injects a builder carrying the settings thresholds
+            (ADR-0011) so a hot-reload keeps the same calibration as the initial snapper.
     """
 
     def __init__(
@@ -42,9 +46,11 @@ class ReloadablePhraseSnapper:
         initial: PhraseSnapper,
         is_idle: Callable[[], bool],
         on_reload: Callable[[int], None] | None = None,
+        build: Callable[[Sequence[str]], PhraseSnapper] = build_snapper,
     ) -> None:
-        """Wire the initial snapper and the idle/observer callbacks."""
+        """Wire the initial snapper, the idle/observer callbacks, and the reload builder."""
         self._on_reload = on_reload
+        self._build = build
         self._swap: IdleGatedSwap[PhraseSnapper] = IdleGatedSwap(initial, is_idle, self._announce)
 
     def snap(self, text: str) -> SnapResult:
@@ -69,7 +75,7 @@ class ReloadablePhraseSnapper:
             ``True`` if the new index was applied immediately (idle), ``False`` if it was
             staged for the next idle checkpoint.
         """
-        return self._swap.request_swap(build_snapper(phrases))
+        return self._swap.request_swap(self._build(phrases))
 
     @property
     def phrase_index(self) -> tuple[str, ...]:

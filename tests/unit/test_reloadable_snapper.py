@@ -143,3 +143,20 @@ def test_reload_to_an_empty_index_makes_the_snapper_a_no_op() -> None:
     result = snapper.snap("texaco request rejoin")
     assert result.decision is SnapDecision.RAW
     assert result.text == "texaco request rejoin"
+
+
+def test_reload_uses_the_injected_builder_so_settings_thresholds_persist() -> None:
+    # The composition injects a builder carrying the settings thresholds (ADR-0011); a
+    # hot-reload must rebuild through it, not the conservative default, so a regenerated
+    # index keeps the configured calibration.
+    seen: list[tuple[str, ...]] = []
+
+    def build(phrases: list[str]) -> PhraseSnapper:
+        seen.append(tuple(phrases))
+        return PhraseSnapper(phrases, high=50.0, low=10.0, margin=5.0)
+
+    snapper = ReloadablePhraseSnapper(build([]), is_idle=lambda: True, build=build)
+    applied = snapper.reload(["overlord bogey dope"])
+
+    assert applied is True
+    assert seen == [(), ("overlord bogey dope",)]  # initial + reload both via the injection

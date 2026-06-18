@@ -257,6 +257,19 @@ class VaivoxConfiguration:
             )
             return default
 
+    def get_float_setting(self, key: str, default: float) -> float:
+        """Return a float configuration setting, falling back to ``default``."""
+        value = self.config.get(key)
+        if value is None:
+            return default
+        try:
+            return float(value)
+        except ValueError:
+            logging.warning(
+                "Invalid float value for '%s': %s. Using default %s.", key, value, default
+            )
+            return default
+
     def get_provider_setting(self, provider: str, key: str, default: str = "") -> str:
         """Return a provider-specific setting, falling back to a generic ``stt_*`` one."""
         return self.config.get(f"{provider}_{key}", self.config.get(f"stt_{key}", default))

@@ -2,7 +2,7 @@
 
 A living punch-list of what's left after Phases 0–5 (core). The phased narrative lives in
 [`docs/MIGRATION_PLAN.md`](docs/MIGRATION_PLAN.md); decisions are in [`docs/adr/`](docs/adr/).
-At last update the tree is green: **237 tests**, ruff / format / mypy / import-linter all
+At last update the tree is green: **243 tests**, ruff / format / mypy / import-linter all
 pass via `uv run` (see [AGENTS.md](AGENTS.md)).
 
 **Done so far (Phase 5):** A governance core (ADR-0004), C telemetry persistence
@@ -87,11 +87,20 @@ These gate the match-signal-dependent work; everything buildable without them is
 - [ ] **Governance maintenance wiring (ADR-0004).** Wire `VocabularyGovernor.govern`
   (eviction) into a maintenance pass + `VocabularyRepository.replace_entries`. Meaningful
   only once usage data exists (depends on live stamping above).
-- [ ] **`.txt → JSONL` vocab migration (ADR-0004 action item).** One-shot migration of the
-  legacy `fuzzy_words.txt` / `word_mappings.txt` into the structured JSONL source.
-- [ ] **Phrase-snap follow-ups (ADR-0011).** Recipient-segment the phrase index + snapper
-  (v1 is whole-phrase `token_sort_ratio`); expose the `HIGH` / `LOW` / `MARGIN` thresholds
-  in `settings.cfg` (they live as named constants today).
+- [x] **`.txt → JSONL` vocab migration (ADR-0004 action item).** `migrate_legacy_vocabulary`
+  + the pure `legacy_to_entries` (`infrastructure/vocabulary/migration.py`) convert the
+  merged `fuzzy_words.txt` / `word_mappings.txt` into structured `VocabularyEntry` records
+  (aliases grouped by replacement, slug ids, `DEFAULT` origin) and seed them through the
+  repository; one-shot CLI `tools/migrate_vocabulary.py`, idempotent by id. Tested (converter
+  + a real repo round-trip) and validated end-to-end on the repo defaults (21 fuzzy + 48
+  mappings). *Follow-up:* auto-run on first launch waits on the pipeline reading vocab from
+  the repository (today the live pipeline still reads from `config`).
+- [ ] **Phrase-snap follow-ups (ADR-0011)** — *thresholds-in-settings ✅; recipient
+  segmentation deferred.* The `HIGH` / `LOW` / `MARGIN` thresholds are now overridable in
+  `settings.cfg` (`snap_high` / `snap_low` / `snap_margin`, defaults = the eval-calibrated
+  constants); the composition injects the builder into `ReloadablePhraseSnapper` so a
+  hot-reload keeps the configured calibration. *Remaining:* recipient-segment the phrase
+  index + snapper (v1 is whole-phrase `token_sort_ratio`).
 - [ ] **Eval dataset augmentation (ADR-0008).** Add the LLM-generated tagged dataset
   alongside the human-curated golden set; consider a small real-audio smoke anchor.
 

@@ -8,7 +8,7 @@ keeping the inner layers free of wiring concerns.
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from threading import Event
 
@@ -34,7 +34,12 @@ from vaivox.application.record_command import (
 )
 from vaivox.application.refresh_vocabulary import RefreshVocabulary, ReloadVocabulary
 from vaivox.application.shutdown import Shutdown
-from vaivox.domain.reconciliation.snapper import build_snapper
+from vaivox.domain.reconciliation.snapper import (
+    DEFAULT_HIGH,
+    DEFAULT_LOW,
+    DEFAULT_MARGIN,
+    PhraseSnapper,
+)
 from vaivox.infrastructure.api.introspection import IntrospectionServer
 from vaivox.infrastructure.audio.recorder import SoundDeviceRecorder
 from vaivox.infrastructure.config.identity import VAIVOX
@@ -221,7 +226,7 @@ ReloadablePhraseSnapper` so a regenerated index can be swapped in at idle withou
 
     Returns:
         A :class:`~vaivox.infrastructure.reload.phrase_snapper.ReloadablePhraseSnapper`
-        over the generated phrase index, with the conservative default thresholds.
+        over the generated phrase index, with the snap thresholds resolved from settings.
     """
     phrases = load_phrase_index(config.app_data_location)
     if phrases:
@@ -229,14 +234,26 @@ ReloadablePhraseSnapper` so a regenerated index can be swapped in at idle withou
     else:
         _LOGGER.debug("No phrase index present; the snapper is a no-op.")
 
+    # The three conservative snap thresholds (ADR-0011) are overridable in settings.cfg —
+    # tune against the eval / telemetry without a code change. Defaults are the
+    # eval-calibrated constants. The same builder seeds the initial snapper and every
+    # hot-reload, so a regenerated index keeps the configured calibration (ADR-0009).
+    high = config.get_float_setting("snap_high", DEFAULT_HIGH)
+    low = config.get_float_setting("snap_low", DEFAULT_LOW)
+    margin = config.get_float_setting("snap_margin", DEFAULT_MARGIN)
+
+    def build(index: Sequence[str]) -> PhraseSnapper:
+        return PhraseSnapper(index, high=high, low=low, margin=margin)
+
     def announce_reload(count: int) -> None:
         _LOGGER.info("Phrase index hot-reloaded: %d phrases.", count)
         reporter.report(f"Vocabulary refreshed: {count} phrases", StatusLevel.SUCCESS)
 
     return ReloadablePhraseSnapper(
-        build_snapper(phrases),
+        build(phrases),
         is_idle=lambda: not recorder.is_recording,
         on_reload=announce_reload,
+        build=build,
     )
 
 

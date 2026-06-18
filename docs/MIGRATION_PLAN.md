@@ -122,7 +122,9 @@ generator, and ADR-0005 **background** generation on first run / on stale all no
 ### Phase 5 — Reconciliation features (on clean seams) 🚧 (in progress)
 - **A — Governance** (ADR-0004) ✅ core: `domain/vocabulary/` model + `VocabularyGovernor`
   (rank by recency/hits, LRU eviction with DEFAULT protection + grace window, Tier 1
-  attribution), `VocabularyRepository` port, JSONL source + usage-sidecar adapter.
+  attribution), `VocabularyRepository` port, JSONL source + usage-sidecar adapter, and a
+  one-shot `.txt → JSONL` migration (`infrastructure/vocabulary/migration.py` +
+  `tools/migrate_vocabulary.py`) seeding the source from the legacy flat files.
   *Deferred:* Tier 2 counterfactual; live `mark_used` wiring (blocked on the match
   signal, below). The **reload model** (ADR-0009) idle-gated hot atomic swap shipped for
   the **phrase index** (`infrastructure/reload/` + the `PhraseMatcher` port; swapped only
@@ -140,7 +142,9 @@ generator, and ADR-0005 **background** generation on first run / on stale all no
   `wrong_match == 0` held. The keyterm + phrase-index **generator**
   (`tools/generate_vaicom_keyterms.py`, ADR-0005) auto-discovers a VAICOM install and emits
   both files to `%LOCALAPPDATA%\VAIVOX` (unit-tested on synthetic fixtures; end-to-end
-  needs a real install). *Deferred:* recipient segmentation; thresholds-in-settings.
+  needs a real install). The `HIGH` / `LOW` / `MARGIN` thresholds are overridable in
+  `settings.cfg` (`snap_high` / `snap_low` / `snap_margin`), injected via the snapper
+  builder so a hot-reload keeps the calibration. *Deferred:* recipient segmentation.
 - **Agent API + skills** (ADR-0010) ✅ read API **+ gated actions**: the localhost
   introspection API serves `/status`, `/metrics`, `/reconciliations`, `/vocabulary` +
   `POST /reconcile/dry-run` over read-only query use cases, plus the **mutating actions**

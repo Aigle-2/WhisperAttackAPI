@@ -101,12 +101,15 @@ unacceptable one.
 
 ## Action Items
 
-1. [ ] Generate the recipient-segmented phrase index alongside the VAICOM keyterms
-   (reuse the ADR-0005 generation path; write to the per-user data dir; frozen for eval).
-2. [ ] Implement the `PhraseSnapper` domain service (snap / abstain / near-miss; runner-up
-   margin; one scorer shared with near-miss).
-3. [ ] Wire it into `StopAndReconcile` after `reconcile(...)`; record the snap decision in
+1. [~] Generate the phrase index alongside the VAICOM keyterms (reuse the ADR-0005
+   generation path; write to the per-user data dir; frozen for eval). *Done as a
+   whole-phrase index; **recipient segmentation** is still deferred.*
+2. [x] Implement the `PhraseSnapper` domain service (snap / abstain / near-miss; runner-up
+   margin; one scorer shared with near-miss) — `domain/reconciliation/snapper.py`.
+3. [x] Wire it into `StopAndReconcile` after `reconcile(...)`; record the snap decision in
    the `ReconciliationOutcome` (ADR-0006).
-4. [ ] Add eval items + tags for snap cases; keep the `wrong_match == 0` gate; calibrate
+4. [x] Add eval items + tags for snap cases; keep the `wrong_match == 0` gate; calibrate
    `HIGH` / `LOW` / `MARGIN` against the eval and telemetry.
-5. [ ] Expose the thresholds in settings with documented, conservative defaults.
+5. [x] Expose the thresholds in settings with documented, conservative defaults
+   (`snap_high` / `snap_low` / `snap_margin`; injected via the snapper builder so a
+   hot-reload, ADR-0009, keeps the calibration).

@@ -88,7 +88,12 @@ ranking.
 
 ## Action Items
 
-1. [ ] Define the JSONL record schema + `id` rules per vocabulary type.
-2. [ ] Implement `VocabularyRepository` (port) + JSONL/sidecar adapter.
-3. [ ] Implement `VocabularyGovernor` (domain service): caps, grace, LRU.
-4. [ ] One-shot `.txt → JSONL` migration on startup.
+1. [x] Define the JSONL record schema + `id` rules per vocabulary type
+   (`{id, term, aliases, origin}` per `<kind>.jsonl`; ids are slugs of the term).
+2. [x] Implement `VocabularyRepository` (port) + JSONL/sidecar adapter
+   (`infrastructure/vocabulary/jsonl_repository.py`).
+3. [x] Implement `VocabularyGovernor` (domain service): caps, grace, LRU
+   (`domain/vocabulary/governor.py`). *Wiring into a maintenance pass waits on usage data.*
+4. [x] One-shot `.txt → JSONL` migration (`infrastructure/vocabulary/migration.py` +
+   `tools/migrate_vocabulary.py`). *Run on demand; auto-run on first launch waits on the
+   pipeline reading vocabulary from the repository.*
