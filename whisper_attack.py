@@ -12,6 +12,12 @@ from ttkbootstrap.widgets.scrolled import ScrolledText
 from ttkbootstrap.constants import *
 from PIL import Image
 from pid import PidFile, PidFileError
+# VAIVOX migration (Phase 2+): make the in-repo ``src/vaivox`` package importable
+# when launching from source. No-op once the package is installed or frozen.
+_VAIVOX_SRC = os.path.join(os.path.dirname(os.path.abspath(__file__)), "src")
+if os.path.isdir(_VAIVOX_SRC) and _VAIVOX_SRC not in sys.path:
+    sys.path.append(_VAIVOX_SRC)
+
 from configuration import WhisperAttackConfiguration, ConfigurationError
 from theme import THEME_DEFAULT, THEME_DARK, TAG_BLUE, TAG_GREY, TAG_RED
 from writer import WhisperAttackWriter

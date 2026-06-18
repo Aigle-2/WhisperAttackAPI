@@ -21,13 +21,16 @@ jobs:
         with:
           python-version: "3.10"
 
-      # Only the gate tooling is installed — the gates run against the source tree
-      # (src/ is put on PYTHONPATH / pytest pythonpath), so the heavy runtime deps
-      # are not needed in CI. ruff is pinned to match the formatter locally.
+      # The gate tooling plus the two pure libraries the reconciliation domain
+      # imports (rapidfuzz, text2digits). The heavy app/UI deps are not needed:
+      # gates run against the source tree (src/ is on PYTHONPATH / pytest pythonpath).
+      # rapidfuzz/text2digits are pinned so the golden characterization tests are
+      # reproducible; ruff is pinned to match the formatter locally.
       - name: Install gate tooling
         run: |
           python -m pip install --upgrade pip
-          python -m pip install ruff==0.15.0 mypy pytest pytest-cov "import-linter>=2.0"
+          python -m pip install ruff==0.15.0 mypy pytest pytest-cov "import-linter>=2.0" \
+            rapidfuzz==3.14.5 text2digits==0.1.2
 
       - name: Ruff lint
         run: ruff check .

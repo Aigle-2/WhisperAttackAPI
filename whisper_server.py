@@ -2,7 +2,6 @@ import os
 import socket
 import time
 import logging
-import unicodedata
 import tempfile
 import re
 from datetime import datetime
@@ -12,14 +11,13 @@ import keyboard
 import sounddevice as sd
 import soundfile as sf
 import pyperclip
-from rapidfuzz import process
-from text2digits import text2digits
 from wcwidth import wcswidth
 from configuration import WhisperAttackConfiguration
 from stt_backends.base import SpeechToTextBackendError
 from stt_backends.factory import create_stt_backend
 from stt_backends.keyterms import PHONETIC_ALPHABET
-from transcription_postprocess import compact_spelled_codes
+from vaivox.domain.reconciliation.fuzzy import correct_dcs_and_phonetics_separately
+from vaivox.domain.reconciliation.pipeline import clean_transcription
 from writer import WhisperAttackWriter
 from theme import TAG_BLUE, TAG_GREEN, TAG_GREY, TAG_ORANGE, TAG_RED
 
@@ -28,9 +26,6 @@ from theme import TAG_BLUE, TAG_GREEN, TAG_GREY, TAG_ORANGE, TAG_RED
 ###############################################################################
 HOST = '127.0.0.1'
 PORT = 65432
-
-# Library to convert textual numbers to their numerical values
-t2d = text2digits.Text2Digits()
 
 # Use the system's temporary folder for the WAV file.
 TEMP_DIR = tempfile.gettempdir()
@@ -43,78 +38,13 @@ SAMPLE_RATE = 16000
 phonetic_alphabet = PHONETIC_ALPHABET
 
 ###############################################################################
-# FUZZY MATCH + CLEANUP
+# RECONCILIATION
+#
+# The text cleanup and fuzzy-matching logic now lives in the reconciliation
+# domain (vaivox.domain.reconciliation). It is imported above and called from
+# transcribe_audio; the kneeboard text formatting below stays here until Phase 3
+# moves it into the kneeboard adapter.
 ###############################################################################
-def correct_dcs_and_phonetics_separately(
-    text: str,
-    dcs_list: list[str],
-    phonetic_list: list[str],
-    dcs_threshold=85,
-    phonetic_threshold=85
-) -> str:
-    """
-    Applies fuzzy matching for DCS callsigns and the phonetic alphabet.
-    """
-    tokens = text.split()
-    corrected_tokens = []
-    dcs_lower = [x.lower() for x in dcs_list]
-    phon_lower = [x.lower() for x in phonetic_list]
-
-    for token in tokens:
-        if len(token) < 6:
-            corrected_tokens.append(token)
-            continue
-
-        t_lower = token.lower()
-        dcs_match = process.extractOne(t_lower, dcs_lower, score_cutoff=dcs_threshold)
-        phon_match = process.extractOne(t_lower, phon_lower, score_cutoff=phonetic_threshold)
-        best_token = token
-        best_score = 0
-
-        if dcs_match is not None:
-            match_name_dcs, score_dcs, _ = dcs_match
-            if score_dcs > best_score:
-                best_score = score_dcs
-                for orig in dcs_list:
-                    if orig.lower() == match_name_dcs:
-                        best_token = orig
-                        break
-
-        if phon_match is not None:
-            match_name_phon, score_phon, _ = phon_match
-            if score_phon > best_score:
-                best_score = score_phon
-                for orig in phonetic_list:
-                    if orig.lower() == match_name_phon:
-                        best_token = orig
-                        break
-
-        corrected_tokens.append(best_token)
-    return " ".join(corrected_tokens)
-
-def replace_word_mappings(word_mappings: dict[str, str], text: str) -> str:
-    """
-    Replace transcribed words with custom words from their mapped values.
-    """
-    for word, replacement in word_mappings.items():
-        pattern = rf"\b{re.escape(word)}\b"
-        text = re.sub(pattern, replacement, text, flags=re.IGNORECASE)
-    return text
-
-def custom_cleanup_text(text: str, word_mappings: dict[str, str]) -> str:
-    """
-    Performs several cleanup steps on the transcribed text.
-    """
-    text = unicodedata.normalize('NFC', text.strip())
-    text = replace_word_mappings(word_mappings, text)
-    text = t2d.convert(text)
-    text = re.sub(r"(?<=\d)-(?=\d)", " ", text)
-    text = re.sub(r'\b0\d+\b', lambda x: ' '.join(x.group()), text)
-    text = re.sub(r"([^\w\d\s])*(?![\w\-\w])(?![^-])?", " ", text)
-    text = re.sub(r"\s+", " ", text).strip()
-    text = compact_spelled_codes(text)
-    return text
-
 def format_for_dcs_kneeboard(text: str, line_length: int) -> str:
     """
     Formats text for word wrapping for use in the DCS kneeboard
@@ -302,7 +232,7 @@ class WhisperServer:
             # Ignore blank audio as nothing has been recorded
             if raw_text.strip() == "[BLANK_AUDIO]" or raw_text.strip() == "":
                 return None
-            cleaned_text = custom_cleanup_text(raw_text, self.config.get_word_mappings())
+            cleaned_text = clean_transcription(raw_text, self.config.get_word_mappings())
             fuzzy_corrected_text = correct_dcs_and_phonetics_separately(
                 cleaned_text,
                 self.config.get_fuzzy_words(),

@@ -76,6 +76,7 @@ if (!(Test-Path $PythonPath)) {
     --name $AppName `
     @ExcludeModules `
     @DataFiles `
+    --paths src `
     whisper_attack.py
 
 $Assets = @(
