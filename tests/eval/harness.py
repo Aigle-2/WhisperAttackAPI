@@ -1,13 +1,17 @@
 """Offline reconciliation eval runner + metrics (ADR-0008).
 
 Runs each dataset item's raw STT through the reconciliation pipeline against a frozen
-vocab snapshot, then asks the VAICOM mock whether the reconciled command exists and
-whether it is the *expected* one. Reports match / wrong-match / not-found / abstain
-rates (overall and per failure-mode tag) plus near-miss recoverability.
+vocab snapshot, then applies the conservative phrase snapper (Axis B, ADR-0011) before
+asking the VAICOM mock whether the resulting command exists and whether it is the
+*expected* one. Reports match / wrong-match / not-found / abstain rates (overall and
+per failure-mode tag) plus near-miss recoverability.
 
-`abstain` is reserved for Axis B phrase-snap (ADR-0006); it stays 0 until snap lands, so
-the metric schema is stable across phases. Pure + deterministic — no I/O beyond reading
-the committed fixtures.
+The pipeline is **reconcile -> snap -> oracle**: the frozen command set IS the snapper's
+phrase index (`PhraseSnapper(load_commands())`), so a high-confidence near-miss the
+per-token step left just shy of an exact command is snapped to that command, while
+mid-confidence inputs land in the `abstain` band (the snapper holds the text and emits a
+near-miss). `abstain` was reserved for this in earlier phases (ADR-0006) and starts being
+populated here. Pure + deterministic — no I/O beyond reading the committed fixtures.
 """
 
 from __future__ import annotations
@@ -19,6 +23,7 @@ from pathlib import Path
 
 from tests.eval.vaicom_mock import VaicomMock, normalize
 from vaivox.domain.reconciliation.pipeline import reconcile
+from vaivox.domain.reconciliation.snapper import PhraseSnapper, SnapDecision
 
 _FIXTURES = Path(__file__).parent / "fixtures"
 
@@ -108,29 +113,45 @@ def _classify(command: str, expected: str, oracle: VaicomMock) -> str:
 
 
 def run_eval() -> EvalMetrics:
-    """Run the full eval over the committed fixtures and return the metrics."""
+    """Run the full eval over the committed fixtures and return the metrics.
+
+    The pipeline is reconcile -> snap -> oracle (ADR-0011): the frozen command set is the
+    snapper's phrase index, so the eval exercises the snapper end to end. A *snapped*
+    command is classified by the oracle exactly like any other; an *abstained* command is
+    counted in the ``abstain`` band (the snapper held the text and emitted a near-miss),
+    distinct from a plain ``not_found``.
+    """
     vocab = load_vocab()
     word_mappings = vocab["word_mappings"]
     fuzzy_words = vocab["fuzzy_words"]
     phonetic_alphabet = vocab["phonetic_alphabet"]
-    oracle = VaicomMock(load_commands())
+    commands = load_commands()
+    oracle = VaicomMock(commands)
+    snapper = PhraseSnapper(commands)
 
     metrics = EvalMetrics()
     per_tag: dict[str, dict[str, int]] = defaultdict(
-        lambda: {MATCH: 0, WRONG_MATCH: 0, NOT_FOUND: 0}
+        lambda: {MATCH: 0, WRONG_MATCH: 0, NOT_FOUND: 0, ABSTAIN: 0}
     )
 
     for item in load_dataset():
         result = reconcile(item.raw_stt, word_mappings, fuzzy_words, phonetic_alphabet)
-        command = result.command_text
+        snap = snapper.snap(result.command_text)
+        command = snap.text
         outcome = _classify(command, item.expected_command, oracle)
+
+        # An abstained, still-not-found utterance is its own band: the snapper saw a
+        # mid-confidence near-miss but conservatively declined to snap (ADR-0011). It is
+        # tracked separately from a plain miss so threshold loosening is observable.
+        if outcome == NOT_FOUND and snap.decision is SnapDecision.ABSTAINED:
+            outcome = ABSTAIN
 
         metrics.total += 1
         setattr(metrics, outcome, getattr(metrics, outcome) + 1)
         for tag in item.tags:
             per_tag[tag][outcome] += 1
 
-        if outcome == NOT_FOUND and item.expected_command in oracle.nearest(
+        if outcome in (NOT_FOUND, ABSTAIN) and item.expected_command in oracle.nearest(
             command, _NEAR_MISS_LIMIT
         ):
             metrics.near_miss_recoverable += 1
