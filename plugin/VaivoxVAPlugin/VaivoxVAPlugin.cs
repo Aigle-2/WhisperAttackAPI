@@ -1,32 +1,37 @@
-﻿using System;
-using System.Collections.Generic;
-using System.IO;
+using System;
 using System.Net;
 using System.Net.Sockets;
 using System.Text;
-using System.Threading;
 using System.Threading.Tasks;
 
-namespace WhisperAttackServerCommand
+namespace VaivoxServerCommand
 {
     public class VA_Plugin
     {
+        // Ports mirror VAIVOX's ProductIdentity (ADR-0002): the app's inbound control
+        // socket is 65432; this plugin's listener (for results) is 65433.
+        private const string Server = "127.0.0.1";
+        private const int ControlPort = 65432;
+        private const int ListenerPort = 65433;
+
         private static bool _isRunning = true;
         private static TcpListener _listener = null;
 
         public static string VA_DisplayName()
         {
-            return "WhisperAttack";
+            return "VAIVOX";
         }
 
         public static string VA_DisplayInfo()
         {
-            return "WhisperAttack Server Command plugin (v1.2.2)";
+            return "VAIVOX Server Command plugin";
         }
 
         public static Guid VA_Id()
         {
-            return new Guid("{1AD02372-145E-4143-BBBE-AC7575595C24}");
+            // Fresh GUID for VAIVOX — distinct from the upstream WhisperAttack plugin
+            // so VoiceAttack treats it as a separate plugin (ADR-0002).
+            return new Guid("{ED0BA443-726F-4A9F-AF05-DB400F39A501}");
         }
 
         public static void VA_StopCommand()
@@ -35,55 +40,48 @@ namespace WhisperAttackServerCommand
 
         public static void VA_Init1(dynamic vaProxy)
         {
-            string server = "127.0.0.1"; // Localhost
-            int port = 65432; // Port of the Python server
-
             try
             {
-                using (TcpClient client = new TcpClient(server, port))
+                using (TcpClient client = new TcpClient(Server, ControlPort))
                 using (NetworkStream stream = client.GetStream())
                 {
-                    vaProxy.WriteToLog("Connected to WhisperAttack server", "blue");
+                    vaProxy.WriteToLog("Connected to VAIVOX server", "blue");
                 }
             }
             catch (Exception ex)
             {
-                vaProxy.WriteToLog($"Failed to connect to WhisperAttack server: {ex.Message}", "red");
+                vaProxy.WriteToLog($"Failed to connect to VAIVOX server: {ex.Message}", "red");
             }
-
 
             StartCommandListener(vaProxy);
         }
 
         public static void VA_Invoke1(dynamic vaProxy)
         {
-            string server = "127.0.0.1";
-            int port = 65432;
-
             string contextinput = vaProxy.Context;
 
             try
             {
-                using (TcpClient client = new TcpClient(server, port))
+                using (TcpClient client = new TcpClient(Server, ControlPort))
                 using (NetworkStream stream = client.GetStream())
                 {
                     switch (contextinput)
                     {
+                        // These VoiceAttack command names match the bundled profile
+                        // ("VAIVOX - VA Profile.vap"); bind your PTT buttons to them.
                         case "Start Whisper Recording":
                             {
-                                string command = "start"; // Command sent to whisper server
-                                byte[] data = Encoding.ASCII.GetBytes(command);
+                                byte[] data = Encoding.ASCII.GetBytes("start");
                                 stream.Write(data, 0, data.Length);
-                                vaProxy.WriteToLog("Start WhisperAttack recording", "grey");
+                                vaProxy.WriteToLog("Start VAIVOX recording", "grey");
                                 break;
                             }
 
                         case "Stop Whisper Recording":
                             {
-                                string command = "stop"; // Command sent to whisper server
-                                byte[] data = Encoding.ASCII.GetBytes(command);
+                                byte[] data = Encoding.ASCII.GetBytes("stop");
                                 stream.Write(data, 0, data.Length);
-                                vaProxy.WriteToLog("Stop WhisperAttack recording", "grey");
+                                vaProxy.WriteToLog("Stop VAIVOX recording", "grey");
                                 break;
                             }
                     }
@@ -91,7 +89,7 @@ namespace WhisperAttackServerCommand
             }
             catch (Exception ex)
             {
-                vaProxy.WriteToLog($"WhisperAttack server command error: {ex.Message}", "red");
+                vaProxy.WriteToLog($"VAIVOX server command error: {ex.Message}", "red");
             }
         }
 
@@ -100,43 +98,37 @@ namespace WhisperAttackServerCommand
             _isRunning = false;
             _listener.Stop();
 
-            string server = "127.0.0.1";
-            int port = 65432;
-
-            using (TcpClient client = new TcpClient(server, port))
+            using (TcpClient client = new TcpClient(Server, ControlPort))
             using (NetworkStream stream = client.GetStream())
             {
-                string command = "shutdown"; // Command sent to whisper server
-                byte[] data = Encoding.ASCII.GetBytes(command);
+                byte[] data = Encoding.ASCII.GetBytes("shutdown");
                 stream.Write(data, 0, data.Length);
             }
         }
 
         private static async Task StartCommandListener(dynamic vaProxy)
         {
-            int port = 65433;
-            
-            vaProxy.WriteToLog($"Starting WhisperAttack listener on {port}", "blue");
-            
+            vaProxy.WriteToLog($"Starting VAIVOX listener on {ListenerPort}", "blue");
+
             try
             {
-                _listener = new TcpListener(IPAddress.Loopback, port);
+                _listener = new TcpListener(IPAddress.Loopback, ListenerPort);
                 _listener.Start();
-                
-                vaProxy.WriteToLog($"WhisperAttack listener started", "blue");
+
+                vaProxy.WriteToLog("VAIVOX listener started", "blue");
 
                 while (_isRunning)
                 {
-                    await HandleWhisperAttackCommand(vaProxy, await _listener.AcceptTcpClientAsync());
+                    await HandleVaivoxCommand(vaProxy, await _listener.AcceptTcpClientAsync());
                 }
             }
             catch (Exception ex)
             {
-                vaProxy.WriteToLog($"Error starting WhisperAttack listener: {ex.Message}", "red");
+                vaProxy.WriteToLog($"Error starting VAIVOX listener: {ex.Message}", "red");
             }
         }
 
-        private static async Task HandleWhisperAttackCommand(dynamic vaProxy, TcpClient client)
+        private static async Task HandleVaivoxCommand(dynamic vaProxy, TcpClient client)
         {
             await Task.Yield();
 
@@ -148,7 +140,7 @@ namespace WhisperAttackServerCommand
                     int bytesRead = await stream.ReadAsync(buffer, 0, buffer.Length);
                     string receivedMessage = Encoding.UTF8.GetString(buffer, 0, bytesRead);
 
-                    vaProxy.WriteToLog($"Received WhisperAttack command: '{receivedMessage}'", "grey");
+                    vaProxy.WriteToLog($"Received VAIVOX command: '{receivedMessage}'", "grey");
 
                     if (vaProxy.Command.Exists(receivedMessage))
                     {
