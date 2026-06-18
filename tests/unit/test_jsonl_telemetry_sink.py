@@ -10,7 +10,7 @@ from __future__ import annotations
 import json
 
 from vaivox.application.ports import TelemetrySink
-from vaivox.domain.telemetry.model import MatchOutcome, ReconciliationOutcome
+from vaivox.domain.telemetry.model import MatchOutcome, ReconciliationOutcome, SnapSummary
 from vaivox.infrastructure.telemetry.jsonl_sink import TELEMETRY_FILE, JsonlTelemetrySink
 
 
@@ -56,6 +56,33 @@ def test_record_serializes_nested_match_outcome(tmp_path) -> None:
 
     record = json.loads((tmp_path / TELEMETRY_FILE).read_text(encoding="utf-8").strip())
     assert record["match"] == {"matched": True, "resolved_command": "Kobuleti tower"}
+
+
+def test_record_serializes_nested_snap_summary(tmp_path) -> None:
+    sink = JsonlTelemetrySink(str(tmp_path))
+    outcome = ReconciliationOutcome(
+        raw_text="texaco request rejon",
+        cleaned_text="texaco request rejon",
+        command_text="texaco request rejon",
+        sent_text="Texaco request rejoin",
+        destination="voiceattack",
+        snap=SnapSummary(
+            decision="snapped",
+            candidate="Texaco request rejoin",
+            score=95.0,
+            near_misses=(),
+        ),
+    )
+
+    sink.record(outcome)
+
+    record = json.loads((tmp_path / TELEMETRY_FILE).read_text(encoding="utf-8").strip())
+    assert record["snap"] == {
+        "decision": "snapped",
+        "candidate": "Texaco request rejoin",
+        "score": 95.0,
+        "near_misses": [],
+    }
 
 
 def test_record_appends_one_line_per_outcome(tmp_path) -> None:

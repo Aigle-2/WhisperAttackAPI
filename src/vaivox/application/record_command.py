@@ -22,7 +22,8 @@ from vaivox.application.ports import (
 )
 from vaivox.domain.reconciliation.model import ReconciliationResult
 from vaivox.domain.reconciliation.pipeline import reconcile
-from vaivox.domain.telemetry.model import ReconciliationOutcome
+from vaivox.domain.reconciliation.snapper import PhraseSnapper, SnapResult
+from vaivox.domain.telemetry.model import ReconciliationOutcome, SnapSummary
 from vaivox.domain.vocabulary.keyterms import PHONETIC_ALPHABET
 
 _LOGGER = logging.getLogger(__name__)
@@ -69,6 +70,7 @@ class StopAndReconcile:
         reporter: StatusReporter,
         clock: Clock,
         telemetry: TelemetrySink,
+        snapper: PhraseSnapper,
     ) -> None:
         """Wire the ports the stop-and-reconcile flow depends on.
 
@@ -81,6 +83,9 @@ class StopAndReconcile:
             reporter: The user-facing status reporter port.
             clock: The clock port (transcription timing).
             telemetry: The telemetry sink port.
+            snapper: The conservative phrase snapper (ADR-0011) applied after
+                reconciliation. With an empty phrase index it is a no-op (every command
+                is sent raw), preserving behaviour when no generated index is present.
         """
         self._recorder = recorder
         self._stt = speech_to_text
@@ -90,6 +95,7 @@ class StopAndReconcile:
         self._reporter = reporter
         self._clock = clock
         self._telemetry = telemetry
+        self._snapper = snapper
 
     def execute(self) -> None:
         """Stop the current recording and route the reconciled command, if any."""
@@ -149,15 +155,24 @@ class StopAndReconcile:
             return None
 
     def _route(self, result: ReconciliationResult) -> None:
-        """Route the reconciled command to the kneeboard or VoiceAttack."""
+        """Route the reconciled command to the kneeboard or VoiceAttack.
+
+        Kneeboard notes (``note ...``) are free text and are never snapped — only the
+        VoiceAttack command path runs through the phrase snapper (ADR-0011), which is a
+        no-op when the phrase index is empty.
+        """
         command = result.command_text
+        snap: SnapResult | None = None
         if command.lower().startswith(_KNEEBOARD_TRIGGER):
             note_text = command[len(_KNEEBOARD_TRIGGER) :].strip()
             self._kneeboard_sink.send(note_text)
             destination, sent_text = "kneeboard", note_text
         else:
-            self._command_sink.send(command)
-            destination, sent_text = "voiceattack", command
+            snap = self._snapper.snap(command)
+            if snap.text != command:
+                _LOGGER.info("Phrase snap: '%s' -> '%s' (%.1f)", command, snap.text, snap.score)
+            self._command_sink.send(snap.text)
+            destination, sent_text = "voiceattack", snap.text
 
         self._telemetry.record(
             ReconciliationOutcome(
@@ -166,5 +181,26 @@ class StopAndReconcile:
                 command_text=result.command_text,
                 sent_text=sent_text,
                 destination=destination,
+                snap=_snap_summary(snap),
             )
         )
+
+
+def _snap_summary(snap: SnapResult | None) -> SnapSummary | None:
+    """Flatten a :class:`SnapResult` into the serializable telemetry summary.
+
+    Args:
+        snap: The snapper's result, or ``None`` for the kneeboard path (not snapped).
+
+    Returns:
+        A :class:`SnapSummary` for telemetry, or ``None`` when the command was not
+        snapped (the kneeboard path), keeping the prior telemetry record shape there.
+    """
+    if snap is None:
+        return None
+    return SnapSummary(
+        decision=str(snap.decision),
+        candidate=snap.candidate,
+        score=snap.score,
+        near_misses=tuple((nm.phrase, nm.score) for nm in snap.near_misses),
+    )

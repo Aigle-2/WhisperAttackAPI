@@ -15,6 +15,7 @@ from vaivox.application.ports import SpeechToTextError, StatusLevel
 from vaivox.application.record_command import StartRecording, StopAndReconcile
 from vaivox.application.shutdown import Shutdown
 from vaivox.domain.reconciliation.model import Transcription
+from vaivox.domain.reconciliation.snapper import PhraseSnapper
 
 FUZZY_WORDS = ["Kobuleti", "Senaki", "Krymsk", "Texaco"]
 
@@ -105,7 +106,7 @@ class FakeTelemetry:
         self.outcomes.append(outcome)
 
 
-def _make_stop(recorder, stt, command_sink=None, kneeboard_sink=None, config=None):
+def _make_stop(recorder, stt, command_sink=None, kneeboard_sink=None, config=None, snapper=None):
     reporter = FakeReporter()
     telemetry = FakeTelemetry()
     use_case = StopAndReconcile(
@@ -117,6 +118,9 @@ def _make_stop(recorder, stt, command_sink=None, kneeboard_sink=None, config=Non
         reporter,
         FakeClock(),
         telemetry,
+        # An empty index makes the snapper a no-op, matching production with no generated
+        # phrase index (behaviour parity). Tests that exercise snapping pass their own.
+        snapper or PhraseSnapper([]),
     )
     return use_case, reporter, telemetry
 
@@ -136,6 +140,64 @@ def test_full_flow_routes_fuzzy_corrected_command_to_voiceattack():
     assert telemetry.outcomes[0].destination == "voiceattack"
     assert telemetry.outcomes[0].sent_text == "Kobuleti tower"
     assert telemetry.outcomes[0].raw_text == "kobuletti tower"
+
+
+def test_phrase_snapper_snaps_near_miss_before_routing():
+    # A reconciled command just shy of a valid phrase is snapped to it (ADR-0011) and
+    # the snap decision is recorded in telemetry.
+    command_sink = FakeCommandSink()
+    snapper = PhraseSnapper(["Texaco request rejoin", "Texaco request fuel"])
+    use_case, _reporter, telemetry = _make_stop(
+        FakeRecorder(),
+        FakeSpeechToText(text="texaco request rejon"),  # near-miss, no fuzzy word fires
+        command_sink=command_sink,
+        config=FakeConfig(fuzzy_words=[]),
+        snapper=snapper,
+    )
+
+    use_case.execute()
+
+    assert command_sink.sent == ["Texaco request rejoin"]
+    outcome = telemetry.outcomes[0]
+    assert outcome.sent_text == "Texaco request rejoin"
+    assert outcome.command_text == "texaco request rejon"  # pre-snap text preserved
+    assert outcome.snap is not None
+    assert outcome.snap.decision == "snapped"
+    assert outcome.snap.candidate == "Texaco request rejoin"
+
+
+def test_empty_index_snapper_is_a_no_op():
+    # With no phrase index (production default) the snapper passes the command through.
+    command_sink = FakeCommandSink()
+    use_case, _reporter, telemetry = _make_stop(
+        FakeRecorder(), FakeSpeechToText(text="kobuletti tower"), command_sink=command_sink
+    )
+
+    use_case.execute()
+
+    assert command_sink.sent == ["Kobuleti tower"]  # only the per-token fuzzy step ran
+    assert telemetry.outcomes[0].snap.decision == "raw"
+
+
+def test_kneeboard_note_is_never_snapped():
+    # Kneeboard notes are free text; the snapper must not touch them. Use a note that is
+    # otherwise close to an index phrase, and no fuzzy words, so any change would be the
+    # snapper's doing.
+    kneeboard = FakeKneeboardSink()
+    snapper = PhraseSnapper(["Texaco request rejoin"])
+    use_case, _reporter, telemetry = _make_stop(
+        FakeRecorder(),
+        FakeSpeechToText(text="note texaco request rejon"),
+        kneeboard_sink=kneeboard,
+        config=FakeConfig(fuzzy_words=[]),
+        snapper=snapper,
+    )
+
+    use_case.execute()
+
+    assert kneeboard.sent == ["texaco request rejon"]  # unsnapped free text, verbatim
+    assert telemetry.outcomes[0].destination == "kneeboard"
+    assert telemetry.outcomes[0].snap is None  # not snapped on the kneeboard path
 
 
 def test_note_prefix_routes_to_kneeboard_with_trigger_stripped():

@@ -22,6 +22,7 @@ from vaivox.application.ports import (
 from vaivox.application.queries import DescribeStatus, DryRunReconcile
 from vaivox.application.record_command import StartRecording, StopAndReconcile
 from vaivox.application.shutdown import Shutdown
+from vaivox.domain.reconciliation.snapper import PhraseSnapper
 from vaivox.infrastructure.api.introspection import IntrospectionServer
 from vaivox.infrastructure.audio.recorder import SoundDeviceRecorder
 from vaivox.infrastructure.config.identity import VAIVOX
@@ -32,6 +33,7 @@ from vaivox.infrastructure.stt.factory import create_stt_backend
 from vaivox.infrastructure.system_clock import SystemClock
 from vaivox.infrastructure.telemetry.jsonl_sink import JsonlTelemetrySink
 from vaivox.infrastructure.telemetry.null_sink import NullTelemetrySink
+from vaivox.infrastructure.vocabulary.phrase_index import load_phrase_index
 from vaivox.infrastructure.voiceattack.sink import VoiceAttackCommandSink
 
 _LOGGER = logging.getLogger(__name__)
@@ -79,6 +81,7 @@ def build(
     kneeboard_sink = KneeboardSink(config.get_text_line_length, reporter)
     telemetry = build_telemetry_sink(config)
     clock = SystemClock()
+    snapper = build_phrase_snapper(config)
 
     start_recording = StartRecording(recorder, reporter)
     stop_and_reconcile = StopAndReconcile(
@@ -90,6 +93,7 @@ def build(
         reporter,
         clock,
         telemetry,
+        snapper,
     )
     shutdown = Shutdown(request_shutdown, reporter)
 
@@ -140,6 +144,30 @@ def build_telemetry_sink(config: VaivoxConfiguration) -> TelemetrySink:
     if config.get_bool_setting("telemetry_enabled", True):
         return JsonlTelemetrySink(config.app_data_location)
     return NullTelemetrySink()
+
+
+def build_phrase_snapper(config: VaivoxConfiguration) -> PhraseSnapper:
+    """Build the conservative phrase snapper from the generated index (ADR-0011).
+
+    The phrase index is read once here and frozen for the session (ADR-0009 does not
+    hot-swap it). It is **not** shipped (ADR-0005): until the generator writes
+    ``phrase_index.txt`` into the per-user data directory the loader returns an empty
+    list, which makes the snapper a no-op (every command is sent raw) so behaviour
+    parity is preserved on a fresh install.
+
+    Args:
+        config: The effective application configuration (for the data-dir location).
+
+    Returns:
+        A :class:`~vaivox.domain.reconciliation.snapper.PhraseSnapper` over the generated
+        phrase index, with the conservative default thresholds.
+    """
+    phrases = load_phrase_index(config.app_data_location)
+    if phrases:
+        _LOGGER.info("Loaded %d phrase-index entries for the snapper.", len(phrases))
+    else:
+        _LOGGER.debug("No phrase index present; the snapper is a no-op.")
+    return PhraseSnapper(phrases)
 
 
 def load_speech_to_text(

@@ -29,6 +29,30 @@ class MatchOutcome:
 
 
 @dataclass(frozen=True)
+class SnapSummary:
+    """The phrase-snapper's decision for one utterance (Axis B, ADR-0011).
+
+    A flat, serializable summary of the snap step recorded in the telemetry outcome.
+    It is deliberately decoupled from the reconciliation
+    :class:`~vaivox.domain.reconciliation.snapper.SnapResult` so the telemetry record
+    schema stays stable as the snapper evolves.
+
+    Attributes:
+        decision: Which band the candidate fell into (``"snapped"`` / ``"abstained"``
+            / ``"raw"``).
+        candidate: The best-scoring phrase considered, or ``None`` for an empty index.
+        score: The best candidate's score (0-100), or ``0.0`` for an empty index.
+        near_misses: The abstain-band near-miss candidates as ``(phrase, score)``
+            pairs; empty unless the snapper abstained.
+    """
+
+    decision: str
+    candidate: str | None = None
+    score: float = 0.0
+    near_misses: tuple[tuple[str, float], ...] = ()
+
+
+@dataclass(frozen=True)
 class ReconciliationOutcome:
     """The full provenance of one utterance, from raw transcript to dispatch.
 
@@ -40,6 +64,8 @@ class ReconciliationOutcome:
         destination: Where the command was routed (``"voiceattack"`` or
             ``"kneeboard"``).
         match: The downstream match outcome, or ``None`` when unknown.
+        snap: The phrase-snapper's decision (ADR-0011), or ``None`` when the snapper is
+            not wired (preserving the prior record shape).
     """
 
     raw_text: str
@@ -48,3 +74,4 @@ class ReconciliationOutcome:
     sent_text: str
     destination: str
     match: MatchOutcome | None = None
+    snap: SnapSummary | None = None
