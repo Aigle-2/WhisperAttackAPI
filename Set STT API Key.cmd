@@ -21,6 +21,6 @@ if "%env_name%"=="" (
   exit /b 1
 )
 
-powershell -NoProfile -ExecutionPolicy Bypass -Command "$envName = '%env_name%'; $key = Read-Host ('Paste API key for ' + $envName) -AsSecureString; $bstr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($key); try { $plain = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($bstr); if ([string]::IsNullOrWhiteSpace($plain)) { throw 'No API key entered.' }; [Environment]::SetEnvironmentVariable($envName, $plain, 'User'); Write-Host ''; Write-Host ('Done. Stored ' + $envName + '. Close and reopen WhisperAttackAPI if it was already running.') } finally { if ($bstr -ne [IntPtr]::Zero) { [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr) } }"
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$envName = '%env_name%'; $key = Read-Host ('Paste API key for ' + $envName) -AsSecureString; $bstr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($key); try { $plain = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($bstr); if ([string]::IsNullOrWhiteSpace($plain)) { throw 'No API key entered.' }; [Environment]::SetEnvironmentVariable($envName, $plain, 'User'); Write-Host ''; Write-Host ('Done. Stored ' + $envName + '. Close and reopen VAIVOX if it was already running.') } finally { if ($bstr -ne [IntPtr]::Zero) { [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr) } }"
 echo.
 pause

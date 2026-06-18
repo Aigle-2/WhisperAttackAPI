@@ -1,4 +1,4 @@
-# Building a VAIVOX / WhisperAttack executable
+# Building the VAIVOX executable
 
 How to build a standalone application executable (exe) that runs without a
 system-wide Python install. For the day-to-day contributor workflow (quality gates,
@@ -18,7 +18,7 @@ covers running locally and producing the exe.
 ## Logging
 
 Because the executable does not run as a console application, logging goes to
-`C:\Users\<username>\AppData\Local\WhisperAttack\WhisperAttack.log`. The log file is
+`C:\Users\<username>\AppData\Local\VAIVOX\VAIVOX.log`. The log file is
 overwritten every time the server starts.
 
 ## Running locally (no build)
@@ -54,8 +54,8 @@ build_api_only.cmd
 This creates:
 
 ```console
-dist\release\WhisperAttackAPI v1.2.2-api.1\WhisperAttackAPI.exe
-dist\release\WhisperAttackAPI v1.2.2-api.1.zip
+dist\release\VAIVOX v1.2.2-api.1\VAIVOX.exe
+dist\release\VAIVOX v1.2.2-api.1.zip
 ```
 
 For the larger offline-capable build with local `faster_whisper` support, double-click:
@@ -74,7 +74,7 @@ API-key `.cmd` helpers, `README_FIRST.txt`) and verifies them, then zips the rel
 
 ```console
 uv sync --frozen --extra app --group build
-uv run pyinstaller --onedir --noconsole --paths src --name WhisperAttackAPI src\vaivox\main.py
+uv run pyinstaller --onedir --noconsole --paths src --name VAIVOX src\vaivox\main.py
 ```
 
 `--noconsole` hides the console window; a VAIVOX icon appears in the Windows system

@@ -15,7 +15,7 @@ Set-Location $ProjectRoot
 # The "api" profile installs the GUI/audio runtime only (uv extra `app`); "full" adds
 # the local faster-whisper STT stack (uv extra `full`). Dependencies and the Python
 # version come from pyproject.toml + uv.lock + .python-version — no requirements*.txt.
-$AppName = "WhisperAttackAPI"
+$AppName = "VAIVOX"
 $SyncExtra = "app"
 $ExcludeModules = @(
     "--exclude-module", "torch",
@@ -28,7 +28,7 @@ $DataFiles = @(
 )
 
 if ($Profile -eq "full") {
-    $AppName = "WhisperAttackAPI-Full"
+    $AppName = "VAIVOX-Full"
     $SyncExtra = "full"
     $ExcludeModules = @()
 }

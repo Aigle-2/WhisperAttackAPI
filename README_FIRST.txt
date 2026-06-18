@@ -1,15 +1,14 @@
-WhisperAttackAPI
-================
+VAIVOX
+======
 
 Quick start
 -----------
 
 1. Double-click "Set STT API Key.cmd" once and paste your provider API key.
-2. Double-click "WhisperAttackAPI.exe".
+2. Double-click "VAIVOX.exe".
 3. Keep the "_internal" folder next to the exe.
 
-VoiceAttack / VAICOM setup stays the same as WhisperAttack when it connects to
-127.0.0.1:65432.
+VoiceAttack / VAICOM connects to the VAIVOX server on 127.0.0.1:65432.
 
 Configuration files
 -------------------
@@ -25,4 +24,4 @@ Logs
 
 Logs are written to:
 
-%LOCALAPPDATA%\WhisperAttack\WhisperAttack.log
+%LOCALAPPDATA%\VAIVOX\VAIVOX.log
