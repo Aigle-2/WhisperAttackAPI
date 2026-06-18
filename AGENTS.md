@@ -40,8 +40,20 @@ but never anything that does I/O (sockets, files, mic, network, UI).
   (`vaivox` console script). An STT **contract test** runs against every adapter and a
   minimal **introspection API** (status + `POST /reconcile/dry-run`, off by default,
   localhost) ships per ADR-0010.
-- **Next — Phase 4:** identity & rebrand (`ProductIdentity`, VAIVOX naming, new GUID,
-  `%LOCALAPPDATA%\VAIVOX`, ports); stop shipping VAICOM-derived data (ADR-0005).
+- **Phase 4** ✅ Identity & rebrand. `ProductIdentity`
+  (`infrastructure/config/identity.py`) is the single source of name/GUID/data-dir/log/
+  ports/titles (ADR-0002/0003); `main`, the UI, composition, and settings resolve
+  through it. New-tree classes renamed off the upstream brand (`VaivoxConfiguration`,
+  `VaivoxApp`, `VaivoxWordMappings`); build artifact, assets, plugin, and docs are
+  VAIVOX. The C# plugin moved to `plugin/VaivoxVAPlugin/` with a fresh GUID. VAICOM-
+  derived data is no longer shipped (ADR-0005): the loader reads a locally-generated
+  file from `%LOCALAPPDATA%\VAIVOX` and falls back to a generic non-VAICOM seed.
+  *Deferred follow-ups:* full ADR-0005 VAICOM auto-discovery + background generation +
+  UI "Refresh" control; and the C# `dotnet` build / `.vap` re-point (verified by hand,
+  not in CI).
+- **Next — Phase 5:** the reconciliation features on clean seams — governance
+  (ADR-0004), telemetry return-channel (ADR-0006), phrase-snap (Axis B), the eval
+  harness (ADR-0008), and the enriched agent API/MCP (ADR-0010).
 
 During the migration the legacy top-level modules (`whisper_attack.py`,
 `whisper_server.py`, `configuration.py`, `stt_backends/`, …) are thin re-export/launcher

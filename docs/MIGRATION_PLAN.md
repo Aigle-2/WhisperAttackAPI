@@ -103,13 +103,20 @@ The legacy top-level modules are thin re-export/launcher shims that delegate int
 the use-case integration tests through fakes); contract + integration tests pass; all
 gates green.
 
-### Phase 4 — Identity & rebrand
-Introduce `ProductIdentity` (VAIVOX, new GUID, `%LOCALAPPDATA%\VAIVOX`, ports,
-titles). Rebrand the C# plugin + bundled `.vap`. README courtesy note. Stop
-shipping VAICOM-derived data; add auto-discovery + background generation + generic
-seed (ADR-0005).
-**Exit:** no `WhisperAttack`/upstream-GUID/old-port references remain; fresh install
-works out-of-the-box via the seed and self-generates VAICOM vocabulary.
+### Phase 4 — Identity & rebrand ✅ (core)
+Introduced `ProductIdentity` (`infrastructure/config/identity.py`: VAIVOX, fresh GUID,
+`%LOCALAPPDATA%\VAIVOX`, log, ports, titles) and routed `main`/UI/composition/settings
+through it. Renamed the new-tree classes off the upstream brand, rebranded the build
+artifact + release assets + docs (README courtesy/attribution note added), and moved the
+C# plugin to `plugin/VaivoxVAPlugin/` with a fresh GUID. Stopped shipping
+VAICOM-derived data (ADR-0005): the loader reads a locally-generated file from
+`%LOCALAPPDATA%\VAIVOX` and falls back to a generic non-VAICOM seed so a fresh install
+works out-of-the-box.
+**Exit:** ✅ no `WhisperAttack` product-identity / upstream-GUID references remain in the
+new tree (only attribution + screenshot filenames); seed works out-of-the-box; gates
+green. **Deferred:** full ADR-0005 auto-discovery + background generation + UI "Refresh
+VAICOM vocabulary"; the C# `dotnet` build + bundled `.vap` re-point (binary; done by hand
+in VoiceAttack, not verifiable in CI).
 
 ### Phase 5 — Reconciliation features (on clean seams)
 - **A — Governance** (ADR-0004): JSONL vocab + usage sidecar + `VocabularyGovernor`

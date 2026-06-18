@@ -1,4 +1,4 @@
-# WhisperAttackAPI - STT Backends for VoiceAttack
+# VAIVOX - STT Backends for VoiceAttack
 
 This repository provides a single-server approach for using modern speech-to-text (STT) backends with VoiceAttack, replacing Windows Speech Recognition with accurate push-to-talk transcription.
 
@@ -6,7 +6,14 @@ This fork keeps the WhisperAttack workflow but adds a provider-agnostic STT back
 
 This is a fork for further integration of **KneeboardWhisper** by the amazing creator [@BojoteX](https://github.com/BojoteX). A special thank you goes to [@hradec](https://github.com/hradec), whose original script used Google Voice Recognition, [@SeaTechNerd83](https://github.com/SeaTechNerd83) for helping combine the two approaches and creating a VA plugin and finally [@sleighzy](https://github.com/sleighzy) for VAICOM implementation and the lengthy list of bug fixes and enchancements that would fill this page
 
-In short, SeaTechNerd83 and I combined the two scripts to run voice commands through Whisper using BojoteX's code and then pushed it into VoiceAttack using hradec's code. To speed this up, I unified the codebase into one file and made it run a server to send commands to VoiceAttack. WhisperAttack will run on any Nvidia GPU with 6GB or more of VRAM and will run along with DCS (performance tuning may be required for lower VRAM cards) although absolute minimum spec GPU has not yet been confirmed, RTX 2060 6gb and GTX 1070 8gb have been confirmed working stutter free alongside DCS in VR.
+In short, SeaTechNerd83 and I combined the two scripts to run voice commands through Whisper using BojoteX's code and then pushed it into VoiceAttack using hradec's code. To speed this up, I unified the codebase into one file and made it run a server to send commands to VoiceAttack. VAIVOX will run on any Nvidia GPU with 6GB or more of VRAM and will run along with DCS (performance tuning may be required for lower VRAM cards) although absolute minimum spec GPU has not yet been confirmed, RTX 2060 6gb and GTX 1070 8gb have been confirmed working stutter free alongside DCS in VR.
+
+> **VAIVOX** is an independent companion project for the DCS voice ecosystem. It is **not
+> affiliated with, or endorsed by, VAICOM Community** — it simply works alongside it.
+> VAICOM(PRO)-Community is the community-maintained, open-source successor to VAICOM PRO
+> ([VAICOMPRO-Community on GitHub](https://github.com/Hollywood-VAICOM/VAICOMPRO-Community)).
+> VAIVOX is a divergence of [WhisperAttack](https://github.com/BojoteX/KneeboardWhisper) /
+> KneeboardWhisper; see the credits above.
 
 ---
 
@@ -60,59 +67,62 @@ Instructions for integrating with VAICOM can be located in the [VAICOM INTEGRATI
 
 These instructions are for normal users. You do not need Python, Git, Visual Studio, CUDA, or any developer tooling when using the release ZIP.
 
-1. Download the latest `WhisperAttackAPI` release ZIP from GitHub Releases.
+1. Download the latest `VAIVOX` release ZIP from GitHub Releases.
 1. Extract the ZIP anywhere on your computer, for example:
 
 ```console
-C:\Program Files\WhisperAttackAPI
+C:\Program Files\VAIVOX
 ```
 
 or:
 
 ```console
-C:\Users\yourname\Desktop\WhisperAttackAPI
+C:\Users\yourname\Desktop\VAIVOX
 ```
 
 1. Open the extracted folder.
 1. Double-click `Set STT API Key.cmd` once and paste your provider API key.
-1. Double-click `WhisperAttackAPI.exe`.
-1. Create a shortcut to `WhisperAttackAPI.exe` if desired.
+1. Double-click `VAIVOX.exe`.
+1. Create a shortcut to `VAIVOX.exe` if desired.
 
 Keep the folder structure intact. Do not move only the `.exe` file elsewhere; it must stay beside `_internal`, `settings.cfg`, `fuzzy_words.txt`, `word_mappings.txt`, and the icon files.
 
 The release folder is expected to look like this:
 
 ```console
-WhisperAttackAPI v1.2.2-api.1\
+VAIVOX v1.2.2-api.1\
   _internal\
-  WhisperAttackAPI.exe
+  VAIVOX.exe
   settings.cfg
   fuzzy_words.txt
   word_mappings.txt
-  whisper_attack_icon.png
+  vaivox_icon.png
   add_icon.png
   Set STT API Key.cmd
   Set ElevenLabs API Key.cmd
   README_FIRST.txt
 ```
 
-VoiceAttack and VAICOM setup stays the same as WhisperAttack when the VoiceAttack plugin connects to `127.0.0.1:65432`.
+The VoiceAttack plugin connects to the VAIVOX server on `127.0.0.1:65432`. Because VAIVOX
+ships a freshly-GUID'd plugin (separate from upstream WhisperAttack), re-point each
+VoiceAttack command's plugin function to the **VAIVOX** plugin — see
+[plugin/VaivoxVAPlugin/README.md](plugin/VaivoxVAPlugin/README.md).
 
 ---
 
 ## Configuration
 
-The default configuration files are stored beside the WhisperAttack application. Custom configuration can be kept in
-files of the same name in the `C:\Users\username\AppData\Local\WhisperAttack` directory. These custom files can be created
+The default configuration files are stored beside the VAIVOX application. Custom configuration can be kept in
+files of the same name in the `C:\Users\username\AppData\Local\VAIVOX` directory. These custom files can be created
 if they do not exist and can be used to override (or add to for word mappings) the default configuration.
 
-Keeping custom configuration at that location means it will not be overwritten when installing later versions of WhisperAttack.
+Keeping custom configuration at that location means it will not be overwritten when installing later versions of VAIVOX.
 
 See below for the list of configuration files.
 
 ### settings.cfg
 
-The `settings.cfg` file contains configuration for WhisperAttack.
+The `settings.cfg` file contains configuration for VAIVOX.
 
 The default values should cover most cases but can be changed:
 
@@ -143,7 +153,7 @@ The default values should cover most cases but can be changed:
 - `whisper_model` - The Whisper model to use, `small.en` by default. See the table at the bottom of the README file for options.
   - A smaller size can be specified for reducing the amount of VRAM used, e.g. `base.en` or `tiny.en`
 - `whisper_device` - Which device to run the Whisper transcription process on, `GPU` (default) or `CPU`
-- `theme` - To display the WhisperAttack UI in light or dark mode. Valid values: 
+- `theme` - To display the VAIVOX UI in light or dark mode. Valid values: 
   - `default` - this will use the current theme you have set for Windows
   - `dark` - dark mode
   - `light` - light mode
@@ -166,27 +176,36 @@ setx OPENAI_API_KEY "your-api-key"
 setx DEEPGRAM_API_KEY "your-api-key"
 ```
 
-Restart WhisperAttackAPI after setting the environment variable.
+Restart VAIVOX after setting the environment variable.
 
 ### VAICOM keyterms
 
-The generated VAICOM vocabulary lives in `stt_backends/vaicom_keyterms.txt`. It was built from the local VAICOMPRO install at:
+VAIVOX does **not** ship VAICOM-derived vocabulary — redistributing data derived from a
+VAICOM install is a licensing grey zone (ADR-0005). Out of the box VAIVOX runs on a
+generic, non-VAICOM seed (the phonetic alphabet plus widely-documented DCS callsigns and
+ATC vocabulary), so recognition is biased toward DCS terms immediately.
+
+To bias recognition toward *your* actual VAICOM install, generate the vocabulary locally.
+The generator writes `vaicom_keyterms.txt` into `%LOCALAPPDATA%\VAIVOX`, and the `vaicom`
+keyterm source loads it from there (or from a path set in the `VAIVOX_VAICOM_KEYTERMS`
+environment variable):
 
 ```console
-E:\Jeux\steamapps\common\VoiceAttack 2\Apps\VAICOMPRO
+python tools\generate_vaicom_keyterms.py --vaicom-root "E:\...\VoiceAttack 2\Apps\VAICOMPRO" --saved-games "C:\Users\you\Saved Games\DCS"
 ```
 
-The checked-in list is a curated provider shortlist capped at 850 terms. It is post-processed into unique words: composed phrases, numeric tokens, low-value UI words, and code-only terms such as ICAO identifiers are removed. Technical acronyms such as `IFF`, `TV`, and `TACAN` are placed first, high-value command words such as `boresight`, `clearance`, and `wheelchocks` follow, then callsigns, common DCS terms, and selected proper names. It is generated from VAICOM command phrases, recipients, callsigns, ATC/airfield aliases, RIO/WSO/George commands, and current F10/mission menu terms where available.
+The generated list is post-processed into unique words: composed phrases, numeric tokens,
+low-value UI words, and code-only terms such as ICAO identifiers are removed. Technical
+acronyms such as `IFF`, `TV`, and `TACAN` are placed first, high-value command words such
+as `boresight`, `clearance`, and `wheelchocks` follow, then callsigns, common DCS terms,
+and selected proper names. Use `--max-terms` to raise or lower the shortlist size.
 
-Spelled aviation codes are normalized after transcription, so the keyterm list does not need to include every code. For example, `U L M B`, `U-L-M-B`, or `E.S.N.J` are compacted to `ULMB` and `ESNJ` before text is sent to VoiceAttack.
+Spelled aviation codes are normalized after transcription, so the keyterm list does not
+need to include every code. For example, `U L M B`, `U-L-M-B`, or `E.S.N.J` are compacted
+to `ULMB` and `ESNJ` before text is sent to VoiceAttack.
 
-To refresh it from a local VAICOM install:
-
-```console
-python tools\generate_vaicom_keyterms.py --vaicom-root "E:\Jeux\steamapps\common\VoiceAttack 2\Apps\VAICOMPRO" --saved-games "C:\Users\esteb\Saved Games\DCS"
-```
-
-Use `--max-terms` to raise or lower the generated shortlist size.
+> Automatic VAICOM-install discovery + background generation + an in-app "Refresh VAICOM
+> vocabulary" control are planned (ADR-0005); for now run the generator above once.
 
 ### Optional STT providers
 
@@ -196,19 +215,19 @@ ElevenLabs remains the default because it has worked well for DCS/VAICOM push-to
 stt_backend=openai
 ```
 
-OpenAI uses the official transcription endpoint with `gpt-4o-transcribe` by default. WhisperAttackAPI sends the DCS/VAICOM prompt and a budgeted set of generated keyterms as transcription context. See the official [OpenAI Speech-to-Text guide](https://developers.openai.com/api/docs/guides/speech-to-text) and [transcription API reference](https://developers.openai.com/api/reference/resources/audio/subresources/transcriptions/methods/create/).
+OpenAI uses the official transcription endpoint with `gpt-4o-transcribe` by default. VAIVOX sends the DCS/VAICOM prompt and a budgeted set of generated keyterms as transcription context. See the official [OpenAI Speech-to-Text guide](https://developers.openai.com/api/docs/guides/speech-to-text) and [transcription API reference](https://developers.openai.com/api/reference/resources/audio/subresources/transcriptions/methods/create/).
 
 ```console
 stt_backend=deepgram
 ```
 
-Deepgram uses prerecorded transcription with `nova-3` by default. WhisperAttackAPI sends a budgeted set of generated DCS/VAICOM keyterms as Deepgram `keyterm` query parameters. See the official [Deepgram prerecorded audio guide](https://developers.deepgram.com/docs/pre-recorded-audio), [Nova-3 model overview](https://developers.deepgram.com/docs/models-languages-overview), and [Keyterm Prompting docs](https://developers.deepgram.com/docs/keyterm).
+Deepgram uses prerecorded transcription with `nova-3` by default. VAIVOX sends a budgeted set of generated DCS/VAICOM keyterms as Deepgram `keyterm` query parameters. See the official [Deepgram prerecorded audio guide](https://developers.deepgram.com/docs/pre-recorded-audio), [Nova-3 model overview](https://developers.deepgram.com/docs/models-languages-overview), and [Keyterm Prompting docs](https://developers.deepgram.com/docs/keyterm).
 
 ### ElevenLabs cost estimate
 
 Pricing can change, so check the official [ElevenLabs API pricing page](https://elevenlabs.io/pricing/api) before publishing guidance to users. The [ElevenLabs Speech-to-Text docs](https://elevenlabs.io/docs/overview/capabilities/speech-to-text) describe Scribe v2, language support, and keyterm prompting. The estimate below was checked on 2026-06-18.
 
-WhisperAttackAPI currently uses `scribe_v2` in batch Speech-to-Text mode, not `Scribe v2 Realtime`. The default configuration sends DCS/VAICOM keyterms, so the estimate includes keyterm prompting.
+VAIVOX currently uses `scribe_v2` in batch Speech-to-Text mode, not `Scribe v2 Realtime`. The default configuration sends DCS/VAICOM keyterms, so the estimate includes keyterm prompting.
 
 Assumptions:
 
@@ -224,7 +243,7 @@ With `$5`:
 $5 / $0.27 = 18.5 hours of transcribed audio
 ```
 
-This is not the same as 18.5 hours of gameplay. WhisperAttackAPI only sends audio while push-to-talk is recording.
+This is not the same as 18.5 hours of gameplay. VAIVOX only sends audio while push-to-talk is recording.
 
 | Usage style | Transcribed audio per gameplay hour | Estimated cost per gameplay hour | $5 covers about |
 | --- | ---: | ---: | ---: |
@@ -257,18 +276,18 @@ build_api_only.cmd
 The executable is created at:
 
 ```console
-dist\release\WhisperAttackAPI v1.2.2-api.1\WhisperAttackAPI.exe
+dist\release\VAIVOX v1.2.2-api.1\VAIVOX.exe
 ```
 
 The distributable ZIP is created beside it:
 
 ```console
-dist\release\WhisperAttackAPI v1.2.2-api.1.zip
+dist\release\VAIVOX v1.2.2-api.1.zip
 ```
 
 Any intermediate PyInstaller output is kept under `build`; only `dist\release` is meant to be published.
 
-The release folder follows the original WhisperAttack layout: the exe, `_internal`, `settings.cfg`, `fuzzy_words.txt`, `word_mappings.txt`, icons, and a small API-key helper are all at the top level.
+The release folder follows the same flat layout: the exe, `_internal`, `settings.cfg`, `fuzzy_words.txt`, `word_mappings.txt`, icons, and a small API-key helper are all at the top level.
 
 To build the larger offline-capable executable that includes the local `faster_whisper` backend, double-click:
 
@@ -298,17 +317,17 @@ gulf;gold=Golf
 inter=Inter
 ```
 
-WhisperAttack needs to be restarted after making changes to this file. New word mappings can be added via the configuration screen and do not require a restart. When adding new word mappings they will be created in your custom configuration file, `C:\Users\username\AppData\Local\WhisperAttack\word_mappings.txt`
+VAIVOX needs to be restarted after making changes to this file. New word mappings can be added via the configuration screen and do not require a restart. When adding new word mappings they will be created in your custom configuration file, `C:\Users\username\AppData\Local\VAIVOX\word_mappings.txt`
 
 ---
 
 ## Running the Whisper Server
 
-Double click the `WhisperAttackAPI.exe` file or shortcut. This will open an application window and start the server.
+Double click the `VAIVOX.exe` file or shortcut. This will open an application window and start the server.
 
-The application window will display startup logging information, including the effective STT keyterm context, the raw text transcribed from the speech, and the final cleaned up command text that was sent to VoiceAttack or DCS. The window can be closed, and then shown again from the menu in the WhisperAttack icon in the Windows system tray. WhisperAttack will continue running even when the window is closed.
+The application window will display startup logging information, including the effective STT keyterm context, the raw text transcribed from the speech, and the final cleaned up command text that was sent to VoiceAttack or DCS. The window can be closed, and then shown again from the menu in the VAIVOX icon in the Windows system tray. VAIVOX will continue running even when the window is closed.
 
-WhisperAttack will have completed loading once the "Server started and listening" message is displayed.
+VAIVOX will have completed loading once the "Server started and listening" message is displayed.
 
 ```
 Loaded STT keyterm context:
@@ -322,15 +341,15 @@ Server started and listening on 127.0.0.1:65432...
 
 ![whisperattack_voiceattack](./screenshots/WhisperAttack%20UI%20and%20VoiceAttack.png)
 
-A WhisperAttack icon will be placed in your Windows system tray. Right-clicking this will give options to show the WhisperAttack window, or to exit the application.
+A VAIVOX icon will be placed in your Windows system tray. Right-clicking this will give options to show the VAIVOX window, or to exit the application.
 
 ![whisperattack_systemtrayicon](./screenshots/WhisperAttack%20system%20tray.png)
 
-Closing VoiceAttack will also stop and close WhisperAttack.
+Closing VoiceAttack will also stop and close VAIVOX.
 
 **NOTE:** There may be a slow startup time for the Whisper Model to download. This process only needs to take place once (unless you change the Whisper Model to be used)
 
-The Whisper server will output logs to the `C:\Users\username\AppData\Local\WhisperAttack\WhisperAttack.log` file.
+The Whisper server will output logs to the `C:\Users\username\AppData\Local\VAIVOX\VAIVOX.log` file.
 
 ---
 
@@ -352,7 +371,7 @@ Go to **Options → General → Enable Plugin Support**.
 
 ### 3. Place Plugin in VoiceAttack Apps folder
 
-After extracting the .zip file, Locate the `WhisperAttackServerCommand` folder and copy the entire folder
+Build the VAIVOX plugin (see [plugin/VaivoxVAPlugin/README.md](plugin/VaivoxVAPlugin/README.md)), then locate the `VAIVOX` plugin folder and copy the entire folder
 
 ![image](https://github.com/user-attachments/assets/dcd75f43-b957-4551-86bf-650468586834)
 
@@ -360,7 +379,7 @@ Locate the VoiceAttack Apps Folder
 
 ![image](https://github.com/user-attachments/assets/413de21d-e7a8-4086-ad9f-c97354716ab3)
 
-Paste the entire `WhisperAttackServerCommand` folder into the Apps folder
+Paste the entire `VAIVOX` folder into the Apps folder
 
 ![image](https://github.com/user-attachments/assets/fd856417-34b7-4f39-b3a9-bf4ea0e79871)
 
@@ -377,7 +396,7 @@ In VoiceAttack, go to **Edit Profile**.
 
 - **When this command executes:**
   - Go to **Other → Advancced → Execute an External Plugin Function**.
-  - **Plugin**: Point it to 'WASC V0.1beta'
+  - **Plugin**: Point it to the 'VAIVOX' plugin
   - **Plugin Context:**
 
 ```
@@ -403,7 +422,7 @@ Assign the same joystick button but check **"Shortcut is invoked only when relea
 ---
 ## Adding new word mappings
 
-Word mappings can be added to WhisperAttack so that when these words are found within transcribed sentences they will be replaced with the replacement word you provide. This can aid with replacing words that are consistently transcribed incorrectly into the word you actually want.
+Word mappings can be added to VAIVOX so that when these words are found within transcribed sentences they will be replaced with the replacement word you provide. This can aid with replacing words that are consistently transcribed incorrectly into the word you actually want.
 
 Click the Add word mapping button to open this configuration screen. Multiple aliases can be entered, separated by semicolons, for a single replacement.
 
@@ -442,7 +461,7 @@ For some GPUs which do not support certain compute types, i.e. do not have tenso
 WARNING - GPU does not have tensor cores, major=6, minor=1
 ```
 
-WhisperAttack can detect this and will fallback on supported values for cuda cores.
+VAIVOX can detect this and will fallback on supported values for cuda cores.
 
 If however the below error message is displayed then the `settings.cfg` file can be updated.
 
@@ -460,14 +479,14 @@ whisper_core_type=standard
 
 ## Performance (AI Model)
 
-If DCS is GPU constrained, use an API backend such as ElevenLabs so transcription does not consume VRAM. This is the default in WhisperAttackAPI:
+If DCS is GPU constrained, use an API backend such as ElevenLabs so transcription does not consume VRAM. This is the default in VAIVOX:
 
 ```console
 stt_backend=elevenlabs
 elevenlabs_model=scribe_v2
 ```
 
-If you use the local `faster_whisper` backend and WhisperAttack is causing significant studders, it is likely that the current model is overloading your VRAM. In that case, reduce the local Whisper model size:
+If you use the local `faster_whisper` backend and VAIVOX is causing significant studders, it is likely that the current model is overloading your VRAM. In that case, reduce the local Whisper model size:
 
 ```console
 stt_backend=faster_whisper
