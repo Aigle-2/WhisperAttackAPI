@@ -116,7 +116,9 @@ works out-of-the-box.
 new tree (only attribution + screenshot filenames); seed works out-of-the-box; gates
 green. **Deferred:** full ADR-0005 auto-discovery + background generation + UI "Refresh
 VAICOM vocabulary"; the C# `dotnet` build + bundled `.vap` re-point (binary; done by hand
-in VoiceAttack, not verifiable in CI).
+in VoiceAttack, not verifiable in CI). The VAICOM auto-discovery + keyterm/phrase-index
+generator now exist (see Phase 5); **background** generation on first run + the UI
+"Refresh" control remain.
 
 ### Phase 5 — Reconciliation features (on clean seams) 🚧 (in progress)
 - **A — Governance** (ADR-0004) ✅ core: `domain/vocabulary/` model + `VocabularyGovernor`
@@ -133,8 +135,10 @@ in VoiceAttack, not verifiable in CI).
 - **B — Phrase snap** (ADR-0011) ✅: conservative three-band `PhraseSnapper` with abstain
   (same scorer as the near-miss top-N), live-wired into `StopAndReconcile` + recorded in
   telemetry (no-op until a phrase index exists). The eval recovers every near-miss with
-  `wrong_match == 0` held. *Deferred:* the VAICOM phrase-index **generator** (needs a real
-  install; untestable in CI) and recipient segmentation.
+  `wrong_match == 0` held. The keyterm + phrase-index **generator**
+  (`tools/generate_vaicom_keyterms.py`, ADR-0005) auto-discovers a VAICOM install and emits
+  both files to `%LOCALAPPDATA%\VAIVOX` (unit-tested on synthetic fixtures; end-to-end
+  needs a real install). *Deferred:* recipient segmentation; thresholds-in-settings.
 - **Agent API + skills** (ADR-0010) — pending: enrich the introspection API
   (telemetry / vocab / metrics endpoints + MCP adapter) and ship the agent skill /
   prompts.

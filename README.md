@@ -186,13 +186,21 @@ generic, non-VAICOM seed (the phonetic alphabet plus widely-documented DCS calls
 ATC vocabulary), so recognition is biased toward DCS terms immediately.
 
 To bias recognition toward *your* actual VAICOM install, generate the vocabulary locally.
-The generator writes `vaicom_keyterms.txt` into `%LOCALAPPDATA%\VAIVOX`, and the `vaicom`
-keyterm source loads it from there (or from a path set in the `VAIVOX_VAICOM_KEYTERMS`
-environment variable):
+The generator **auto-discovers** the VAICOM install (it checks `VAICOMPRO_DIR` and the
+common VoiceAttack `Apps` locations under Program Files / Steam) and writes two files into
+`%LOCALAPPDATA%\VAIVOX`:
+
+- `vaicom_keyterms.txt` — STT keyterms (the `vaicom` keyterm source loads it; override the
+  path with `VAIVOX_VAICOM_KEYTERMS`).
+- `phrase_index.txt` — the valid command phrases the Axis B phrase snapper matches against
+  (override with `VAIVOX_PHRASE_INDEX`).
 
 ```console
-python tools\generate_vaicom_keyterms.py --vaicom-root "E:\...\VoiceAttack 2\Apps\VAICOMPRO" --saved-games "C:\Users\you\Saved Games\DCS"
+python tools\generate_vaicom_keyterms.py
 ```
+
+Pass `--vaicom-root` / `--saved-games` if auto-discovery misses a non-standard install,
+and `--data-dir` to write elsewhere.
 
 The generated list is post-processed into unique words: composed phrases, numeric tokens,
 low-value UI words, and code-only terms such as ICAO identifiers are removed. Technical
@@ -204,8 +212,9 @@ Spelled aviation codes are normalized after transcription, so the keyterm list d
 need to include every code. For example, `U L M B`, `U-L-M-B`, or `E.S.N.J` are compacted
 to `ULMB` and `ESNJ` before text is sent to VoiceAttack.
 
-> Automatic VAICOM-install discovery + background generation + an in-app "Refresh VAICOM
-> vocabulary" control are planned (ADR-0005); for now run the generator above once.
+> Background generation on first run + an in-app "Refresh VAICOM vocabulary" control are
+> still planned (ADR-0005); for now run the generator above once (and again after you
+> change your VAICOM setup).
 
 ### Optional STT providers
 

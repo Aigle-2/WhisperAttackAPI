@@ -48,9 +48,9 @@ but never anything that does I/O (sockets, files, mic, network, UI).
   VAIVOX. The C# plugin moved to `plugin/VaivoxVAPlugin/` with a fresh GUID. VAICOM-
   derived data is no longer shipped (ADR-0005): the loader reads a locally-generated
   file from `%LOCALAPPDATA%\VAIVOX` and falls back to a generic non-VAICOM seed.
-  *Deferred follow-ups:* full ADR-0005 VAICOM auto-discovery + background generation +
-  UI "Refresh" control; and the C# `dotnet` build / `.vap` re-point (verified by hand,
-  not in CI).
+  *Deferred follow-ups:* ADR-0005 **background** generation on first run + the in-app
+  "Refresh VAICOM vocabulary" control (auto-discovery + the generator itself now exist —
+  see Phase 5); and the C# `dotnet` build / `.vap` re-point (verified by hand, not in CI).
 - **Phase 5** 🚧 (in progress) the reconciliation features, on clean seams:
   - **A — Governance** (ADR-0004) ✅ core: `domain/vocabulary/` `VocabularyEntry` +
     `VocabularyGovernor` (rank by recency/hits, LRU eviction with DEFAULT protection +
@@ -65,8 +65,11 @@ but never anything that does I/O (sockets, files, mic, network, UI).
   - **B — Phrase snap** (ADR-0011) ✅: conservative three-band `PhraseSnapper`
     (snap / abstain+near-miss / raw, runner-up margin), wired into `StopAndReconcile`
     (VoiceAttack path only) + recorded in telemetry; a no-op until a phrase index exists.
-    The eval recovers every near-miss with `wrong_match == 0` held. *Deferred:* the
-    VAICOM phrase-index generator (untestable in CI) and recipient segmentation.
+    The eval recovers every near-miss with `wrong_match == 0` held. The keyterm +
+    phrase-index **generator** (`tools/generate_vaicom_keyterms.py`, ADR-0005)
+    auto-discovers a VAICOM install and emits both files to `%LOCALAPPDATA%\VAIVOX`
+    (unit-tested on synthetic fixtures; end-to-end needs a real install). *Deferred:*
+    recipient segmentation; thresholds-in-settings.
   - **Agent API/MCP** (ADR-0010) — pending.
   - **Cross-cutting blocker:** the C# plugin **return channel** (ADR-0006) gates the
     match-signal-dependent work — live usage stamping (`mark_used`/recency), near-miss

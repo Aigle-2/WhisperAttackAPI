@@ -7,10 +7,20 @@ import unicodedata
 from pathlib import Path
 
 
-DEFAULT_VAICOM_ROOT = Path(r"E:\Jeux\steamapps\common\VoiceAttack 2\Apps\VAICOMPRO")
 DEFAULT_DCS_SAVED_GAMES = Path.home() / "Saved Games" / "DCS"
-DEFAULT_OUTPUT = Path(__file__).resolve().parents[1] / "stt_backends" / "vaicom_keyterms.txt"
 DEFAULT_MAX_KEYTERMS = 850
+DEFAULT_MAX_PHRASES = 2000
+
+# Output file names the app loaders read from the per-user VAIVOX data dir (ADR-0005):
+# vaivox.infrastructure.vocabulary.vaicom_keyterms / .phrase_index.
+KEYTERMS_FILE = "vaicom_keyterms.txt"
+PHRASE_INDEX_FILE = "phrase_index.txt"
+
+
+def default_data_dir() -> Path:
+    """Return the per-user VAIVOX data directory the app loaders read (ADR-0005)."""
+    base = os.getenv("LOCALAPPDATA") or str(Path.home())
+    return Path(base) / "VAIVOX"
 
 TECHNICAL_WORDS = {
     "AAA", "ADF", "APX", "ATC", "AVTR", "AWACS", "BATH", "BDA", "CMS", "DCS",
@@ -333,20 +343,178 @@ def write_keyterms(path: Path, keyterms: list[str], vaicom_root: Path, saved_gam
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
+def _discovery_candidates() -> list[Path]:
+    """Return candidate VAICOM install roots in priority order (ADR-0005).
+
+    The ``VAICOMPRO_DIR`` env override comes first, then ``VAICOM*`` folders found under
+    the common VoiceAttack ``Apps`` locations (standalone + Steam).
+    """
+    candidates: list[Path] = []
+    env_override = os.getenv("VAICOMPRO_DIR")
+    if env_override:
+        candidates.append(Path(env_override))
+
+    bases = [
+        os.getenv("ProgramFiles"),
+        os.getenv("ProgramFiles(x86)"),
+        os.getenv("ProgramW6432"),
+        r"C:\Program Files (x86)\Steam\steamapps\common",
+        r"C:\Program Files\Steam\steamapps\common",
+    ]
+    app_suffixes = [Path("VoiceAttack 2") / "Apps", Path("VoiceAttack") / "Apps", Path("Apps")]
+    for base in bases:
+        if not base:
+            continue
+        for suffix in app_suffixes:
+            apps_dir = Path(base) / suffix
+            if apps_dir.is_dir():
+                candidates.extend(sorted(apps_dir.glob("VAICOM*")))
+    return candidates
+
+
+def _looks_like_vaicom_root(path: Path) -> bool:
+    """Whether ``path`` looks like a VAICOM install (has the files we parse)."""
+    return path.is_dir() and (
+        (path / "Export" / "keywords.txt").is_file()
+        or (path / "Profiles").is_dir()
+        or bool(list(path.glob("*.vap")))
+    )
+
+
+def discover_vaicom_root() -> Path | None:
+    """Auto-discover a VAICOM install (env override + common locations, ADR-0005)."""
+    for candidate in _discovery_candidates():
+        if _looks_like_vaicom_root(candidate):
+            return candidate
+    return None
+
+
+def collect_phrases(vaicom_root: Path, saved_games: Path) -> list[str]:
+    """Collect candidate command phrases (whole, not word-split) for the snap index.
+
+    The authoritative spoken commands are the VoiceAttack ``<CommandString>`` entries
+    (``;`` separates alternate spoken forms of one command); the ``keywords.txt`` bracket
+    chunks add recipient/command vocabulary. Each part is cleaned but kept whole.
+    """
+    phrases: list[str] = []
+
+    profile_paths = [
+        *sorted((vaicom_root / "Profiles").glob("*.vap")),
+        *sorted((vaicom_root / "Export").glob("*.vap")),
+    ]
+    for path in profile_paths:
+        text = path.read_text(encoding="utf-8", errors="ignore")
+        for command_string in re.findall(
+            r"<CommandString>(.*?)</CommandString>", text, flags=re.IGNORECASE | re.DOTALL
+        ):
+            for part in html.unescape(command_string).split(";"):
+                phrases.append(clean_term(part))
+
+    keywords_path = vaicom_root / "Export" / "keywords.txt"
+    if keywords_path.is_file():
+        text = keywords_path.read_text(encoding="utf-8", errors="ignore")
+        for chunk in re.findall(r"\[([^\[\]]*)\]", text):
+            for part in chunk.split(";"):
+                phrases.append(clean_term(part))
+
+    return phrases
+
+
+def _is_command_phrase(phrase: str) -> bool:
+    """Whether a cleaned phrase belongs in the snap index.
+
+    Keep multi-word phrases of a sane length; single words are handled by the keyterms +
+    per-token fuzzy step and would over-trigger the snapper.
+    """
+    words = phrase.split()
+    return 2 <= len(words) <= 8 and len(phrase) <= 60
+
+
+def generate_phrase_index(
+    vaicom_root: Path, saved_games: Path, max_phrases: int = DEFAULT_MAX_PHRASES
+) -> list[str]:
+    """Build the deduped, sorted phrase index of valid command phrases (ADR-0011)."""
+    seen: set[str] = set()
+    index: list[str] = []
+    for phrase in collect_phrases(vaicom_root, saved_games):
+        if not _is_command_phrase(phrase):
+            continue
+        key = phrase.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        index.append(phrase)
+    index.sort(key=str.lower)
+    return index[:max_phrases]
+
+
+def write_phrase_index(
+    path: Path, phrases: list[str], vaicom_root: Path, saved_games: Path
+) -> None:
+    """Write the phrase index the Axis B snapper loads (ADR-0011 / ADR-0005)."""
+    lines = [
+        "# Generated VAICOM/DCS command phrase index for the Axis B phrase snapper (ADR-0011).",
+        f"# Source VAICOM root: {vaicom_root}",
+        f"# Source DCS Saved Games: {saved_games}",
+        "# Refresh with: python tools/generate_vaicom_keyterms.py",
+        "# One valid command phrase per line (whole; alternates were split on ';').",
+        f"# Phrase count: {len(phrases)}",
+        "",
+    ]
+    lines.extend(phrases)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Generate STT keyterms from a local VAICOMPRO install.")
-    parser.add_argument("--vaicom-root", type=Path, default=Path(os.getenv("VAICOMPRO_DIR", DEFAULT_VAICOM_ROOT)))
-    parser.add_argument("--saved-games", type=Path, default=Path(os.getenv("DCS_SAVED_GAMES", DEFAULT_DCS_SAVED_GAMES)))
-    parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT)
+    parser = argparse.ArgumentParser(
+        description="Generate STT keyterms + the snap phrase index from a local VAICOM install."
+    )
+    parser.add_argument(
+        "--vaicom-root",
+        type=Path,
+        default=None,
+        help="VAICOM install root. Auto-discovered (VAICOMPRO_DIR + common locations) if omitted.",
+    )
+    parser.add_argument(
+        "--saved-games", type=Path, default=Path(os.getenv("DCS_SAVED_GAMES", DEFAULT_DCS_SAVED_GAMES))
+    )
+    parser.add_argument(
+        "--data-dir",
+        type=Path,
+        default=default_data_dir(),
+        help="Output directory (defaults to the per-user VAIVOX data dir).",
+    )
+    parser.add_argument("--keyterms-output", type=Path, default=None)
+    parser.add_argument("--phrase-index-output", type=Path, default=None)
     parser.add_argument("--max-terms", type=int, default=DEFAULT_MAX_KEYTERMS)
+    parser.add_argument("--max-phrases", type=int, default=DEFAULT_MAX_PHRASES)
     return parser.parse_args()
 
 
 def main() -> None:
     args = parse_args()
-    keyterms = generate_keyterms(args.vaicom_root, args.saved_games, args.max_terms)
-    write_keyterms(args.output, keyterms, args.vaicom_root, args.saved_games)
-    print(f"Wrote {len(keyterms)} VAICOM keyterms to {args.output}")
+    vaicom_root = args.vaicom_root or discover_vaicom_root()
+    if vaicom_root is None:
+        raise SystemExit(
+            "No VAICOM install found. Set VAICOMPRO_DIR or pass --vaicom-root "
+            "(looked for VAICOM* under VoiceAttack 'Apps' in Program Files / Steam)."
+        )
+    if not vaicom_root.is_dir():
+        raise SystemExit(f"VAICOM root does not exist: {vaicom_root}")
+
+    keyterms_output = args.keyterms_output or (args.data_dir / KEYTERMS_FILE)
+    phrase_output = args.phrase_index_output or (args.data_dir / PHRASE_INDEX_FILE)
+
+    keyterms = generate_keyterms(vaicom_root, args.saved_games, args.max_terms)
+    write_keyterms(keyterms_output, keyterms, vaicom_root, args.saved_games)
+
+    phrases = generate_phrase_index(vaicom_root, args.saved_games, args.max_phrases)
+    write_phrase_index(phrase_output, phrases, vaicom_root, args.saved_games)
+
+    print(f"VAICOM root: {vaicom_root}")
+    print(f"Wrote {len(keyterms)} keyterms to {keyterms_output}")
+    print(f"Wrote {len(phrases)} command phrases to {phrase_output}")
 
 
 if __name__ == "__main__":
