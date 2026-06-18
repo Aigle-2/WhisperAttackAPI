@@ -56,8 +56,44 @@ Instructions for integrating with VAICOM can be located in the [VAICOM INTEGRATI
 
 ## Installation
 
-1. Download the latest `WhisperAttackAPI` release ZIP from GitHub Releases and unarchive it anywhere on your computer, e.g. `C:\Program Files\WhisperAttackAPI`
-1. A shortcut can be created to the `WhisperAttackAPI.exe` application
+These instructions are for normal users. You do not need Python, Git, Visual Studio, CUDA, or any developer tooling when using the release ZIP.
+
+1. Download the latest `WhisperAttackAPI` release ZIP from GitHub Releases.
+1. Extract the ZIP anywhere on your computer, for example:
+
+```console
+C:\Program Files\WhisperAttackAPI
+```
+
+or:
+
+```console
+C:\Users\yourname\Desktop\WhisperAttackAPI
+```
+
+1. Open the extracted folder.
+1. Double-click `Set ElevenLabs API Key.cmd` once and paste your ElevenLabs API key.
+1. Double-click `WhisperAttackAPI.exe`.
+1. Create a shortcut to `WhisperAttackAPI.exe` if desired.
+
+Keep the folder structure intact. Do not move only the `.exe` file elsewhere; it must stay beside `_internal`, `settings.cfg`, `fuzzy_words.txt`, `word_mappings.txt`, and the icon files.
+
+The release folder is expected to look like this:
+
+```console
+WhisperAttackAPI v1.2.2-api.1\
+  _internal\
+  WhisperAttackAPI.exe
+  settings.cfg
+  fuzzy_words.txt
+  word_mappings.txt
+  whisper_attack_icon.png
+  add_icon.png
+  Set ElevenLabs API Key.cmd
+  README_FIRST.txt
+```
+
+VoiceAttack and VAICOM setup stays the same as WhisperAttack when the VoiceAttack plugin connects to `127.0.0.1:65432`.
 
 ---
 
@@ -99,7 +135,15 @@ The default values should cover most cases but can be changed:
 
 ### ElevenLabs API setup
 
-PowerShell:
+For release users, use the helper included beside the exe:
+
+```console
+Set ElevenLabs API Key.cmd
+```
+
+This stores the key in your Windows user environment as `ELEVENLABS_API_KEY`. The key is not written to `settings.cfg`.
+
+PowerShell alternative:
 
 ```console
 setx ELEVENLABS_API_KEY "your-api-key"
@@ -107,9 +151,49 @@ setx ELEVENLABS_API_KEY "your-api-key"
 
 Restart WhisperAttackAPI after setting the environment variable.
 
-### Building the executable
+### ElevenLabs cost estimate
 
-The recommended deployment is the API-only executable. It avoids bundling Torch and faster-whisper, so the package is smaller and DCS keeps priority on the GPU.
+Pricing can change, so check the official [ElevenLabs API pricing page](https://elevenlabs.io/pricing/api) before publishing guidance to users. The [ElevenLabs Speech-to-Text docs](https://elevenlabs.io/docs/overview/capabilities/speech-to-text) describe Scribe v2, language support, and keyterm prompting. The estimate below was checked on 2026-06-18.
+
+WhisperAttackAPI currently uses `scribe_v2` in batch Speech-to-Text mode, not `Scribe v2 Realtime`. The default configuration sends DCS/VAICOM keyterms, so the estimate includes keyterm prompting.
+
+Assumptions:
+
+- Scribe v1/v2 Speech-to-Text: `$0.22` per transcribed audio hour.
+- Keyterm prompting: `+$0.05` per transcribed audio hour.
+- Entity detection is not used.
+- Realtime transcription is not used.
+- Estimated total: `$0.27` per transcribed audio hour, before taxes.
+
+With `$5`:
+
+```console
+$5 / $0.27 = 18.5 hours of transcribed audio
+```
+
+This is not the same as 18.5 hours of gameplay. WhisperAttackAPI only sends audio while push-to-talk is recording.
+
+| Usage style | Transcribed audio per gameplay hour | Estimated cost per gameplay hour | $5 covers about |
+| --- | ---: | ---: | ---: |
+| Light radio use | 30 seconds | $0.00225 | 2200 gameplay hours |
+| Normal VAICOM use | 2 minutes | $0.009 | 555 gameplay hours |
+| Intensive radio use | 5 minutes | $0.0225 | 222 gameplay hours |
+| Very chatty / dictation | 15 minutes | $0.0675 | 74 gameplay hours |
+| Push-to-talk nearly always held | 60 minutes | $0.27 | 18.5 gameplay hours |
+
+A typical 3-second command costs roughly:
+
+```console
+$0.27 / 3600 * 3 = $0.000225
+```
+
+So `$5` covers about `22,000` short 3-second commands under the straight audio-duration estimate.
+
+Important caveat: ElevenLabs documents Speech-to-Text as billed per audio minute, but the public pricing page does not clearly state whether many very short API requests are rounded up individually. If each short push-to-talk clip were rounded up to one full minute, `$5` would cover about `1,111` commands instead. The safest validation is to send a small number of test commands, then check usage in the ElevenLabs developer dashboard.
+
+### Building the executable (maintainers only)
+
+Normal users should download the release ZIP and should not run this step. The recommended maintainer build is the API-only executable. It avoids bundling Torch and faster-whisper, so the package is smaller and DCS keeps priority on the GPU.
 
 Double-click:
 

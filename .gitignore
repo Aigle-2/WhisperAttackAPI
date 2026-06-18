@@ -37,6 +37,7 @@ build/
 dist/
 *.egg-info/
 .eggs/
+*.spec
 whisper_server.exe
 
 # .NET / Visual Studio outputs for the VoiceAttack plugin
