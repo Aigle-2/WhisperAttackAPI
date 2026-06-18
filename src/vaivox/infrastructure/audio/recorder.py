@@ -15,7 +15,7 @@ from typing import Any
 _LOGGER = logging.getLogger(__name__)
 
 _SAMPLE_RATE = 16000
-_AUDIO_FILENAME = "whisper_temp_recording.wav"
+_AUDIO_FILENAME = "vaivox_recording.wav"
 
 
 class SoundDeviceRecorder:

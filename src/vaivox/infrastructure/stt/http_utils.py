@@ -26,7 +26,7 @@ def build_multipart_body(
     Returns:
         The encoded body bytes and the matching ``Content-Type`` header value.
     """
-    boundary = f"----WhisperAttackAPI{uuid.uuid4().hex}"
+    boundary = f"----VAIVOX{uuid.uuid4().hex}"
     lines: list[bytes] = []
 
     for name, value in fields:

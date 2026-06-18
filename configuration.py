@@ -7,7 +7,10 @@ Retained so the legacy entry point and the ported tests keep importing
 
 from vaivox.infrastructure.config.settings import (
     ConfigurationError,
-    WhisperAttackConfiguration,
+    VaivoxConfiguration,
 )
 
-__all__ = ["ConfigurationError", "WhisperAttackConfiguration"]
+# Backward-compatible alias for the pre-rebrand class name (Phase 4 renamed it).
+WhisperAttackConfiguration = VaivoxConfiguration
+
+__all__ = ["ConfigurationError", "VaivoxConfiguration", "WhisperAttackConfiguration"]

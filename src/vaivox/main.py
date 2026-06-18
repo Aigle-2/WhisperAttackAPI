@@ -16,9 +16,6 @@ from pathlib import Path
 
 _LOGGER = logging.getLogger(__name__)
 
-# Rebranded to VAIVOX in Phase 4; kept as-is here so paths/locks stay compatible.
-_APPLICATION_NAME = "WhisperAttack"
-
 
 def _ensure_src_on_path() -> None:
     """Make the in-repo ``src/`` importable when run from source as a script."""
@@ -34,17 +31,17 @@ def _resolve_app_path() -> str:
     return str(Path(__file__).resolve().parents[2])
 
 
-def _resolve_app_data_dir() -> str:
+def _resolve_app_data_dir(data_dir_name: str) -> str:
     """Return (creating if needed) the per-user data directory for overrides/logs."""
     local_appdata = os.getenv("LOCALAPPDATA") or os.path.expanduser("~")
-    app_data_dir = os.path.join(local_appdata, _APPLICATION_NAME)
+    app_data_dir = os.path.join(local_appdata, data_dir_name)
     os.makedirs(app_data_dir, exist_ok=True)
     return app_data_dir
 
 
-def _start_logging(app_data_dir: str) -> None:
+def _start_logging(app_data_dir: str, log_file_name: str) -> None:
     """Start file logging into the per-user data directory."""
-    log_file = os.path.join(app_data_dir, f"{_APPLICATION_NAME}.log")
+    log_file = os.path.join(app_data_dir, log_file_name)
     logging.basicConfig(
         filename=log_file,
         filemode="w",
@@ -60,20 +57,21 @@ def main() -> None:
 
     from pid import PidFile, PidFileError
 
-    from vaivox.infrastructure.ui.app import WhisperAttackApp, show_error_dialog
+    from vaivox.infrastructure.config.identity import VAIVOX
+    from vaivox.infrastructure.ui.app import VaivoxApp, show_error_dialog
 
     app_path = _resolve_app_path()
-    app_data_dir = _resolve_app_data_dir()
-    _start_logging(app_data_dir)
+    app_data_dir = _resolve_app_data_dir(VAIVOX.data_dir_name)
+    _start_logging(app_data_dir, VAIVOX.log_file_name)
 
-    lock_file = os.path.join(app_data_dir, "whisper_attack")
+    lock_file = os.path.join(app_data_dir, VAIVOX.instance_lock_name)
     try:
         with PidFile(lock_file):
-            app = WhisperAttackApp(app_path, app_data_dir)
+            app = VaivoxApp(app_path, app_data_dir)
             app.run()
     except PidFileError:
         # Another instance already holds the lock.
-        show_error_dialog("WhisperAttack is already running")
+        show_error_dialog(f"{VAIVOX.name} is already running")
     except Exception as error:
         trace = traceback.format_exc()
         _LOGGER.error("Server error: %s\n\n%s", error, trace)

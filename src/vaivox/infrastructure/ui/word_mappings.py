@@ -13,7 +13,7 @@ if TYPE_CHECKING:
     from ttkbootstrap import Window
 
 
-class WhisperAttackWordMappings:
+class VaivoxWordMappings:
     """Show a modal that collects a set of aliases and their replacement."""
 
     def __init__(self, root: Window, add_word_mapping: Callable[[str, str], None]) -> None:

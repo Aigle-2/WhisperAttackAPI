@@ -11,12 +11,12 @@ from vaivox.infrastructure.stt.faster_whisper import FasterWhisperBackend
 from vaivox.infrastructure.stt.openai import OpenAIBackend
 
 if TYPE_CHECKING:
-    from vaivox.infrastructure.config.settings import WhisperAttackConfiguration
+    from vaivox.infrastructure.config.settings import VaivoxConfiguration
 
 _BackendClass = type[FasterWhisperBackend | DeepgramBackend | ElevenLabsBackend | OpenAIBackend]
 
 
-def create_stt_backend(config: WhisperAttackConfiguration) -> SpeechToText:
+def create_stt_backend(config: VaivoxConfiguration) -> SpeechToText:
     """Create the speech-to-text adapter named by ``stt_backend`` in the config.
 
     Args:

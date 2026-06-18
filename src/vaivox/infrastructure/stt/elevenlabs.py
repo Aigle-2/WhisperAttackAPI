@@ -13,7 +13,7 @@ from vaivox.domain.reconciliation.model import Transcription
 from vaivox.infrastructure.stt.http_utils import build_multipart_body
 
 if TYPE_CHECKING:
-    from vaivox.infrastructure.config.settings import WhisperAttackConfiguration
+    from vaivox.infrastructure.config.settings import VaivoxConfiguration
 
 
 class ElevenLabsBackend:
@@ -22,7 +22,7 @@ class ElevenLabsBackend:
     provider_name = "elevenlabs"
     DEFAULT_API_URL = "https://api.elevenlabs.io/v1/speech-to-text"
 
-    def __init__(self, config: WhisperAttackConfiguration) -> None:
+    def __init__(self, config: VaivoxConfiguration) -> None:
         """Read the ElevenLabs provider settings from ``config``.
 
         Args:

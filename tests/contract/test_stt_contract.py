@@ -16,7 +16,7 @@ import pytest
 
 from vaivox.application.ports import SpeechToText, SpeechToTextError
 from vaivox.domain.reconciliation.model import Transcription
-from vaivox.infrastructure.config.settings import WhisperAttackConfiguration
+from vaivox.infrastructure.config.settings import VaivoxConfiguration
 from vaivox.infrastructure.stt.deepgram import DeepgramBackend
 from vaivox.infrastructure.stt.elevenlabs import ElevenLabsBackend
 from vaivox.infrastructure.stt.factory import create_stt_backend
@@ -45,7 +45,7 @@ def make_config(tmp_path, settings):
     (app_dir / "fuzzy_words.txt").write_text("", encoding="utf-8")
     data_dir = tmp_path / "data"
     data_dir.mkdir()
-    return WhisperAttackConfiguration(str(app_dir), str(data_dir))
+    return VaivoxConfiguration(str(app_dir), str(data_dir))
 
 
 class FakeHTTPResponse:

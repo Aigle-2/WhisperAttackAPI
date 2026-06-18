@@ -21,18 +21,11 @@ from vaivox.application.ports import (
 from vaivox.application.queries import DescribeStatus, DryRunReconcile
 from vaivox.application.record_command import StartRecording, StopAndReconcile
 from vaivox.application.shutdown import Shutdown
-from vaivox.infrastructure.api.introspection import (
-    DEFAULT_API_HOST,
-    DEFAULT_API_PORT,
-    IntrospectionServer,
-)
+from vaivox.infrastructure.api.introspection import IntrospectionServer
 from vaivox.infrastructure.audio.recorder import SoundDeviceRecorder
-from vaivox.infrastructure.config.settings import WhisperAttackConfiguration
-from vaivox.infrastructure.inbound.control_server import (
-    DEFAULT_HOST,
-    DEFAULT_PORT,
-    ControlSocketServer,
-)
+from vaivox.infrastructure.config.identity import VAIVOX
+from vaivox.infrastructure.config.settings import VaivoxConfiguration
+from vaivox.infrastructure.inbound.control_server import ControlSocketServer
 from vaivox.infrastructure.kneeboard.sink import KneeboardSink
 from vaivox.infrastructure.stt.factory import create_stt_backend
 from vaivox.infrastructure.system_clock import SystemClock
@@ -56,12 +49,12 @@ class WiredApp:
 
 
 def build(
-    config: WhisperAttackConfiguration,
+    config: VaivoxConfiguration,
     reporter: StatusReporter,
     exit_event: Event,
     request_shutdown: Callable[[], None],
-    host: str = DEFAULT_HOST,
-    port: int = DEFAULT_PORT,
+    host: str = VAIVOX.control_host,
+    port: int = VAIVOX.control_port,
 ) -> WiredApp:
     """Construct the adapters, use cases, and control server.
 
@@ -118,8 +111,8 @@ def build(
         api_server = IntrospectionServer(
             DescribeStatus(recorder, config),
             DryRunReconcile(config),
-            host=config.get_setting("api_host", DEFAULT_API_HOST),
-            port=config.get_int_setting("api_port", DEFAULT_API_PORT),
+            host=config.get_setting("api_host", VAIVOX.api_host),
+            port=config.get_int_setting("api_port", VAIVOX.api_port),
             token=config.get_setting("api_token", ""),
         )
 

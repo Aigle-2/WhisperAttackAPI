@@ -2,9 +2,7 @@
 
 This is the infrastructure adapter behind the :class:`~vaivox.application.ports.ConfigProvider`
 port. Default values ship with the app; user overrides live in the per-user
-``%LOCALAPPDATA%`` WhisperAttack directory and are merged on top. The class keeps the
-legacy ``WhisperAttackConfiguration`` name and behaviour (the rebrand is Phase 4);
-only its home and typing changed.
+``%LOCALAPPDATA%`` VAIVOX directory and are merged on top.
 """
 
 from __future__ import annotations
@@ -21,6 +19,7 @@ from vaivox.domain.vocabulary.keyterms import (
     KeytermBudget,
     apply_keyterm_budget,
 )
+from vaivox.infrastructure.config.identity import VAIVOX
 from vaivox.infrastructure.vocabulary.vaicom_keyterms import load_vaicom_keyterms
 
 _DEFAULT_THEME = "default"
@@ -30,12 +29,12 @@ class ConfigurationError(Exception):
     """Raised when configuration files cannot be read or written."""
 
 
-class WhisperAttackConfiguration:
+class VaivoxConfiguration:
     """Read and write the application configuration.
 
     Default configuration is loaded from the application directory; custom
-    configuration is loaded from the per-user ``%LOCALAPPDATA%`` WhisperAttack
-    directory and merged on top of the defaults.
+    configuration is loaded from the per-user ``%LOCALAPPDATA%`` VAIVOX directory and
+    merged on top of the defaults.
     """
 
     def __init__(self, app_location: str, app_data_location: str) -> None:
@@ -461,11 +460,11 @@ class WhisperAttackConfiguration:
 
     def get_voiceattack_host(self) -> str:
         """Return the IP address of the machine running VoiceAttack (default localhost)."""
-        return self.config.get("voiceattack_host", "127.0.0.1")
+        return self.config.get("voiceattack_host", VAIVOX.voiceattack_host)
 
     def get_voiceattack_port(self) -> int:
-        """Return the port to connect to for VoiceAttack (default 65433)."""
-        voiceattack_port = self.config.get("voiceattack_port", 65433)
+        """Return the port to connect to for VoiceAttack (default from ProductIdentity)."""
+        voiceattack_port = self.config.get("voiceattack_port", VAIVOX.voiceattack_port)
         return int(voiceattack_port)
 
     def get_text_line_length(self) -> int:

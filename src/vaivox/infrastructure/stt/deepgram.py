@@ -13,7 +13,7 @@ from vaivox.application.ports import SpeechToTextError
 from vaivox.domain.reconciliation.model import Transcription
 
 if TYPE_CHECKING:
-    from vaivox.infrastructure.config.settings import WhisperAttackConfiguration
+    from vaivox.infrastructure.config.settings import VaivoxConfiguration
 
 
 class DeepgramBackend:
@@ -22,7 +22,7 @@ class DeepgramBackend:
     provider_name = "deepgram"
     DEFAULT_API_URL = "https://api.deepgram.com/v1/listen"
 
-    def __init__(self, config: WhisperAttackConfiguration) -> None:
+    def __init__(self, config: VaivoxConfiguration) -> None:
         """Read the Deepgram provider settings from ``config``.
 
         Args:

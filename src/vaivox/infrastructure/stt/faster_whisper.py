@@ -10,15 +10,15 @@ from vaivox.domain.reconciliation.model import Transcription
 from vaivox.infrastructure.stt.prompts import DEFAULT_DCS_PROMPT
 
 if TYPE_CHECKING:
-    from vaivox.infrastructure.config.settings import WhisperAttackConfiguration
+    from vaivox.infrastructure.config.settings import VaivoxConfiguration
 
 
 class FasterWhisperBackend:
-    """On-device faster-whisper backend used by the original WhisperAttack workflow."""
+    """On-device faster-whisper backend (the original local transcription path)."""
 
     provider_name = "faster_whisper"
 
-    def __init__(self, config: WhisperAttackConfiguration) -> None:
+    def __init__(self, config: VaivoxConfiguration) -> None:
         """Store configuration; the model is loaded lazily in :meth:`load`.
 
         Args:

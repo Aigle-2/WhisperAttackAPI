@@ -16,7 +16,8 @@ from threading import Event
 from typing import TYPE_CHECKING, Any
 
 from vaivox import composition
-from vaivox.infrastructure.config.settings import ConfigurationError, WhisperAttackConfiguration
+from vaivox.infrastructure.config.identity import VAIVOX
+from vaivox.infrastructure.config.settings import ConfigurationError, VaivoxConfiguration
 from vaivox.infrastructure.ui.theme import (
     TAG_BLUE,
     TAG_GREY,
@@ -24,7 +25,7 @@ from vaivox.infrastructure.ui.theme import (
     THEME_DARK,
     THEME_DEFAULT,
 )
-from vaivox.infrastructure.ui.word_mappings import WhisperAttackWordMappings
+from vaivox.infrastructure.ui.word_mappings import VaivoxWordMappings
 from vaivox.infrastructure.ui.writer import TkStatusWriter
 
 if TYPE_CHECKING:
@@ -32,13 +33,11 @@ if TYPE_CHECKING:
 
 _LOGGER = logging.getLogger(__name__)
 
-APPLICATION_VERSION = "1.2.2"
-
 _SUPPORTED_KEYTERM_PROVIDERS = {"elevenlabs", "deepgram", "openai"}
 
 
-class WhisperAttackApp:
-    """The WhisperAttack window, system-tray icon, and control-server thread."""
+class VaivoxApp:
+    """The VAIVOX window, system-tray icon, and control-server thread."""
 
     def __init__(self, app_path: str, app_data_dir: str) -> None:
         """Build the window, wire the control server, and start the tray thread.
@@ -54,18 +53,18 @@ class WhisperAttackApp:
         from ttkbootstrap import Button, Style, Window
         from ttkbootstrap.widgets.scrolled import ScrolledText
 
-        _LOGGER.info("WhisperAttack version: %s", APPLICATION_VERSION)
-        _LOGGER.info("WhisperAttack location: %s", app_path)
+        _LOGGER.info("%s version: %s", VAIVOX.name, VAIVOX.version)
+        _LOGGER.info("%s location: %s", VAIVOX.name, app_path)
 
         self.app_path = app_path
         self.app_data_dir = app_data_dir
         self.exit_event = Event()
 
         self.window = Window(
-            title="WhisperAttack",
-            iconphoto=path.join(app_path, "whisper_attack_icon.png"),
+            title=VAIVOX.window_title,
+            iconphoto=path.join(app_path, "vaivox_icon.png"),
         )
-        self.config = WhisperAttackConfiguration(app_path, app_data_dir)
+        self.config = VaivoxConfiguration(app_path, app_data_dir)
 
         theme = self.get_theme()
         self.window.style.theme_use("darkly" if theme == THEME_DARK else "flatly")
@@ -115,11 +114,11 @@ class WhisperAttackApp:
         if self.api_server is not None:
             self.api_server.start()
 
-        image = Image.open(path.join(app_path, "whisper_attack_icon.png"))
+        image = Image.open(path.join(app_path, "vaivox_icon.png"))
         self.icon = Icon(
-            "WA",
+            VAIVOX.name,
             image,
-            "WhisperAttack",
+            VAIVOX.name,
             menu=Menu(MenuItem("Show", self._show_window), MenuItem("Exit", self._close)),
         )
         self.window.protocol("WM_DELETE_WINDOW", self._withdraw_window)
@@ -214,7 +213,7 @@ class WhisperAttackApp:
             except ConfigurationError as error:
                 self.writer.write(str(error), TAG_RED)
 
-        WhisperAttackWordMappings(self.window, update_word_mapping)
+        VaivoxWordMappings(self.window, update_word_mapping)
 
     def get_theme(self) -> str:
         """Return the effective theme, resolving ``default`` to the Windows theme."""
@@ -259,9 +258,7 @@ class WhisperAttackApp:
         """Open a modal dialog showing ``message``."""
         from ttkbootstrap import Button, Label, Style, Toplevel
 
-        modal = Toplevel(
-            title="WhisperAttack", size=(1000, 300), transient=self.window, topmost=True
-        )
+        modal = Toplevel(title=VAIVOX.name, size=(1000, 300), transient=self.window, topmost=True)
         Label(modal, text=message).pack(pady=20)
         Style().configure("TButton", font=("GG Sans", 11))
         Button(modal, text="Close", command=modal.destroy).pack(pady=10)
@@ -278,7 +275,7 @@ def show_error_dialog(message: str) -> None:
     """
     from ttkbootstrap import Button, Label, Window
 
-    window = Window(title="WhisperAttack")
+    window = Window(title=VAIVOX.name)
     Label(window, text=message).pack(pady=20, padx=20)
     Button(window, text="Close", command=window.destroy).pack(pady=10)
     window.place_window_center()

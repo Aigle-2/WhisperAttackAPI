@@ -14,7 +14,7 @@ from vaivox.infrastructure.stt.http_utils import build_multipart_body
 from vaivox.infrastructure.stt.prompts import DEFAULT_DCS_PROMPT
 
 if TYPE_CHECKING:
-    from vaivox.infrastructure.config.settings import WhisperAttackConfiguration
+    from vaivox.infrastructure.config.settings import VaivoxConfiguration
 
 
 class OpenAIBackend:
@@ -23,7 +23,7 @@ class OpenAIBackend:
     provider_name = "openai"
     DEFAULT_API_URL = "https://api.openai.com/v1/audio/transcriptions"
 
-    def __init__(self, config: WhisperAttackConfiguration) -> None:
+    def __init__(self, config: VaivoxConfiguration) -> None:
         """Read the OpenAI provider settings from ``config``.
 
         Args:

@@ -40,7 +40,7 @@ _LEVEL_TAGS: dict[StatusLevel, str] = {
 
 
 class TkStatusWriter:
-    """Write status lines to the WhisperAttack scrolled text area."""
+    """Write status lines to the VAIVOX scrolled text area."""
 
     def __init__(self, theme: str, text_area: ScrolledText) -> None:
         """Configure the colour tags for the active theme.
