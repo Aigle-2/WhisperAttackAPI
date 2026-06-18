@@ -115,13 +115,13 @@ but never anything that does I/O (sockets, files, mic, network, UI).
     the offline near-miss review report and Tier 2 counterfactual attribution (both want
     accumulated live match data and the pipeline reading vocab from `VocabularyRepository`).
 
-During the migration the remaining legacy top-level modules (`whisper_attack.py`,
-`configuration.py`, `transcription_postprocess.py`, `stt_backends/`) are thin
-re-export/launcher **shims that delegate into `src/vaivox/`** (the single source of truth).
-`whisper_attack.py` now just launches `vaivox.main`. The fully-migrated god-module and UI
-modules (`whisper_server.py`, `writer.py`, `theme.py`, `word_mappings.py`) were **deleted**
-in the Phase 5 cleanup — their behavior lives in `infrastructure/ui/` + the use cases. New
-behavior goes in `src/vaivox/`.
+`src/vaivox/` is the single source of truth and the only application code: the legacy
+top-level shims (`whisper_attack.py`, `configuration.py`, `transcription_postprocess.py`,
+`stt_backends/`) and the god-module / UI modules (`whisper_server.py`, `writer.py`,
+`theme.py`, `word_mappings.py`) have all been **deleted** — their behavior lives in
+`domain/` + the use cases + `infrastructure/`. The only code outside the strict tree is
+`tools/` (the VAICOM generator + the vocabulary migration). New behavior goes in
+`src/vaivox/`.
 
 ## Quality gates (ADR-0007)
 
@@ -163,12 +163,11 @@ uv run vaivox               # launch the app (needs --extra app or full)
 uv run --extra mcp vaivox-mcp   # serve the read-only MCP introspection tools over stdio
 ```
 
-Running from source uses a small `sys.path` shim in `vaivox.main` (and the
-`whisper_attack.py` launcher) so the in-repo `src/vaivox` package is importable; the
-PyInstaller build (`build_exe.ps1`) targets `src/vaivox/main.py` and passes `--paths src`.
-`uv sync` installs `vaivox` editable, so `import vaivox` and `lint-imports` work without
-extra path setup; the pytest `pythonpath` setting still exposes the legacy top-level
-shims.
+Running from source uses a small `sys.path` shim in `vaivox.main` so the in-repo
+`src/vaivox` package is importable; the PyInstaller build (`build_exe.ps1`) targets
+`src/vaivox/main.py` and passes `--paths src`. `uv sync` installs `vaivox` editable, so
+`import vaivox` and `lint-imports` work without extra path setup; the pytest `pythonpath`
+setting also exposes the repo root so the `tools/` scripts import.
 
 ## Runtime introspection API (ADR-0010)
 
@@ -211,5 +210,5 @@ The full debug recipes (curl examples, the dry-run workflow, the gated actions, 
   When changing reconciliation behavior, update the **golden characterization tests** in
   `tests/unit/test_reconciliation.py` deliberately — they pin parity with the original
   implementation.
-- Don't reformat or tighten types on legacy modules just to satisfy a gate; they're
-  excluded on purpose until their migration phase.
+- Don't reformat or tighten types on the `tools/` scripts just to satisfy a gate; they're
+  excluded on purpose (utility code, not part of the strict tree).

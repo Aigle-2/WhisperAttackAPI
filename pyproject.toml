@@ -4,11 +4,9 @@
 # This file is the single source for packaging (PEP 621, src/ layout) and for the
 # quality gates defined in ADR-0007 (ruff, mypy, pytest+coverage, import-linter).
 #
-# IMPORTANT (Phase 1 scope): the strict gates target only the NEW `src/vaivox/`
-# tree. The legacy modules (`whisper_*.py`, `configuration.py`,
-# `stt_backends/`, ...) are deliberately excluded / loosened so every gate is green
-# without rewriting code that Phase 2+ will move. See the `extend-exclude` and the
-# mypy `[[tool.mypy.overrides]]` blocks below.
+# The strict gates target the `src/vaivox/` tree. The only non-strict code left is
+# `tools/` (the VAICOM generator + the one-shot vocabulary migration), excluded /
+# loosened in the `extend-exclude` and mypy `[[tool.mypy.overrides]]` blocks below.
 #
 
 [build-system]
@@ -116,24 +114,16 @@ environments = [
 
 # ---------------------------------------------------------------------------
 # Ruff — lint + format (ADR-0007). Google-convention docstrings via the `D` rules.
-# Scoped to the new tree; legacy modules are excluded until Phase 2 moves them.
+# Scoped to the `src/vaivox/` tree; the `tools/` utility scripts are excluded.
 # ---------------------------------------------------------------------------
 [tool.ruff]
 target-version = "py312"
 line-length = 100
 src = ["src", "tests"]
 extend-exclude = [
-    # Legacy application modules — refactored in Phase 2+, not yet held to the
-    # new standard. Excluding them keeps lint/format green without churn. As modules
-    # are fully migrated they are deleted and drop off this list (the Phase 5 cleanup
-    # removed whisper_server.py / writer.py / theme.py / word_mappings.py).
-    "whisper_attack.py",
-    "stt_backends",
+    # `tools/` holds the VAICOM keyterm/phrase-index generator and the one-shot
+    # vocabulary migration — utility scripts, not held to the new tree's standard.
     "tools",
-    # Legacy tests moved verbatim under tests/unit/ (kept runnable, not reformatted).
-    "tests/unit/test_configuration.py",
-    "tests/unit/test_stt_backends.py",
-    "tests/unit/test_transcription_postprocess.py",
 ]
 
 [tool.ruff.lint]
@@ -160,8 +150,8 @@ convention = "google"
 "tests/**" = ["D", "ANN"]
 
 # ---------------------------------------------------------------------------
-# Mypy — strict, scoped to src/vaivox (ADR-0007). Legacy modules are ignored and
-# third-party libraries without stubs are silenced (forward-looking for Phase 2+).
+# Mypy — strict, scoped to src/vaivox (ADR-0007). The `tools/` scripts are ignored and
+# third-party libraries without stubs are silenced.
 # ---------------------------------------------------------------------------
 [tool.mypy]
 python_version = "3.12"
@@ -175,8 +165,6 @@ pretty = true
 
 [[tool.mypy.overrides]]
 module = [
-    "whisper_attack",
-    "stt_backends.*",
     "tools",
     "tools.*",
 ]
@@ -209,8 +197,8 @@ ignore_missing_imports = true
 
 # ---------------------------------------------------------------------------
 # Pytest + coverage (ADR-0007 / ADR-0008 test pyramid).
-# `pythonpath` exposes both the new package (src) and the legacy top-level
-# modules (.) so tests run without an editable install.
+# `pythonpath` exposes the new package (src) and the repo root (.) so the `tools/`
+# scripts import in tests without an editable install.
 # ---------------------------------------------------------------------------
 [tool.pytest.ini_options]
 minversion = "8.0"

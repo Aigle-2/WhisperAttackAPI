@@ -27,7 +27,7 @@ Install the app runtime (GUI + audio) and launch it:
 
 ```console
 uv sync --extra app        # API backends (elevenlabs/openai/deepgram)
-uv run vaivox              # or:  uv run python whisper_attack.py
+uv run vaivox              # launch the app
 ```
 
 For the local on-device faster-whisper backend, sync the full extra instead:
@@ -78,8 +78,7 @@ uv run pyinstaller --onedir --noconsole --paths src --name VAIVOX src\vaivox\mai
 ```
 
 `--noconsole` hides the console window; a VAIVOX icon appears in the Windows system
-tray. The entry point is `src\vaivox\main.py` (the single `vaivox.main` bootstrap);
-`whisper_attack.py` remains as a thin launcher into it.
+tray. The entry point is `src\vaivox\main.py` (the single `vaivox.main` bootstrap).
 
 ### Cleaning up
 
