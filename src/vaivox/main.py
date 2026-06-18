@@ -1,1 +1,84 @@
-"""Application entry-point bootstrap (becomes the only entry point in Phase 3)."""
+"""VAIVOX bootstrap — the single application entry point.
+
+Wired as the ``vaivox`` console script (``pyproject.toml``) and as the PyInstaller
+build target. It resolves paths, configures logging, takes the single-instance lock,
+and runs the windowed app built by the composition root. Heavy imports are deferred
+into :func:`main` so importing this module never pulls in the UI stack.
+"""
+
+from __future__ import annotations
+
+import logging
+import os
+import sys
+import traceback
+from pathlib import Path
+
+_LOGGER = logging.getLogger(__name__)
+
+# Rebranded to VAIVOX in Phase 4; kept as-is here so paths/locks stay compatible.
+_APPLICATION_NAME = "WhisperAttack"
+
+
+def _ensure_src_on_path() -> None:
+    """Make the in-repo ``src/`` importable when run from source as a script."""
+    src = Path(__file__).resolve().parents[1]
+    if src.is_dir() and str(src) not in sys.path:
+        sys.path.insert(0, str(src))
+
+
+def _resolve_app_path() -> str:
+    """Return the directory holding the bundled assets and default configuration."""
+    if getattr(sys, "frozen", False):
+        return os.path.dirname(sys.executable)
+    return str(Path(__file__).resolve().parents[2])
+
+
+def _resolve_app_data_dir() -> str:
+    """Return (creating if needed) the per-user data directory for overrides/logs."""
+    local_appdata = os.getenv("LOCALAPPDATA") or os.path.expanduser("~")
+    app_data_dir = os.path.join(local_appdata, _APPLICATION_NAME)
+    os.makedirs(app_data_dir, exist_ok=True)
+    return app_data_dir
+
+
+def _start_logging(app_data_dir: str) -> None:
+    """Start file logging into the per-user data directory."""
+    log_file = os.path.join(app_data_dir, f"{_APPLICATION_NAME}.log")
+    logging.basicConfig(
+        filename=log_file,
+        filemode="w",
+        level=logging.INFO,
+        format="%(asctime)s - %(levelname)s - %(message)s",
+    )
+    logging.getLogger().setLevel(logging.INFO)
+
+
+def main() -> None:
+    """Run the application under a single-instance lock."""
+    _ensure_src_on_path()
+
+    from pid import PidFile, PidFileError
+
+    from vaivox.infrastructure.ui.app import WhisperAttackApp, show_error_dialog
+
+    app_path = _resolve_app_path()
+    app_data_dir = _resolve_app_data_dir()
+    _start_logging(app_data_dir)
+
+    lock_file = os.path.join(app_data_dir, "whisper_attack")
+    try:
+        with PidFile(lock_file):
+            app = WhisperAttackApp(app_path, app_data_dir)
+            app.run()
+    except PidFileError:
+        # Another instance already holds the lock.
+        show_error_dialog("WhisperAttack is already running")
+    except Exception as error:
+        trace = traceback.format_exc()
+        _LOGGER.error("Server error: %s\n\n%s", error, trace)
+        show_error_dialog(f"Unexpected server error: {error}")
+
+
+if __name__ == "__main__":
+    main()
