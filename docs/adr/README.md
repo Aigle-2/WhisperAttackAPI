@@ -29,5 +29,6 @@ new reconciliation features are built on top of it.
 | [0008](0008-test-and-evaluation-strategy.md) | Test & evaluation strategy (LLM dataset + VAICOM mock) | Accepted |
 | [0009](0009-vocabulary-reload-model.md) | Vocabulary / index reload model (hot-apply vs restart) | Accepted |
 | [0010](0010-runtime-introspection-api-for-agents.md) | Runtime introspection API for agentic tooling (+ skills) | Accepted |
+| [0011](0011-conservative-phrase-snap.md) | Conservative whole-utterance phrase snap (Axis B) | Proposed |
 
 The roadmap that consumes these decisions is in [../MIGRATION_PLAN.md](../MIGRATION_PLAN.md).
