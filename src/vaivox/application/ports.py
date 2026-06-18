@@ -19,6 +19,7 @@ from typing import Protocol, runtime_checkable
 
 from vaivox.domain.reconciliation.model import Transcription
 from vaivox.domain.telemetry.model import ReconciliationOutcome
+from vaivox.domain.vocabulary.model import GovernedEntry, VocabularyEntry, VocabularyKind
 
 
 class SpeechToTextError(Exception):
@@ -100,6 +101,41 @@ class TelemetrySink(Protocol):
 
     def record(self, outcome: ReconciliationOutcome) -> None:
         """Record one :class:`ReconciliationOutcome`."""
+
+
+@runtime_checkable
+class VocabularyRepository(Protocol):
+    """Driven port: the structured-vocabulary store (ADR-0004, Axis A).
+
+    The repository is the single source of truth the reconciliation pipeline reads
+    (ADR-0009). It joins the versioned JSONL *source* with the hot usage *sidecar* and
+    exposes the joined view; mutations (usage stamps, eviction) flow back through it.
+    Adapters live in :mod:`vaivox.infrastructure.vocabulary`.
+    """
+
+    def load(self, kind: VocabularyKind) -> list[GovernedEntry]:
+        """Return every entry of ``kind``, each joined with its usage stats."""
+
+    def mark_used(self, ids: Sequence[str], when: datetime) -> None:
+        """Stamp ``last_used`` / increment ``hits`` for the contributing entry ``ids``.
+
+        Called only on a matched utterance, for the entries Tier 1/2 attribution
+        credited (ADR-0006 §2). Unknown ids are ignored.
+        """
+
+    def add(self, entry: VocabularyEntry, when: datetime) -> None:
+        """Add a new source ``entry`` and seed its usage (``last_used = when``).
+
+        Seeding recency to ``when`` keeps a brand-new entry out of immediate eviction
+        (the grace window, ADR-0004 §3).
+        """
+
+    def replace_entries(self, kind: VocabularyKind, kept: Sequence[GovernedEntry]) -> None:
+        """Persist the post-eviction ``kept`` set for ``kind`` (drops the rest).
+
+        The write-back of a :class:`~vaivox.domain.vocabulary.model.EvictionResult`'s
+        ``kept`` entries after a governance pass.
+        """
 
 
 @runtime_checkable
