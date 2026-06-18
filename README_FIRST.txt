@@ -4,7 +4,7 @@ WhisperAttackAPI
 Quick start
 -----------
 
-1. Double-click "Set ElevenLabs API Key.cmd" once and paste your ElevenLabs API key.
+1. Double-click "Set STT API Key.cmd" once and paste your provider API key.
 2. Double-click "WhisperAttackAPI.exe".
 3. Keep the "_internal" folder next to the exe.
 

@@ -19,6 +19,7 @@ from configuration import WhisperAttackConfiguration
 from stt_backends.base import SpeechToTextBackendError
 from stt_backends.factory import create_stt_backend
 from stt_backends.keyterms import PHONETIC_ALPHABET
+from transcription_postprocess import compact_spelled_codes
 from writer import WhisperAttackWriter
 from theme import TAG_BLUE, TAG_GREEN, TAG_GREY, TAG_ORANGE, TAG_RED
 
@@ -111,6 +112,7 @@ def custom_cleanup_text(text: str, word_mappings: dict[str, str]) -> str:
     text = re.sub(r'\b0\d+\b', lambda x: ' '.join(x.group()), text)
     text = re.sub(r"([^\w\d\s])*(?![\w\-\w])(?![^-])?", " ", text)
     text = re.sub(r"\s+", " ", text).strip()
+    text = compact_spelled_codes(text)
     return text
 
 def format_for_dcs_kneeboard(text: str, line_length: int) -> str:

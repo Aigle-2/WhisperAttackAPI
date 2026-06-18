@@ -1,12 +1,11 @@
 import json
 import logging
-import mimetypes
 import os
-import uuid
 from urllib import error, parse, request
 
 from configuration import WhisperAttackConfiguration
 from stt_backends.base import SpeechToTextBackend, SpeechToTextBackendError, SpeechToTextResult
+from stt_backends.http_utils import build_multipart_body
 
 
 class ElevenLabsBackend(SpeechToTextBackend):
@@ -28,7 +27,13 @@ class ElevenLabsBackend(SpeechToTextBackend):
         self.tag_audio_events = config.get_provider_bool("elevenlabs", "tag_audio_events", False)
         self.timestamps_granularity = config.get_provider_setting("elevenlabs", "timestamps_granularity", "none")
         self.temperature = config.get_provider_setting("elevenlabs", "temperature", "")
-        self.keyterms = config.get_stt_keyterms()
+        self.max_keyterms = config.get_provider_int("elevenlabs", "max_keyterms", 900)
+        self.max_keyterm_chars = config.get_provider_int("elevenlabs", "max_keyterm_chars", 50)
+        self.keyterms = config.get_budgeted_stt_keyterms(
+            self.provider_name,
+            max_terms=self.max_keyterms,
+            max_term_chars=self.max_keyterm_chars,
+        )
         self.api_key = ""
 
     def load(self) -> None:
@@ -89,34 +94,7 @@ class ElevenLabsBackend(SpeechToTextBackend):
         return parse.urlunparse(parsed._replace(query=parse.urlencode(query)))
 
     def _build_multipart_body(self, fields: list[tuple[str, str]], audio_path: str) -> tuple[bytes, str]:
-        boundary = f"----WhisperAttackAPI{uuid.uuid4().hex}"
-        lines: list[bytes] = []
-
-        for name, value in fields:
-            if value is None or value == "":
-                continue
-            lines.extend([
-                f"--{boundary}".encode("utf-8"),
-                f'Content-Disposition: form-data; name="{name}"'.encode("utf-8"),
-                b"",
-                str(value).encode("utf-8"),
-            ])
-
-        file_name = os.path.basename(audio_path)
-        content_type = mimetypes.guess_type(audio_path)[0] or "audio/wav"
-        with open(audio_path, "rb") as audio_file:
-            audio_bytes = audio_file.read()
-        lines.extend([
-            f"--{boundary}".encode("utf-8"),
-            f'Content-Disposition: form-data; name="file"; filename="{file_name}"'.encode("utf-8"),
-            f"Content-Type: {content_type}".encode("utf-8"),
-            b"",
-            audio_bytes,
-            f"--{boundary}--".encode("utf-8"),
-            b"",
-        ])
-
-        return b"\r\n".join(lines), f"multipart/form-data; boundary={boundary}"
+        return build_multipart_body(fields, audio_path)
 
     def _extract_text(self, payload: dict) -> str:
         if "text" in payload:

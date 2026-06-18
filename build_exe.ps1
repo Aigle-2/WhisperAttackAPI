@@ -21,6 +21,9 @@ $ExcludeModules = @(
     "--exclude-module", "transformers",
     "--exclude-module", "ctranslate2"
 )
+$DataFiles = @(
+    "--add-data", "stt_backends\vaicom_keyterms.txt;stt_backends"
+)
 
 if ($Profile -eq "full") {
     $AppName = "WhisperAttackAPI-Full"
@@ -72,6 +75,7 @@ if (!(Test-Path $PythonPath)) {
     --distpath $PackageRoot `
     --name $AppName `
     @ExcludeModules `
+    @DataFiles `
     whisper_attack.py
 
 $Assets = @(
@@ -80,6 +84,7 @@ $Assets = @(
     "word_mappings.txt",
     "whisper_attack_icon.png",
     "add_icon.png",
+    "Set STT API Key.cmd",
     "Set ElevenLabs API Key.cmd",
     "README_FIRST.txt"
 )
@@ -104,8 +109,10 @@ $ExpectedReleaseItems = @(
     "word_mappings.txt",
     "whisper_attack_icon.png",
     "add_icon.png",
+    "Set STT API Key.cmd",
     "Set ElevenLabs API Key.cmd",
-    "README_FIRST.txt"
+    "README_FIRST.txt",
+    "_internal\stt_backends\vaicom_keyterms.txt"
 )
 
 foreach ($Item in $ExpectedReleaseItems) {

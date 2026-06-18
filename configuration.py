@@ -2,7 +2,15 @@ import os
 import logging
 from collections.abc import Iterable
 
-from stt_backends.keyterms import DEFAULT_DCS_KEYTERMS, DEFAULT_STT_KEYTERM_SOURCES, PHONETIC_ALPHABET
+from stt_backends.keyterms import (
+    BudgetedKeyterms,
+    DEFAULT_DCS_KEYTERMS,
+    DEFAULT_STT_KEYTERM_SOURCES,
+    PHONETIC_ALPHABET,
+    KeytermBudget,
+    apply_keyterm_budget,
+    load_vaicom_keyterms,
+)
 from theme import THEME_DEFAULT
 
 class ConfigurationError(Exception):
@@ -253,22 +261,125 @@ class WhisperAttackConfiguration:
         """
         keyterms: list[str] = []
         for source in self.get_stt_keyterm_sources():
-            if source == "phonetic_alphabet":
-                keyterms.extend(PHONETIC_ALPHABET)
-            elif source == "fuzzy_words":
-                keyterms.extend(self.fuzzy_words)
-            elif source in ("word_mapping_replacements", "word_mappings"):
-                keyterms.extend(self.word_mappings.values())
-            elif source == "word_mapping_aliases":
-                keyterms.extend(self.word_mappings.keys())
-            elif source in ("dcs_default", "dcs_defaults"):
-                keyterms.extend(DEFAULT_DCS_KEYTERMS)
-            elif source in ("custom", "settings"):
-                keyterms.extend(self._parse_keyterm_setting("stt_keyterms"))
-                keyterms.extend(self._parse_keyterm_setting("stt_keyterms_extra"))
-            else:
-                logging.warning("Unknown stt_keyterm_sources entry '%s'.", source)
+            keyterms.extend(self._keyterms_for_source(source))
         return self._dedupe_keyterms(keyterms)
+
+    def get_stt_keyterm_source_counts(self) -> dict[str, int]:
+        """
+        Returns per-source keyterm counts for startup diagnostics.
+        """
+        counts = {}
+        for source in self.get_stt_keyterm_sources():
+            counts[source] = len(self._dedupe_keyterms(self._keyterms_for_source(source, warn_unknown=False)))
+        return counts
+
+    def get_provider_stt_keyterm_budget(self, provider: str) -> KeytermBudget:
+        """
+        Returns the configured keyterm budget for a provider.
+        """
+        provider = provider.strip().lower()
+        if provider == "elevenlabs":
+            return KeytermBudget(
+                max_terms=self.get_provider_int("elevenlabs", "max_keyterms", 900),
+                max_term_chars=self.get_provider_int("elevenlabs", "max_keyterm_chars", 50),
+            )
+        if provider == "deepgram":
+            return KeytermBudget(
+                max_terms=self.get_provider_int("deepgram", "max_keyterms", 100),
+            )
+        if provider == "openai":
+            return KeytermBudget(
+                max_terms=self.get_provider_int("openai", "max_prompt_keyterms", 300),
+                max_total_chars=self.get_provider_int("openai", "prompt_keyterm_char_budget", 6000),
+            )
+        return KeytermBudget()
+
+    def get_provider_budgeted_stt_keyterm_details(
+        self,
+        provider: str,
+        log_result: bool = True,
+    ) -> BudgetedKeyterms:
+        """
+        Returns generated keyterms constrained to this provider's configured limits.
+        """
+        budget = self.get_provider_stt_keyterm_budget(provider)
+        return self.get_budgeted_stt_keyterm_details(
+            provider,
+            max_terms=budget.max_terms,
+            max_term_chars=budget.max_term_chars,
+            max_total_chars=budget.max_total_chars,
+            log_result=log_result,
+        )
+
+    def get_budgeted_stt_keyterms(
+        self,
+        provider: str,
+        max_terms: int | None = None,
+        max_term_chars: int | None = None,
+        max_total_chars: int | None = None,
+    ) -> list[str]:
+        """
+        Returns generated keyterms constrained to provider-specific limits.
+        """
+        return self.get_budgeted_stt_keyterm_details(
+            provider,
+            max_terms=max_terms,
+            max_term_chars=max_term_chars,
+            max_total_chars=max_total_chars,
+        ).keyterms
+
+    def get_budgeted_stt_keyterm_details(
+        self,
+        provider: str,
+        max_terms: int | None = None,
+        max_term_chars: int | None = None,
+        max_total_chars: int | None = None,
+        log_result: bool = True,
+    ) -> BudgetedKeyterms:
+        """
+        Returns keyterm budgeting details for diagnostics and backend setup.
+        """
+        budget = KeytermBudget(
+            max_terms=max_terms,
+            max_term_chars=max_term_chars,
+            max_total_chars=max_total_chars,
+        )
+        result = apply_keyterm_budget(self.get_stt_keyterms(), budget)
+        if log_result and (
+            result.skipped_too_long or result.omitted_by_term_limit or result.omitted_by_char_limit
+        ):
+            logging.info(
+                "Budgeted %s STT keyterms to %s terms "
+                "(skipped_too_long=%s, omitted_by_term_limit=%s, omitted_by_char_limit=%s).",
+                provider,
+                len(result.keyterms),
+                result.skipped_too_long,
+                result.omitted_by_term_limit,
+                result.omitted_by_char_limit,
+            )
+        return result
+
+    def _keyterms_for_source(self, source: str, warn_unknown: bool = True) -> list[str]:
+        if source == "phonetic_alphabet":
+            return PHONETIC_ALPHABET
+        if source == "fuzzy_words":
+            return self.fuzzy_words
+        if source in ("word_mapping_replacements", "word_mappings"):
+            return list(self.word_mappings.values())
+        if source == "word_mapping_aliases":
+            return list(self.word_mappings.keys())
+        if source in ("dcs_default", "dcs_defaults"):
+            return DEFAULT_DCS_KEYTERMS
+        if source == "vaicom":
+            return load_vaicom_keyterms()
+        if source in ("custom", "settings"):
+            return [
+                *self._parse_keyterm_setting("stt_keyterms"),
+                *self._parse_keyterm_setting("stt_keyterms_extra"),
+            ]
+        if warn_unknown:
+            logging.warning("Unknown stt_keyterm_sources entry '%s'.", source)
+        return []
 
     def _parse_keyterm_setting(self, key: str) -> list[str]:
         keyterms = self.config.get(key, "")
