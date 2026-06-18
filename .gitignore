@@ -1,8 +1,60 @@
-__MACOSX
+# OS metadata
+__MACOSX/
 .DS_Store
+Thumbs.db
+desktop.ini
 
-.venv
-dist
-build
+# Local secrets and credentials
+.env
+.env.*
+*.key
+*.pem
+*.p12
+*.pfx
 
+# Python caches and local environments
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.pyre/
+.ruff_cache/
+.tox/
+.nox/
+.coverage
+.coverage.*
+htmlcov/
+.venv/
+venv/
+env/
+ENV/
+
+# Build and packaging outputs
+build/
+dist/
+*.egg-info/
+.eggs/
 whisper_server.exe
+
+# .NET / Visual Studio outputs for the VoiceAttack plugin
+.vs/
+VoiceAttackPlugin/**/bin/
+VoiceAttackPlugin/**/obj/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+
+# Local logs, runtime audio, and temporary files
+logs/
+*.log
+recorded_audio.wav
+*.tmp
+*.temp
+tmp/
+temp/
+
+# Editor settings
+.idea/
+.vscode/

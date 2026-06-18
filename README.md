@@ -1,6 +1,8 @@
-# WhisperAttack - OpenAI Whisper for VoiceAttack
+# WhisperAttackAPI - STT Backends for VoiceAttack
 
-This repository provides a single-server approach for using OpenAI Whisper locally with VoiceAttack, replacing Windows Speech Recognition with a fully offline, GPU-accelerated blazing fast and accurate AI speech recognition engine
+This repository provides a single-server approach for using modern speech-to-text (STT) backends with VoiceAttack, replacing Windows Speech Recognition with accurate push-to-talk transcription.
+
+This fork keeps the WhisperAttack workflow but adds a provider-agnostic STT backend layer. The default backend is ElevenLabs Scribe v2 for API-based transcription that does not consume the GPU DCS needs. The original local `faster_whisper` workflow remains available as a configurable fallback.
 
 This is a fork for further integration of **KneeboardWhisper** by the amazing creator [@BojoteX](https://github.com/BojoteX). A special thank you goes to [@hradec](https://github.com/hradec), whose original script used Google Voice Recognition, [@SeaTechNerd83](https://github.com/SeaTechNerd83) for helping combine the two approaches and creating a VA plugin and finally [@sleighzy](https://github.com/sleighzy) for VAICOM implementation and the lengthy list of bug fixes and enchancements that would fill this page
 
@@ -10,20 +12,22 @@ In short, SeaTechNerd83 and I combined the two scripts to run voice commands thr
 
 ## Features
 
-- **OpenAI Whisper models**:
-  - Loads the Whisper model once on GPU or CPU.
+- **Provider-agnostic STT backends**:
   - Records mic audio on demand (via socket commands).
-  - Transcribes the `.wav` file using Whisper.
+  - Transcribes the `.wav` file using the configured backend.
   - Sends recognized text into VoiceAttack.
   - Pushes transcribed text to clipboard - (perfect for voice to text DCS Chat...)
+  - Supports the original local `faster_whisper` backend.
+  - Supports ElevenLabs Scribe v2 via API.
 
 - **VoiceAttack Command Plugin**
   - Sends "start", "stop", or "shutdown" commands to the server directly through VoiceAttack.
 
 - **Advantages:**
-  - No repeated model loads (faster, especially with larger Whisper models).
+  - API-backed STT avoids using GPU resources needed by DCS.
+  - Local Whisper can still be used offline when preferred.
   - Push-to-Talk style workflow with VoiceAttack press & release.
-  - Extremely accurate voice recognition (No more VoiceAttack misunderstanding you!)
+  - STT keyterms can bias recognition toward DCS, VAICOM, ATC, callsigns, and airfields.
 
 ---
 
@@ -40,8 +44,13 @@ Instructions for integrating with VAICOM can be located in the [VAICOM INTEGRATI
   - Plugins Enabled
 
 - **GPU (Optional, but Recommended)**
-  - Whisper runs faster on an NVIDIA GPU with CUDA.
-  - When using GPU if CUDA is not available then an error will be logged and this will fallback to CPU
+  - Only required when using the `faster_whisper` backend.
+  - API-backed providers do not use local GPU resources.
+
+- **API key (ElevenLabs backend)**
+  - Create an ElevenLabs API key.
+  - Set it in your environment as `ELEVENLABS_API_KEY`.
+  - Do not put API keys in `settings.cfg` or commit them to the repository.
 
 ---
 
@@ -68,6 +77,16 @@ The `settings.cfg` file contains configuration for WhisperAttack.
 
 The default values should cover most cases but can be changed:
 
+- `stt_backend` - The speech-to-text backend to use, `elevenlabs` by default in this fork.
+  - Supported values: `elevenlabs`, `faster_whisper`
+- `stt_language` - Language hint for transcription, `en` by default for VAICOM English commands.
+- `stt_timeout_seconds` - API request timeout in seconds.
+- `stt_keyterms` - Comma-separated provider-side biasing terms for supported API backends.
+- `elevenlabs_api_key_env` - Environment variable containing the ElevenLabs API key. Defaults to `ELEVENLABS_API_KEY`.
+- `elevenlabs_model` - ElevenLabs model ID, `scribe_v2` by default.
+- `elevenlabs_no_verbatim` - Removes filler words and false starts when supported. Defaults to `true`.
+- `elevenlabs_tag_audio_events` - Enables or disables audio event tags. Defaults to `false`.
+- `elevenlabs_timestamps_granularity` - Timestamp granularity. Defaults to `none` because VoiceAttack only needs text.
 - `whisper_model` - The Whisper model to use, `small.en` by default. See the table at the bottom of the README file for options.
   - A smaller size can be specified for reducing the amount of VRAM used, e.g. `base.en` or `tiny.en`
 - `whisper_device` - Which device to run the Whisper transcription process on, `GPU` (default) or `CPU`
@@ -75,6 +94,25 @@ The default values should cover most cases but can be changed:
   - `default` - this will use the current theme you have set for Windows
   - `dark` - dark mode
   - `light` - light mode
+
+### ElevenLabs API setup
+
+PowerShell:
+
+```console
+setx ELEVENLABS_API_KEY "your-api-key"
+```
+
+Restart WhisperAttackAPI after setting the environment variable.
+
+### Local Whisper setup
+
+To run fully offline, update `settings.cfg`:
+
+```console
+stt_backend=faster_whisper
+whisper_model=small.en
+```
 
 ### word_mappings.txt
 
@@ -100,7 +138,7 @@ The application window will display startup logging information, the raw text tr
 WhisperAttack will have completed loading once the "Server started and listening" message is displayed.
 
 ```
-Loading Whisper model (small.en), device=GPU ...
+Loading STT backend (elevenlabs) ...
 Server started and listening on 127.0.0.1:65432...
 ```
 
@@ -244,9 +282,17 @@ whisper_core_type=standard
 
 ## Performance (AI Model)
 
-If WhisperAttack is causing significant studders, It is likely that the current model is overloading your VRAM. If this is the case, studders can be alleviated by changing the model size (extra information on the models is available in the table below) in the `settings.cfg` file as follows:
+If DCS is GPU constrained, use an API backend such as ElevenLabs so transcription does not consume VRAM. This is the default in WhisperAttackAPI:
 
 ```console
+stt_backend=elevenlabs
+elevenlabs_model=scribe_v2
+```
+
+If you use the local `faster_whisper` backend and WhisperAttack is causing significant studders, it is likely that the current model is overloading your VRAM. In that case, reduce the local Whisper model size:
+
+```console
+stt_backend=faster_whisper
 whisper_model=base.en
 ```
 

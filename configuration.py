@@ -16,7 +16,7 @@ class WhisperAttackConfiguration:
     """
     A class to read and write the WhisperAttack configuration.
     Default configuration is loaded from the application directory,
-    custom configuration is loaded from the AppData\Local\WhisperAttack
+    custom configuration is loaded from the AppData\\Local\\WhisperAttack
     directory and is combined with the default configuration.
     """
     def __init__(self, app_location: str, app_data_location: str):
@@ -140,6 +140,73 @@ class WhisperAttackConfiguration:
         """
         return self.config
 
+    def get_safe_configuration(self) -> dict[str, str]:
+        """
+        Return configuration values with sensitive local settings redacted.
+        """
+        safe_config = {}
+        for key, value in self.config.items():
+            lower_key = key.lower()
+            if lower_key.endswith("_env"):
+                safe_config[key] = value
+            elif "api_key" in lower_key or "secret" in lower_key or "token" in lower_key or "password" in lower_key:
+                safe_config[key] = "<redacted>"
+            else:
+                safe_config[key] = value
+        return safe_config
+
+    def get_setting(self, key: str, default: str = "") -> str:
+        """
+        Returns a raw string configuration setting.
+        """
+        return self.config.get(key, default)
+
+    def get_bool_setting(self, key: str, default: bool = False) -> bool:
+        """
+        Returns a boolean configuration setting.
+        """
+        value = self.config.get(key)
+        if value is None:
+            return default
+        return value.strip().lower() in ("1", "true", "yes", "y", "on")
+
+    def get_int_setting(self, key: str, default: int) -> int:
+        """
+        Returns an integer configuration setting.
+        """
+        value = self.config.get(key)
+        if value is None:
+            return default
+        try:
+            return int(value)
+        except ValueError:
+            logging.warning("Invalid integer value for '%s': %s. Using default %s.", key, value, default)
+            return default
+
+    def get_provider_setting(self, provider: str, key: str, default: str = "") -> str:
+        """
+        Returns a provider-specific setting, falling back to a generic stt_* setting.
+        """
+        return self.config.get(f"{provider}_{key}", self.config.get(f"stt_{key}", default))
+
+    def get_provider_bool(self, provider: str, key: str, default: bool = False) -> bool:
+        """
+        Returns a provider-specific boolean setting.
+        """
+        provider_key = f"{provider}_{key}"
+        if provider_key in self.config:
+            return self.get_bool_setting(provider_key, default)
+        return self.get_bool_setting(f"stt_{key}", default)
+
+    def get_provider_int(self, provider: str, key: str, default: int) -> int:
+        """
+        Returns a provider-specific integer setting.
+        """
+        provider_key = f"{provider}_{key}"
+        if provider_key in self.config:
+            return self.get_int_setting(provider_key, default)
+        return self.get_int_setting(f"stt_{key}", default)
+
     def get_word_mappings(self) -> dict[str, str]:
         """
         Returns the keyword mappings
@@ -151,6 +218,37 @@ class WhisperAttackConfiguration:
         Returns the fuzzy words list
         """
         return self.fuzzy_words
+
+    def get_stt_backend(self) -> str:
+        """
+        Returns the speech-to-text backend provider to use.
+        """
+        return self.config.get("stt_backend", "faster_whisper").strip().lower()
+
+    def get_stt_language(self) -> str:
+        """
+        Returns the language hint used for transcription.
+        """
+        return self.config.get("stt_language", "en")
+
+    def get_stt_prompt(self) -> str:
+        """
+        Returns an optional prompt for backends that support textual context.
+        """
+        return self.config.get("stt_prompt", "").strip()
+
+    def get_stt_keyterms(self) -> list[str]:
+        """
+        Returns keyterms used by STT backends that support provider-side biasing.
+        """
+        keyterms = self.config.get("stt_keyterms", "")
+        return [keyterm.strip() for keyterm in keyterms.split(",") if keyterm.strip()]
+
+    def get_stt_timeout_seconds(self) -> int:
+        """
+        Returns the timeout for API-backed transcription requests.
+        """
+        return self.get_int_setting("stt_timeout_seconds", 30)
 
     def get_whisper_model(self) -> str:
         """
