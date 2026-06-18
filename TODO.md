@@ -2,15 +2,15 @@
 
 A living punch-list of what's left after Phases 0–5 (core). The phased narrative lives in
 [`docs/MIGRATION_PLAN.md`](docs/MIGRATION_PLAN.md); decisions are in [`docs/adr/`](docs/adr/).
-At last update the tree is green: **232 tests**, ruff / format / mypy / import-linter all
+At last update the tree is green: **237 tests**, ruff / format / mypy / import-linter all
 pass via `uv run` (see [AGENTS.md](AGENTS.md)).
 
 **Done so far (Phase 5):** A governance core (ADR-0004), C telemetry persistence
 (ADR-0006 §1), the eval harness (ADR-0008), B phrase-snap (ADR-0011), the VAICOM
 keyterm + phrase-index generator with auto-discovery + **background generation on first
 run / on stale** (ADR-0005), the **idle-gated phrase-index hot-reload** (ADR-0009), and the
-introspection API — read endpoints + **gated mutating actions** + `vaivox-debug` skill
-(ADR-0010).
+introspection API — read endpoints + **gated mutating actions** + the **MCP server
+adapter** (`vaivox-mcp`) + `vaivox-debug` skill (ADR-0010).
 
 ---
 
@@ -44,10 +44,15 @@ These gate the match-signal-dependent work; everything buildable without them is
 
 ## 2. Buildable in CI — no hardware required
 
-- [ ] **MCP server adapter (ADR-0010).** A thin MCP server over the *same* query use cases
-  as the HTTP API. Needs a dependency decision: add `mcp` as an optional extra and import
-  it lazily (the gate env is dep-light and the smoke test imports every module). Fast-follow
-  to the read API.
+- [x] **MCP server adapter (ADR-0010).** `infrastructure/api/mcp_server.py`
+  (`IntrospectionTools` + `build_mcp_server`) exposes the *same* read query use cases as
+  the HTTP API (status / dry-run / recent / metrics / vocabulary) as FastMCP tools, served
+  over **stdio** by the `vaivox-mcp` console script (`vaivox/mcp_main.py`, headless reader
+  process). `mcp` is an **optional extra** imported **lazily** (the gate stays dep-light;
+  the smoke test imports every module mcp-free — verified). Tool bodies unit-tested without
+  `mcp`; the FastMCP build + headless wiring validated against the real SDK (`--extra mcp`).
+  *Scope:* read/reproduce only — the mutating actions stay on the embedded HTTP API (they
+  act on live in-app state a separate reader process doesn't own).
 - [x] **Gated mutating API actions (ADR-0010).** `POST /vocabulary/generate` (force
   regenerate + hot-apply), `/vocabulary/reload` (re-read index from disk + hot-apply), and
   `/reconcile/simulate` (reconcile **and dispatch** for real) over the `RefreshVocabulary` /

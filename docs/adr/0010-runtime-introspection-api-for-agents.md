@@ -88,7 +88,10 @@ call.
 2. [x] HTTP/JSON adapter; localhost + opt-in + optional token
    (`infrastructure/api/introspection.py`). *Built on the stdlib `http.server` instead of
    FastAPI to keep the gate environment dependency-free (no auto-OpenAPI as a result).*
-3. [ ] MCP server adapter over the same use cases (deferred — needs the `mcp` dependency).
+3. [x] MCP server adapter over the same use cases (`infrastructure/api/mcp_server.py` +
+   the `vaivox-mcp` console script; `mcp` optional extra, lazy import; FastMCP stdio).
+   *Scope:* the read query use cases — a standalone reader process; mutating actions stay on
+   the HTTP API (they need live in-app state).
 4. [x] Gate mutating actions behind debug/agent mode. `POST /vocabulary/generate` |
    `/vocabulary/reload` | `/reconcile/simulate` over the `RefreshVocabulary` /
    `ReloadVocabulary` / `SimulateUtterance` use cases, gated behind `api_actions_enabled`

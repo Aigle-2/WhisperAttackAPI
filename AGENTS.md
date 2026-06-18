@@ -86,14 +86,17 @@ but never anything that does I/O (sockets, files, mic, network, UI).
     phrases"; exposed on `WiredApp.phrase_snapper` for a reload trigger. The eval stays on
     a frozen `PhraseSnapper` (no leak). *Deferred:* the vocabulary swap (waits on the
     pipeline reading vocab from `VocabularyRepository`), the LRU pass, and the file-watch.
-  - **Agent API/MCP** (ADR-0010) ✅ read API **+ gated actions**: introspection endpoints
-    `/status`, `/metrics`, `/reconciliations`, `/vocabulary` + `POST /reconcile/dry-run`
-    over query use cases (off by default, localhost, optional bearer token, secrets
-    redacted), plus the `vaivox-debug` Claude Code skill. The **mutating actions**
-    (`POST /vocabulary/generate` | `/vocabulary/reload` | `/reconcile/simulate`) go through
-    application use cases and are gated behind `api_actions_enabled` (off by default, 403
-    otherwise); `route_command` is shared so simulate dispatches identically to the PTT
-    flow. *Deferred:* the MCP server adapter (needs the `mcp` dependency).
+  - **Agent API/MCP** (ADR-0010) ✅ read API **+ gated actions + MCP**: introspection
+    endpoints `/status`, `/metrics`, `/reconciliations`, `/vocabulary` + `POST
+    /reconcile/dry-run` over query use cases (off by default, localhost, optional bearer
+    token, secrets redacted), plus the `vaivox-debug` Claude Code skill. The **mutating
+    actions** (`POST /vocabulary/generate` | `/vocabulary/reload` | `/reconcile/simulate`)
+    go through application use cases and are gated behind `api_actions_enabled` (off by
+    default, 403 otherwise); `route_command` is shared so simulate dispatches identically to
+    the PTT flow. The **MCP server adapter** (`infrastructure/api/mcp_server.py` +
+    `vaivox-mcp` console script) serves the *same read query use cases* as FastMCP stdio
+    tools — `mcp` is an optional extra, imported lazily so the gate stays dep-light. *Scope:*
+    the MCP server is a read-only reader process; mutating actions stay on the HTTP API.
   - **Cross-cutting blocker:** the C# plugin **return channel** (ADR-0006) gates the
     match-signal-dependent work — live usage stamping (`mark_used`/recency), near-miss
     capture, Tier 2 attribution — and needs a Windows/VoiceAttack build (not CI-testable).
@@ -141,7 +144,9 @@ opt-in because its libraries are imported lazily:
 ```bash
 uv sync --extra app         # + ttkbootstrap/sounddevice/keyboard/... (run the real app)
 uv sync --extra full        # + torch/faster-whisper/transformers (local STT)
+uv sync --extra mcp         # + the `mcp` SDK (the vaivox-mcp agent server, ADR-0010)
 uv run vaivox               # launch the app (needs --extra app or full)
+uv run --extra mcp vaivox-mcp   # serve the read-only MCP introspection tools over stdio
 ```
 
 Running from source uses a small `sys.path` shim in `vaivox.main` (and the
@@ -171,8 +176,14 @@ mutating actions** (403 unless `api_actions_enabled`): `POST /vocabulary/generat
 disk + hot-apply), `POST /reconcile/simulate {"text": "..."}` (reconcile **and dispatch**
 for real).
 
-The full debug recipes (curl examples, the dry-run workflow, the gated actions, the
-deferred MCP adapter) live in the Claude Code skill
+For **native** agent tooling, the same read query use cases are also served as MCP stdio
+tools by the `vaivox-mcp` console script (`infrastructure/api/mcp_server.py` +
+`src/vaivox/mcp_main.py`): a standalone read-only reader process over the persisted state.
+`mcp` is an optional extra (`uv sync --extra mcp`), imported lazily so the default gate sync
+stays dependency-free.
+
+The full debug recipes (curl examples, the dry-run workflow, the gated actions, the MCP
+`.mcp.json` setup) live in the Claude Code skill
 [`.claude/skills/vaivox-debug/SKILL.md`](.claude/skills/vaivox-debug/SKILL.md).
 
 ## Conventions

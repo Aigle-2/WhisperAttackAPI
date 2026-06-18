@@ -68,9 +68,16 @@ full = [
     "faster-whisper",
     "transformers",
 ]
+# The MCP server adapter (ADR-0010): native agent tool access over the introspection
+# query use cases. Install with `uv sync --extra mcp`. Imported lazily (see
+# infrastructure/api/mcp_server.py) so the default gate sync stays dependency-light.
+mcp = [
+    "mcp>=1.0",
+]
 
 [project.scripts]
 vaivox = "vaivox.main:main"
+vaivox-mcp = "vaivox.mcp_main:main"
 
 # Developer toolchain — the quality gates (ADR-0007). A PEP 735 dependency group, so
 # `uv sync` installs it by default; it is NOT part of the published wheel's extras.
@@ -196,6 +203,7 @@ module = [
     "faster_whisper.*",
     "torch.*",
     "transformers.*",
+    "mcp.*",
 ]
 ignore_missing_imports = true
 

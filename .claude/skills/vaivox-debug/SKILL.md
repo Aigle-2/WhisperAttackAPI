@@ -183,11 +183,37 @@ you intend the side effect.
 > Vocabulary swaps are idle-gated (ADR-0009): a reload/generate requested mid-utterance
 > applies at the next idle point, never mid-command.
 
+## 5. Native MCP tools (`vaivox-mcp`)
+
+For **native** tool access (no curl), VAIVOX ships an MCP server over the **same read query
+use cases** (status, dry-run, recent, metrics, vocabulary). It is a standalone **stdio**
+process that reads the persisted state under `%LOCALAPPDATA%\VAIVOX`, so it works whether or
+not the desktop app is running.
+
+Install the optional extra (it is not in the default sync) and register the server:
+
+```bash
+uv sync --extra mcp        # installs the `mcp` SDK + the `vaivox-mcp` console script
+```
+
+```json
+// .mcp.json (or your client's MCP config)
+{
+  "mcpServers": {
+    "vaivox": { "command": "uv", "args": ["run", "--extra", "mcp", "vaivox-mcp"] }
+  }
+}
+```
+
+Tools exposed: `status`, `dry_run` (args: `text`), `recent_reconciliations` (args: `limit`),
+`metrics`, `vocabulary` — the same shapes as the HTTP endpoints in §2.
+
+> **Read-only by design.** The MCP server is a separate *reader* process, so it exposes only
+> the query tools (the `recording` flag always reports `false`). The **mutating actions**
+> (generate / reload / simulate, §4) act on the *live* in-app state and stay on the embedded
+> HTTP API.
+
 ## Deferred / next steps
 
-- **MCP server adapter (fast-follow, ADR-0010 item 3).** A thin MCP adapter would give
-  Claude Code / Codex *native* tool access over the **same** use cases. It is deliberately
-  **not** built yet: it needs the `mcp` dependency, which is not in the gate environment,
-  so adding it now would break the depless gates / package smoke test. When added it must
-  reuse `application/queries.py` + the action use cases (no domain bypass) and keep the
-  same read-only-by-default / gated-actions invariants.
+- **Mutating actions over MCP.** Could follow once an embedded (in-app) MCP transport
+  exists; today they live on the HTTP API where the live snapper / VoiceAttack socket are.

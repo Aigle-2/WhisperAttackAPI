@@ -147,7 +147,10 @@ generator, and ADR-0005 **background** generation on first run / on stale all no
   `POST /vocabulary/generate` | `/vocabulary/reload` | `/reconcile/simulate` gated behind
   `api_actions_enabled` (off by default, 403 otherwise; `route_command` shared with the PTT
   flow). Off by default, bearer token, redacted; shipped with the `vaivox-debug` Claude
-  Code skill. *Deferred:* the MCP server adapter (needs the `mcp` dependency).
+  Code skill. The **MCP server adapter** (`infrastructure/api/mcp_server.py` + the
+  `vaivox-mcp` console script) serves the same read query use cases as FastMCP stdio tools
+  (`mcp` optional extra, lazy import). *Deferred:* mutating actions over MCP (they stay on
+  the embedded HTTP API).
 Order: A and C landed first (C's "entry fired" event powers A's recency), then B (which
 relies on the eval/telemetry to tune thresholds safely). The match-signal-dependent
 pieces (A's recency, C's outcome, near-miss) wait on the C# return channel.
