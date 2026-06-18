@@ -1,35 +1,21 @@
-from abc import ABC, abstractmethod
-from dataclasses import dataclass
+"""Legacy shim: the STT port, result VO, and error now live in the hexagonal layers.
 
+Retained so legacy modules and the ported tests keep importing from
+``stt_backends.base`` during the migration. New code imports the port and error from
+:mod:`vaivox.application.ports` and the result VO from
+:mod:`vaivox.domain.reconciliation.model`.
+"""
 
-class SpeechToTextBackendError(Exception):
-    """
-    Raised when a speech-to-text backend cannot load or transcribe audio.
-    """
+from vaivox.application.ports import SpeechToText, SpeechToTextError
+from vaivox.domain.reconciliation.model import Transcription
 
+# Backward-compatible aliases for the pre-hexagonal names.
+SpeechToTextResult = Transcription
+SpeechToTextBackendError = SpeechToTextError
+SpeechToTextBackend = SpeechToText
 
-@dataclass(frozen=True)
-class SpeechToTextResult:
-    """
-    Normalized speech-to-text result returned by every backend.
-    """
-    text: str
-
-
-class SpeechToTextBackend(ABC):
-    """
-    Common contract for all speech-to-text providers.
-    """
-    provider_name = "unknown"
-
-    def load(self) -> None:
-        """
-        Prepare the backend for transcription.
-        """
-
-    @abstractmethod
-    def transcribe(self, audio_path: str) -> SpeechToTextResult:
-        """
-        Transcribe an audio file and return normalized text.
-        """
-
+__all__ = [
+    "SpeechToTextBackend",
+    "SpeechToTextBackendError",
+    "SpeechToTextResult",
+]

@@ -71,6 +71,9 @@ dev = [
     "pre-commit>=3.7",
 ]
 
+[project.scripts]
+vaivox = "vaivox.main:main"
+
 [project.urls]
 Homepage = "https://github.com/Aigle-2/WhisperAttackAPI"
 
@@ -87,11 +90,10 @@ line-length = 100
 src = ["src", "tests"]
 extend-exclude = [
     # Legacy application modules — refactored in Phase 2+, not yet held to the
-    # new standard. Excluding them keeps lint/format green without churn.
+    # new standard. Excluding them keeps lint/format green without churn. As modules
+    # become thin shims (re-export only) they are removed from this list.
     "whisper_attack.py",
     "whisper_server.py",
-    "configuration.py",
-    "transcription_postprocess.py",
     "word_mappings.py",
     "writer.py",
     "theme.py",
@@ -144,8 +146,6 @@ pretty = true
 module = [
     "whisper_attack",
     "whisper_server",
-    "configuration",
-    "transcription_postprocess",
     "word_mappings",
     "writer",
     "theme",
@@ -166,6 +166,8 @@ module = [
     "pid.*",
     "darkdetect.*",
     "pyperclip.*",
+    "wcwidth.*",
+    "PIL.*",
     "faster_whisper.*",
     "torch.*",
     "transformers.*",

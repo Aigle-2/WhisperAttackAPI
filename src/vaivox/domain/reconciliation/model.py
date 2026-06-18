@@ -6,6 +6,20 @@ from dataclasses import dataclass
 
 
 @dataclass(frozen=True)
+class Transcription:
+    """A normalized speech-to-text result returned by every STT provider.
+
+    This is the value object every :class:`~vaivox.application.ports.SpeechToText`
+    adapter yields, decoupling the use cases from any provider-specific payload.
+
+    Attributes:
+        text: The transcript text exactly as normalized by the provider adapter.
+    """
+
+    text: str
+
+
+@dataclass(frozen=True)
 class ReconciliationResult:
     """The staged result of reconciling one raw transcript into a command.
 
