@@ -70,7 +70,11 @@ but never anything that does I/O (sockets, files, mic, network, UI).
     auto-discovers a VAICOM install and emits both files to `%LOCALAPPDATA%\VAIVOX`
     (unit-tested on synthetic fixtures; end-to-end needs a real install). *Deferred:*
     recipient segmentation; thresholds-in-settings.
-  - **Agent API/MCP** (ADR-0010) — pending.
+  - **Agent API/MCP** (ADR-0010) ✅ read API: introspection endpoints `/status`,
+    `/metrics`, `/reconciliations`, `/vocabulary` + `POST /reconcile/dry-run` over query
+    use cases (off by default, localhost, optional bearer token, secrets redacted), plus
+    the `vaivox-debug` Claude Code skill. *Deferred:* the MCP server adapter (needs the
+    `mcp` dependency) and gated mutating actions (reload / generate / simulate).
   - **Cross-cutting blocker:** the C# plugin **return channel** (ADR-0006) gates the
     match-signal-dependent work — live usage stamping (`mark_used`/recency), near-miss
     capture, Tier 2 attribution — and needs a Windows/VoiceAttack build (not CI-testable).

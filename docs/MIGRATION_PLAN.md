@@ -139,9 +139,12 @@ generator now exist (see Phase 5); **background** generation on first run + the 
   (`tools/generate_vaicom_keyterms.py`, ADR-0005) auto-discovers a VAICOM install and emits
   both files to `%LOCALAPPDATA%\VAIVOX` (unit-tested on synthetic fixtures; end-to-end
   needs a real install). *Deferred:* recipient segmentation; thresholds-in-settings.
-- **Agent API + skills** (ADR-0010) — pending: enrich the introspection API
-  (telemetry / vocab / metrics endpoints + MCP adapter) and ship the agent skill /
-  prompts.
+- **Agent API + skills** (ADR-0010) ✅ read API: the localhost introspection API now
+  serves `/status`, `/metrics`, `/reconciliations`, `/vocabulary` + `POST
+  /reconcile/dry-run` over read-only query use cases (off by default, bearer token,
+  redacted), shipped with the `vaivox-debug` Claude Code skill. *Deferred:* the MCP server
+  adapter (needs the `mcp` dependency) and gated mutating actions (reload / generate /
+  simulate).
 Order: A and C landed first (C's "entry fired" event powers A's recency), then B (which
 relies on the eval/telemetry to tune thresholds safely). The match-signal-dependent
 pieces (A's recency, C's outcome, near-miss) wait on the C# return channel.
