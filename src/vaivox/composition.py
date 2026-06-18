@@ -17,6 +17,7 @@ from vaivox.application.ports import (
     SpeechToTextError,
     StatusLevel,
     StatusReporter,
+    TelemetrySink,
 )
 from vaivox.application.queries import DescribeStatus, DryRunReconcile
 from vaivox.application.record_command import StartRecording, StopAndReconcile
@@ -29,6 +30,7 @@ from vaivox.infrastructure.inbound.control_server import ControlSocketServer
 from vaivox.infrastructure.kneeboard.sink import KneeboardSink
 from vaivox.infrastructure.stt.factory import create_stt_backend
 from vaivox.infrastructure.system_clock import SystemClock
+from vaivox.infrastructure.telemetry.jsonl_sink import JsonlTelemetrySink
 from vaivox.infrastructure.telemetry.null_sink import NullTelemetrySink
 from vaivox.infrastructure.voiceattack.sink import VoiceAttackCommandSink
 
@@ -75,7 +77,7 @@ def build(
         config.get_voiceattack_host(), config.get_voiceattack_port(), reporter
     )
     kneeboard_sink = KneeboardSink(config.get_text_line_length, reporter)
-    telemetry = NullTelemetrySink()
+    telemetry = build_telemetry_sink(config)
     clock = SystemClock()
 
     start_recording = StartRecording(recorder, reporter)
@@ -117,6 +119,27 @@ def build(
         )
 
     return WiredApp(control_server=control_server, api_server=api_server)
+
+
+def build_telemetry_sink(config: VaivoxConfiguration) -> TelemetrySink:
+    """Select the telemetry sink from configuration (ADR-0006).
+
+    Telemetry is on by default: ADR-0006 step 1 records every reconciliation outcome,
+    and the log is a local append-only file in the per-user VAIVOX data directory under
+    %LOCALAPPDATA% (no network, no PII beyond transcribed text). The ``telemetry_enabled``
+    setting lets a user opt out, in which case the no-op sink preserves legacy behaviour.
+
+    Args:
+        config: The effective application configuration.
+
+    Returns:
+        A :class:`~vaivox.infrastructure.telemetry.jsonl_sink.JsonlTelemetrySink` writing
+        into the per-user data directory when telemetry is enabled, otherwise a
+        :class:`~vaivox.infrastructure.telemetry.null_sink.NullTelemetrySink`.
+    """
+    if config.get_bool_setting("telemetry_enabled", True):
+        return JsonlTelemetrySink(config.app_data_location)
+    return NullTelemetrySink()
 
 
 def load_speech_to_text(

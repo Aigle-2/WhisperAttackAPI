@@ -206,6 +206,11 @@ class VaivoxConfiguration:
                 "Failed to add new word mapping to word_mappings.txt file"
             ) from error
 
+    @property
+    def app_data_location(self) -> str:
+        """Return the per-user data directory (config, logs, telemetry, generated files)."""
+        return self._app_data_location
+
     def get_configuration(self) -> dict[str, str]:
         """Return the full merged configuration."""
         return self.config
