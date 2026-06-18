@@ -114,18 +114,20 @@ VAICOM-derived data (ADR-0005): the loader reads a locally-generated file from
 works out-of-the-box.
 **Exit:** ✅ no `WhisperAttack` product-identity / upstream-GUID references remain in the
 new tree (only attribution + screenshot filenames); seed works out-of-the-box; gates
-green. **Deferred:** full ADR-0005 auto-discovery + background generation + UI "Refresh
-VAICOM vocabulary"; the C# `dotnet` build + bundled `.vap` re-point (binary; done by hand
-in VoiceAttack, not verifiable in CI). The VAICOM auto-discovery + keyterm/phrase-index
-generator now exist (see Phase 5); **background** generation on first run + the UI
-"Refresh" control remain.
+green. **Deferred:** the C# `dotnet` build + bundled `.vap` re-point (binary; done by hand
+in VoiceAttack, not verifiable in CI). The VAICOM auto-discovery, the keyterm/phrase-index
+generator, and ADR-0005 **background** generation on first run / on stale all now exist
+(see Phase 5); only the UI "Refresh VAICOM vocabulary" **button** remains.
 
 ### Phase 5 — Reconciliation features (on clean seams) 🚧 (in progress)
 - **A — Governance** (ADR-0004) ✅ core: `domain/vocabulary/` model + `VocabularyGovernor`
   (rank by recency/hits, LRU eviction with DEFAULT protection + grace window, Tier 1
   attribution), `VocabularyRepository` port, JSONL source + usage-sidecar adapter.
-  *Deferred:* Tier 2 counterfactual; the **reload model** (ADR-0009) idle-gated hot
-  atomic swap; live `mark_used` wiring (blocked on the match signal, below).
+  *Deferred:* Tier 2 counterfactual; live `mark_used` wiring (blocked on the match
+  signal, below). The **reload model** (ADR-0009) idle-gated hot atomic swap shipped for
+  the **phrase index** (`infrastructure/reload/` + the `PhraseMatcher` port; swapped only
+  when not recording, observable, eval still frozen); the **vocabulary** swap + file-watch
+  remain (they wait on the pipeline reading vocab from `VocabularyRepository`).
 - **C — Telemetry** (ADR-0006) ✅ §1 ("always"): `JsonlTelemetrySink` +
   config-gated wiring. *Deferred:* the **plugin return channel** (`MatchOutcome`) —
   needs the C# rebuild — and with it usage stamping and near-miss capture.
@@ -139,12 +141,13 @@ generator now exist (see Phase 5); **background** generation on first run + the 
   (`tools/generate_vaicom_keyterms.py`, ADR-0005) auto-discovers a VAICOM install and emits
   both files to `%LOCALAPPDATA%\VAIVOX` (unit-tested on synthetic fixtures; end-to-end
   needs a real install). *Deferred:* recipient segmentation; thresholds-in-settings.
-- **Agent API + skills** (ADR-0010) ✅ read API: the localhost introspection API now
-  serves `/status`, `/metrics`, `/reconciliations`, `/vocabulary` + `POST
-  /reconcile/dry-run` over read-only query use cases (off by default, bearer token,
-  redacted), shipped with the `vaivox-debug` Claude Code skill. *Deferred:* the MCP server
-  adapter (needs the `mcp` dependency) and gated mutating actions (reload / generate /
-  simulate).
+- **Agent API + skills** (ADR-0010) ✅ read API **+ gated actions**: the localhost
+  introspection API serves `/status`, `/metrics`, `/reconciliations`, `/vocabulary` +
+  `POST /reconcile/dry-run` over read-only query use cases, plus the **mutating actions**
+  `POST /vocabulary/generate` | `/vocabulary/reload` | `/reconcile/simulate` gated behind
+  `api_actions_enabled` (off by default, 403 otherwise; `route_command` shared with the PTT
+  flow). Off by default, bearer token, redacted; shipped with the `vaivox-debug` Claude
+  Code skill. *Deferred:* the MCP server adapter (needs the `mcp` dependency).
 Order: A and C landed first (C's "entry fired" event powers A's recency), then B (which
 relies on the eval/telemetry to tune thresholds safely). The match-signal-dependent
 pieces (A's recency, C's outcome, near-miss) wait on the C# return channel.

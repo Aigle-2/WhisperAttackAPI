@@ -6,7 +6,9 @@ reconciled command against an index of valid VAICOM command phrases. That index 
 redistributing data derived from a VAICOM install is a licensing grey zone. Instead the
 generator writes ``phrase_index.txt`` (one valid command phrase per line) into the
 per-user VAIVOX data directory under %LOCALAPPDATA% VAIVOX, and this loader reads it from
-there. The index is **frozen per session** (ADR-0009 does not hot-swap it).
+there. The index loaded here seeds the snapper; a regenerated index can later be swapped
+in at idle without a restart via the reloadable adapter (ADR-0009,
+:class:`~vaivox.infrastructure.reload.phrase_snapper.ReloadablePhraseSnapper`).
 
 Until that file exists the loader returns an empty list, which makes the snapper a no-op
 (every utterance is sent raw) — so there is never a hard dependency on a generated file

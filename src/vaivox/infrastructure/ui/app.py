@@ -111,6 +111,7 @@ class VaivoxApp:
         )
         self.control_server = wired.control_server
         self.api_server = wired.api_server
+        self.refresh_vocabulary = wired.refresh_vocabulary
         if self.api_server is not None:
             self.api_server.start()
 
@@ -126,9 +127,23 @@ class VaivoxApp:
         threading.excepthook = self._handle_exception
         threading.Thread(daemon=True, target=lambda: self.icon.run(setup=self._startup)).start()
 
+        # Generate/refresh the VAICOM vocabulary off the UI thread (ADR-0005). It is a
+        # no-op when up to date, falls back to the seed when no install is found, and
+        # hot-applies a regenerated phrase index at idle (ADR-0009) — never blocking start.
+        threading.Thread(daemon=True, target=self._refresh_vocabulary_in_background).start()
+
     def run(self) -> None:
         """Run the Tk main loop (blocks until the window is destroyed)."""
         self.window.mainloop()
+
+    def _refresh_vocabulary_in_background(self) -> None:
+        """Run the VAICOM vocabulary refresh use case, guarding the background thread."""
+        try:
+            self.refresh_vocabulary.execute()
+        except Exception:
+            # The use case reports user-facing status itself; this guard only keeps an
+            # unexpected failure from killing the daemon thread (ADR-0005 is best-effort).
+            _LOGGER.exception("Background vocabulary refresh failed.")
 
     def write_startup_context(self) -> None:
         """Write the startup vocabulary summary to the UI."""

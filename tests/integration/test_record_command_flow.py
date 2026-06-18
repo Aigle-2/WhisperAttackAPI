@@ -12,7 +12,11 @@ from datetime import datetime
 import pytest
 
 from vaivox.application.ports import SpeechToTextError, StatusLevel
-from vaivox.application.record_command import StartRecording, StopAndReconcile
+from vaivox.application.record_command import (
+    SimulateUtterance,
+    StartRecording,
+    StopAndReconcile,
+)
 from vaivox.application.shutdown import Shutdown
 from vaivox.domain.reconciliation.model import Transcription
 from vaivox.domain.reconciliation.snapper import PhraseSnapper
@@ -297,3 +301,42 @@ def test_shutdown_invokes_callback():
 
     assert called == [True]
     assert any("shutdown" in message.lower() for message in reporter.messages())
+
+
+def test_simulate_utterance_dispatches_fuzzy_corrected_command_to_voiceattack():
+    # Simulate runs the same reconcile -> snap -> route path as the PTT flow, but from text
+    # and without the mic/STT, actually sending the command (ADR-0010 gated action).
+    command_sink = FakeCommandSink()
+    telemetry = FakeTelemetry()
+    reporter = FakeReporter()
+    use_case = SimulateUtterance(
+        FakeConfig(), PhraseSnapper([]), command_sink, FakeKneeboardSink(), telemetry, reporter
+    )
+
+    outcome = use_case.execute("kobuletti tower")
+
+    assert command_sink.sent == ["Kobuleti tower"]  # fuzzy-corrected and dispatched for real
+    assert outcome.destination == "voiceattack"
+    assert outcome.sent_text == "Kobuleti tower"
+    assert telemetry.outcomes[0].sent_text == "Kobuleti tower"
+    assert any("Simulated utterance" in message for message in reporter.messages())
+
+
+def test_simulate_utterance_routes_note_to_kneeboard():
+    kneeboard = FakeKneeboardSink()
+    command_sink = FakeCommandSink()
+    use_case = SimulateUtterance(
+        FakeConfig(fuzzy_words=[]),
+        PhraseSnapper([]),
+        command_sink,
+        kneeboard,
+        FakeTelemetry(),
+        FakeReporter(),
+    )
+
+    outcome = use_case.execute("note request startup")
+
+    assert kneeboard.sent == ["request startup"]
+    assert command_sink.sent == []
+    assert outcome.destination == "kneeboard"
+    assert outcome.snap is None

@@ -64,6 +64,13 @@ swaps are confined to the idle state.
 ## Action Items
 
 1. [ ] Make `VocabularyRepository` the thread-safe in-memory source of truth.
-2. [ ] Implement idle-gated atomic swap for regenerated vocab/index + LRU passes.
+2. [~] Implement idle-gated atomic swap for regenerated vocab/index + LRU passes.
+   *Done for the phrase index:* the generic `IdleGatedSwap[T]`
+   (`infrastructure/reload/idle_gated.py`) + `ReloadablePhraseSnapper` apply a staged
+   index only when not recording (never mid-utterance; an in-flight `snap` keeps its
+   captured reference), wired behind the new `application.ports.PhraseMatcher` port and
+   exposed on `WiredApp.phrase_snapper`. *Remaining:* the vocabulary swap (waits on item 1)
+   and the LRU maintenance pass.
 3. [ ] Add optional file-watch for external JSONL edits.
-4. [ ] Surface "vocabulary refreshed / evicted N" in the UI.
+4. [~] Surface "vocabulary refreshed / evicted N" in the UI. *Done* for "refreshed N
+   phrases" (the snapper reports it on each applied swap); "evicted N" waits on the LRU pass.

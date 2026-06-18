@@ -8,6 +8,7 @@ user-visible behaviour (status messages, routing, blank-audio handling) is prese
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass
 
 from vaivox.application.ports import (
     AudioRecorder,
@@ -15,6 +16,7 @@ from vaivox.application.ports import (
     CommandSink,
     ConfigProvider,
     KneeboardSink,
+    PhraseMatcher,
     SpeechToText,
     StatusLevel,
     StatusReporter,
@@ -22,7 +24,7 @@ from vaivox.application.ports import (
 )
 from vaivox.domain.reconciliation.model import ReconciliationResult
 from vaivox.domain.reconciliation.pipeline import reconcile
-from vaivox.domain.reconciliation.snapper import PhraseSnapper, SnapResult
+from vaivox.domain.reconciliation.snapper import SnapResult
 from vaivox.domain.telemetry.model import ReconciliationOutcome, SnapSummary
 from vaivox.domain.vocabulary.keyterms import PHONETIC_ALPHABET
 
@@ -70,7 +72,7 @@ class StopAndReconcile:
         reporter: StatusReporter,
         clock: Clock,
         telemetry: TelemetrySink,
-        snapper: PhraseSnapper,
+        snapper: PhraseMatcher,
     ) -> None:
         """Wire the ports the stop-and-reconcile flow depends on.
 
@@ -83,9 +85,11 @@ class StopAndReconcile:
             reporter: The user-facing status reporter port.
             clock: The clock port (transcription timing).
             telemetry: The telemetry sink port.
-            snapper: The conservative phrase snapper (ADR-0011) applied after
-                reconciliation. With an empty phrase index it is a no-op (every command
-                is sent raw), preserving behaviour when no generated index is present.
+            snapper: The phrase matcher (ADR-0011) applied after reconciliation —
+                a frozen :class:`~vaivox.domain.reconciliation.snapper.PhraseSnapper` or
+                the idle-hot-reloadable adapter (ADR-0009), behind the same port. With an
+                empty phrase index it is a no-op (every command is sent raw), preserving
+                behaviour when no generated index is present.
         """
         self._recorder = recorder
         self._stt = speech_to_text
@@ -155,35 +159,149 @@ class StopAndReconcile:
             return None
 
     def _route(self, result: ReconciliationResult) -> None:
-        """Route the reconciled command to the kneeboard or VoiceAttack.
-
-        Kneeboard notes (``note ...``) are free text and are never snapped — only the
-        VoiceAttack command path runs through the phrase snapper (ADR-0011), which is a
-        no-op when the phrase index is empty.
-        """
-        command = result.command_text
-        snap: SnapResult | None = None
-        if command.lower().startswith(_KNEEBOARD_TRIGGER):
-            note_text = command[len(_KNEEBOARD_TRIGGER) :].strip()
-            self._kneeboard_sink.send(note_text)
-            destination, sent_text = "kneeboard", note_text
-        else:
-            snap = self._snapper.snap(command)
-            if snap.text != command:
-                _LOGGER.info("Phrase snap: '%s' -> '%s' (%.1f)", command, snap.text, snap.score)
-            self._command_sink.send(snap.text)
-            destination, sent_text = "voiceattack", snap.text
-
-        self._telemetry.record(
-            ReconciliationOutcome(
-                raw_text=result.raw_text,
-                cleaned_text=result.cleaned_text,
-                command_text=result.command_text,
-                sent_text=sent_text,
-                destination=destination,
-                snap=_snap_summary(snap),
-            )
+        """Route the reconciled command to the kneeboard or VoiceAttack (shared logic)."""
+        route_command(
+            result,
+            snapper=self._snapper,
+            command_sink=self._command_sink,
+            kneeboard_sink=self._kneeboard_sink,
+            telemetry=self._telemetry,
         )
+
+
+@dataclass(frozen=True)
+class RouteOutcome:
+    """The result of routing a reconciled command (ADR-0010 simulate + the PTT flow).
+
+    Attributes:
+        destination: ``"voiceattack"`` or ``"kneeboard"``.
+        sent_text: The exact text dispatched to that destination.
+        snap: The phrase-snap result on the VoiceAttack path, or ``None`` for a kneeboard
+            note (never snapped).
+    """
+
+    destination: str
+    sent_text: str
+    snap: SnapResult | None
+
+
+def route_command(
+    result: ReconciliationResult,
+    *,
+    snapper: PhraseMatcher,
+    command_sink: CommandSink,
+    kneeboard_sink: KneeboardSink,
+    telemetry: TelemetrySink,
+) -> RouteOutcome:
+    """Route a reconciled command and record telemetry (shared by PTT + simulate).
+
+    Kneeboard notes (``note ...``) are free text and are never snapped — only the
+    VoiceAttack command path runs through the phrase snapper (ADR-0011), which is a no-op
+    when the phrase index is empty. Extracted so the push-to-talk flow
+    (:class:`StopAndReconcile`) and the gated simulate action (:class:`SimulateUtterance`,
+    ADR-0010) dispatch and record identically — there is exactly one routing path.
+
+    Args:
+        result: The staged reconciliation result to route.
+        snapper: The phrase matcher applied on the VoiceAttack path.
+        command_sink: The VoiceAttack command sink.
+        kneeboard_sink: The DCS kneeboard sink.
+        telemetry: The telemetry sink the outcome is recorded to.
+
+    Returns:
+        The :class:`RouteOutcome` describing where the command went and the snap result.
+    """
+    command = result.command_text
+    snap: SnapResult | None = None
+    if command.lower().startswith(_KNEEBOARD_TRIGGER):
+        note_text = command[len(_KNEEBOARD_TRIGGER) :].strip()
+        kneeboard_sink.send(note_text)
+        destination, sent_text = "kneeboard", note_text
+    else:
+        snap = snapper.snap(command)
+        if snap.text != command:
+            _LOGGER.info("Phrase snap: '%s' -> '%s' (%.1f)", command, snap.text, snap.score)
+        command_sink.send(snap.text)
+        destination, sent_text = "voiceattack", snap.text
+
+    telemetry.record(
+        ReconciliationOutcome(
+            raw_text=result.raw_text,
+            cleaned_text=result.cleaned_text,
+            command_text=result.command_text,
+            sent_text=sent_text,
+            destination=destination,
+            snap=_snap_summary(snap),
+        )
+    )
+    return RouteOutcome(destination=destination, sent_text=sent_text, snap=snap)
+
+
+class SimulateUtterance:
+    """Run text through reconcile -> snap -> route, actually dispatching it (ADR-0010).
+
+    Unlike :class:`~vaivox.application.queries.DryRunReconcile` (which only *stages* the
+    transformations), simulate **sends** the resulting command to VoiceAttack (or the
+    kneeboard) and records telemetry — the full push-to-talk path minus the mic and STT.
+    It is a gated debug/agent action (off by default) and reports the dispatch to the UI so
+    an agent-triggered command is never invisible to the user.
+    """
+
+    def __init__(
+        self,
+        config: ConfigProvider,
+        snapper: PhraseMatcher,
+        command_sink: CommandSink,
+        kneeboard_sink: KneeboardSink,
+        telemetry: TelemetrySink,
+        reporter: StatusReporter,
+    ) -> None:
+        """Wire the ports the simulate action routes through (mirrors the PTT flow).
+
+        Args:
+            config: The configuration provider (word mappings / fuzzy words, read live).
+            snapper: The phrase matcher applied on the VoiceAttack path.
+            command_sink: The VoiceAttack command sink.
+            kneeboard_sink: The DCS kneeboard sink.
+            telemetry: The telemetry sink the outcome is recorded to.
+            reporter: The status reporter (surfaces the agent-triggered dispatch).
+        """
+        self._config = config
+        self._snapper = snapper
+        self._command_sink = command_sink
+        self._kneeboard_sink = kneeboard_sink
+        self._telemetry = telemetry
+        self._reporter = reporter
+
+    def execute(self, text: str) -> RouteOutcome:
+        """Reconcile ``text`` and dispatch it for real, returning the route outcome.
+
+        Args:
+            text: The utterance text to simulate (as if it had been transcribed).
+
+        Returns:
+            The :class:`RouteOutcome` for the dispatched command.
+        """
+        result = reconcile(
+            text,
+            self._config.get_word_mappings(),
+            self._config.get_fuzzy_words(),
+            PHONETIC_ALPHABET,
+            _FUZZY_THRESHOLD,
+            _FUZZY_THRESHOLD,
+        )
+        outcome = route_command(
+            result,
+            snapper=self._snapper,
+            command_sink=self._command_sink,
+            kneeboard_sink=self._kneeboard_sink,
+            telemetry=self._telemetry,
+        )
+        self._reporter.report(
+            f"Simulated utterance: '{text}' -> sent '{outcome.sent_text}' to {outcome.destination}",
+            StatusLevel.DETAIL,
+        )
+        return outcome
 
 
 def _snap_summary(snap: SnapResult | None) -> SnapSummary | None:

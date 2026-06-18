@@ -13,11 +13,13 @@ infrastructure import.
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
 from typing import Protocol, runtime_checkable
 
 from vaivox.domain.reconciliation.model import Transcription
+from vaivox.domain.reconciliation.snapper import SnapResult
 from vaivox.domain.telemetry.model import ReconciliationOutcome
 from vaivox.domain.vocabulary.model import GovernedEntry, VocabularyEntry, VocabularyKind
 
@@ -70,6 +72,22 @@ class KneeboardSink(Protocol):
 
     def send(self, note_text: str) -> None:
         """Format and deliver ``note_text`` to the in-game kneeboard."""
+
+
+@runtime_checkable
+class PhraseMatcher(Protocol):
+    """Driven port: snap a reconciled command to a valid command phrase (ADR-0011).
+
+    The use case calls :meth:`snap` once per VoiceAttack-bound utterance. The domain
+    :class:`~vaivox.domain.reconciliation.snapper.PhraseSnapper` satisfies this directly
+    (a frozen index); the infrastructure reloadable adapter
+    (:class:`~vaivox.infrastructure.reload.phrase_snapper.ReloadablePhraseSnapper`)
+    satisfies it too, swapping a regenerated index in at idle (ADR-0009) behind the same
+    method — so the application never knows whether the index is frozen or hot-reloadable.
+    """
+
+    def snap(self, text: str) -> SnapResult:
+        """Score ``text`` against the phrase index and decide snap / abstain / raw."""
 
 
 class StatusLevel(Enum):
@@ -159,6 +177,57 @@ class VocabularyRepository(Protocol):
 
         The write-back of a :class:`~vaivox.domain.vocabulary.model.EvictionResult`'s
         ``kept`` entries after a governance pass.
+        """
+
+
+@dataclass(frozen=True)
+class VocabularyGenerationResult:
+    """The outcome of a VAICOM vocabulary generation attempt (ADR-0005).
+
+    Attributes:
+        generated: Whether generation actually ran and wrote the keyterm + phrase-index
+            files (``False`` when no VAICOM install was found or the generator was
+            unavailable — the generic seed remains in use).
+        reason: A short human-readable status (e.g. ``"generated"``, ``"no VAICOM install
+            found"``), surfaced to the user and the logs.
+        keyterm_count: How many keyterms were written (``0`` when nothing was generated).
+        phrase_count: How many command phrases were written to the snap index.
+        source: The discovered VAICOM install root used, or ``None`` when none was found.
+    """
+
+    generated: bool
+    reason: str
+    keyterm_count: int = 0
+    phrase_count: int = 0
+    source: str | None = None
+
+
+@runtime_checkable
+class VocabularyGenerator(Protocol):
+    """Driven port: (re)generate the VAICOM-derived vocabulary into the data dir (ADR-0005).
+
+    VAICOM-derived data is never shipped (ADR-0005); it is generated locally from the
+    user's own install on first run / when stale. The concrete adapter wraps
+    ``tools/generate_vaicom_keyterms.py`` (auto-discovery + parsing); the
+    :class:`~vaivox.application.refresh_vocabulary.RefreshVocabulary` use case drives it
+    on a background thread and hot-applies the regenerated phrase index (ADR-0009).
+    """
+
+    def is_stale(self) -> bool:
+        """Whether the generated vocabulary is missing or out of date (worth regenerating).
+
+        Returns:
+            ``True`` when the output files are absent, or a discoverable install's sources
+            are newer than them; ``False`` when up to date or nothing can be regenerated.
+        """
+
+    def generate(self) -> VocabularyGenerationResult:
+        """Discover the VAICOM install and write keyterms + the phrase index.
+
+        Returns:
+            A :class:`VocabularyGenerationResult`; ``generated=False`` (never raised) when
+            no install is found or the generator is unavailable, so a background caller
+            degrades gracefully to the generic seed.
         """
 
 

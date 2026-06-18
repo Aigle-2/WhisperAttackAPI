@@ -170,9 +170,14 @@ pretty = true
 module = [
     "whisper_attack",
     "stt_backends.*",
+    "tools",
     "tools.*",
 ]
 ignore_errors = true
+# `tools/` is gate-excluded and is not bundled into the frozen build, so the new tree
+# imports it lazily/defensively (infrastructure/vocabulary/vaicom_generator.py); treat it
+# as an untyped boundary rather than resolving it from the strict tree.
+ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
 module = [

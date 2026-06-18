@@ -12,7 +12,8 @@ src/vaivox/
 ├── domain/          pure logic, NO I/O (reconciliation, vocabulary, telemetry, shared)
 ├── application/     use cases (record_command, shutdown, queries) + driven ports
 └── infrastructure/  adapters — the only layer touching the outside world
-                     (stt, audio, voiceattack, kneeboard, inbound, api, config, ui, …)
+                     (stt, audio, voiceattack, kneeboard, inbound, api, config, ui,
+                      reload, …)
     composition.py / main.py   wiring + the single entry point
 ```
 
@@ -48,9 +49,10 @@ but never anything that does I/O (sockets, files, mic, network, UI).
   VAIVOX. The C# plugin moved to `plugin/VaivoxVAPlugin/` with a fresh GUID. VAICOM-
   derived data is no longer shipped (ADR-0005): the loader reads a locally-generated
   file from `%LOCALAPPDATA%\VAIVOX` and falls back to a generic non-VAICOM seed.
-  *Deferred follow-ups:* ADR-0005 **background** generation on first run + the in-app
-  "Refresh VAICOM vocabulary" control (auto-discovery + the generator itself now exist —
-  see Phase 5); and the C# `dotnet` build / `.vap` re-point (verified by hand, not in CI).
+  *Deferred follow-ups:* the in-app "Refresh VAICOM vocabulary" **button** (auto-discovery,
+  the generator, and ADR-0005 **background** generation on first run now all exist — see
+  Phase 5; the button is a thin `RefreshVocabulary.execute(force=True)` call); and the C#
+  `dotnet` build / `.vap` re-point (verified by hand, not in CI).
 - **Phase 5** 🚧 (in progress) the reconciliation features, on clean seams:
   - **A — Governance** (ADR-0004) ✅ core: `domain/vocabulary/` `VocabularyEntry` +
     `VocabularyGovernor` (rank by recency/hits, LRU eviction with DEFAULT protection +
@@ -70,11 +72,28 @@ but never anything that does I/O (sockets, files, mic, network, UI).
     auto-discovers a VAICOM install and emits both files to `%LOCALAPPDATA%\VAIVOX`
     (unit-tested on synthetic fixtures; end-to-end needs a real install). *Deferred:*
     recipient segmentation; thresholds-in-settings.
-  - **Agent API/MCP** (ADR-0010) ✅ read API: introspection endpoints `/status`,
-    `/metrics`, `/reconciliations`, `/vocabulary` + `POST /reconcile/dry-run` over query
-    use cases (off by default, localhost, optional bearer token, secrets redacted), plus
-    the `vaivox-debug` Claude Code skill. *Deferred:* the MCP server adapter (needs the
-    `mcp` dependency) and gated mutating actions (reload / generate / simulate).
+  - **Background vocabulary generation** (ADR-0005) ✅: `RefreshVocabulary`
+    (`application/refresh_vocabulary.py`) over the `VocabularyGenerator` port +
+    `VaicomVocabularyGenerator` adapter (lazy/defensive wrap of the `tools/` generator)
+    runs on a daemon thread at startup — regenerates when missing/stale (outputs absent or
+    install sources newer), reports status, and **hot-applies** the new phrase index via
+    the reload seam below. *Deferred:* the UI "Refresh" button (`force=True`); bundling the
+    generator into the frozen build; live keyterm reload (STT loads keyterms at startup).
+  - **Reload model** (ADR-0009) ✅ phrase index: an idle-gated atomic swap — the generic
+    `IdleGatedSwap[T]` + `ReloadablePhraseSnapper` (`infrastructure/reload/`) swap a
+    regenerated phrase index in **only when not recording** (never mid-utterance), behind
+    the new `application.ports.PhraseMatcher` port, reporting "Vocabulary refreshed: N
+    phrases"; exposed on `WiredApp.phrase_snapper` for a reload trigger. The eval stays on
+    a frozen `PhraseSnapper` (no leak). *Deferred:* the vocabulary swap (waits on the
+    pipeline reading vocab from `VocabularyRepository`), the LRU pass, and the file-watch.
+  - **Agent API/MCP** (ADR-0010) ✅ read API **+ gated actions**: introspection endpoints
+    `/status`, `/metrics`, `/reconciliations`, `/vocabulary` + `POST /reconcile/dry-run`
+    over query use cases (off by default, localhost, optional bearer token, secrets
+    redacted), plus the `vaivox-debug` Claude Code skill. The **mutating actions**
+    (`POST /vocabulary/generate` | `/vocabulary/reload` | `/reconcile/simulate`) go through
+    application use cases and are gated behind `api_actions_enabled` (off by default, 403
+    otherwise); `route_command` is shared so simulate dispatches identically to the PTT
+    flow. *Deferred:* the MCP server adapter (needs the `mcp` dependency).
   - **Cross-cutting blocker:** the C# plugin **return channel** (ADR-0006) gates the
     match-signal-dependent work — live usage stamping (`mark_used`/recency), near-miss
     capture, Tier 2 attribution — and needs a Windows/VoiceAttack build (not CI-testable).
@@ -134,21 +153,26 @@ shims.
 
 ## Runtime introspection API (ADR-0010)
 
-For fast debug — *why did command X not fire?* — VAIVOX exposes a **read-only localhost
-HTTP/JSON introspection API** over the `application/queries.py` use cases (a driver
-adapter in `infrastructure/api/introspection.py`, stdlib `http.server`, no extra
-dependency). It is **off by default**, binds **127.0.0.1 only**, never mutates state,
-never returns secrets (config via the redacted accessor), and takes an **optional
-bearer token**. Enable it in the per-user `settings.cfg` with `api_enabled = true`
-(optional `api_host` / `api_port` / `api_token`).
+For fast debug — *why did command X not fire?* — VAIVOX exposes a **localhost HTTP/JSON
+introspection API** over the `application/` use cases (a driver adapter in
+`infrastructure/api/introspection.py`, stdlib `http.server`, no extra dependency). It is
+**off by default**, binds **127.0.0.1 only**, never returns secrets (config via the
+redacted accessor), and takes an **optional bearer token**. The read surface never mutates
+state; the mutating actions are **additionally gated** off by default. Enable it in the
+per-user `settings.cfg` with `api_enabled = true` (optional `api_host` / `api_port` /
+`api_token`, and `api_actions_enabled = true` to opt into the actions).
 
-Endpoints: `GET /healthz`, `GET /status`, `GET /metrics` (match/wrong-match/not-found/
+Read endpoints: `GET /healthz`, `GET /status`, `GET /metrics` (match/wrong-match/not-found/
 unknown/abstain counts + rates over recorded telemetry), `GET /reconciliations?limit=N`
 (recent provenance), `GET /vocabulary` (entries + usage by kind), and the killer
-`POST /reconcile/dry-run {"text": "..."}` (full pipeline, no mic/VoiceAttack).
+`POST /reconcile/dry-run {"text": "..."}` (full pipeline, no mic/VoiceAttack). **Gated
+mutating actions** (403 unless `api_actions_enabled`): `POST /vocabulary/generate`
+(regenerate from VAICOM + hot-apply), `POST /vocabulary/reload` (re-read the index from
+disk + hot-apply), `POST /reconcile/simulate {"text": "..."}` (reconcile **and dispatch**
+for real).
 
-The full debug recipes (curl examples, the dry-run workflow, deferred MCP adapter +
-mutating actions) live in the Claude Code skill
+The full debug recipes (curl examples, the dry-run workflow, the gated actions, the
+deferred MCP adapter) live in the Claude Code skill
 [`.claude/skills/vaivox-debug/SKILL.md`](.claude/skills/vaivox-debug/SKILL.md).
 
 ## Conventions

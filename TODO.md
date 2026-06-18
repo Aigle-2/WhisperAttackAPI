@@ -2,13 +2,15 @@
 
 A living punch-list of what's left after Phases 0–5 (core). The phased narrative lives in
 [`docs/MIGRATION_PLAN.md`](docs/MIGRATION_PLAN.md); decisions are in [`docs/adr/`](docs/adr/).
-At last update the tree is green: **203 tests**, ruff / format / mypy / import-linter all
+At last update the tree is green: **232 tests**, ruff / format / mypy / import-linter all
 pass via `uv run` (see [AGENTS.md](AGENTS.md)).
 
 **Done so far (Phase 5):** A governance core (ADR-0004), C telemetry persistence
 (ADR-0006 §1), the eval harness (ADR-0008), B phrase-snap (ADR-0011), the VAICOM
-keyterm + phrase-index generator with auto-discovery (ADR-0005), and the read-only
-introspection API + `vaivox-debug` skill (ADR-0010).
+keyterm + phrase-index generator with auto-discovery + **background generation on first
+run / on stale** (ADR-0005), the **idle-gated phrase-index hot-reload** (ADR-0009), and the
+introspection API — read endpoints + **gated mutating actions** + `vaivox-debug` skill
+(ADR-0010).
 
 ---
 
@@ -46,16 +48,37 @@ These gate the match-signal-dependent work; everything buildable without them is
   as the HTTP API. Needs a dependency decision: add `mcp` as an optional extra and import
   it lazily (the gate env is dep-light and the smoke test imports every module). Fast-follow
   to the read API.
-- [ ] **Gated mutating API actions (ADR-0010).** `reload vocabulary`, `trigger generation`,
-  `simulate utterance` — behind an explicit debug/agent mode, never destructive by default.
-  The API is read-only today.
-- [ ] **Background generation on first run / on stale (ADR-0005).** On startup, if the
-  keyterms / phrase index are missing or stale, run the generator (it already
-  auto-discovers) on a background thread into the data dir. Testable with the generator
-  faked; trigger logic + status only.
-- [ ] **Vocabulary / index hot-reload (ADR-0009).** Idle-gated atomic swap. Today the
-  phrase index + vocab are loaded once at composition (frozen per session); add a
-  thread-safe swap layer. Must never leak into the eval (it runs on a frozen snapshot).
+- [x] **Gated mutating API actions (ADR-0010).** `POST /vocabulary/generate` (force
+  regenerate + hot-apply), `/vocabulary/reload` (re-read index from disk + hot-apply), and
+  `/reconcile/simulate` (reconcile **and dispatch** for real) over the `RefreshVocabulary` /
+  `ReloadVocabulary` / `SimulateUtterance` use cases. Gated behind `api_actions_enabled`
+  (off by default, 403 otherwise); `route_command` is shared with `StopAndReconcile` so
+  simulate dispatches identically to the PTT path. Reload/generate go through the ADR-0009
+  idle-gated swap. Tested over real HTTP (403-by-default + each action enabled).
+- [x] **Background generation on first run / on stale (ADR-0005).** `RefreshVocabulary`
+  (`application/refresh_vocabulary.py`) gates on the `VocabularyGenerator` port's
+  `is_stale()` (outputs missing, or a discovered install's sources newer than them),
+  generates via `VaicomVocabularyGenerator` (lazy/defensive wrap of
+  `tools/generate_vaicom_keyterms.py`), and **hot-applies** the regenerated phrase index
+  through the ADR-0009 reload seam. `VaivoxApp` runs it on a daemon thread at startup; it
+  reports status and falls back to the seed when no install is found. Unit-tested with the
+  generator faked (trigger logic + status) + the adapter's staleness branches. *Follow-ups:*
+  keyterms apply on next launch (STT loads them at startup, not hot); bundle/migrate the
+  generator into the frozen build (today it degrades to "generator unavailable" in a
+  packaged exe — see "Generator end-to-end" in §1); the UI "Refresh" button is a thin
+  `execute(force=True)` call (still part of ADR-0005 item 4 below).
+- [ ] **Vocabulary / index hot-reload (ADR-0009)** — *phrase index ✅; vocab swap +
+  file-watch deferred.* The idle-gated atomic swap **mechanism** shipped: the generic
+  `IdleGatedSwap[T]` (`infrastructure/reload/idle_gated.py`) + `ReloadablePhraseSnapper`
+  swap a regenerated phrase index in **only when not recording** (never mid-utterance,
+  in-flight `snap` keeps its captured reference) and report "Vocabulary refreshed: N
+  phrases". The snapper is wired through it (`build_phrase_snapper`) behind the new
+  `PhraseMatcher` port and exposed on `WiredApp.phrase_snapper` for a reload trigger to
+  call (#3 background-gen / the #4 reload action). The eval still builds a frozen
+  `PhraseSnapper`, so nothing leaks into the metrics. *Remaining:* extend the swap to the
+  vocabulary once the pipeline reads word-mappings/fuzzy from `VocabularyRepository`
+  (today it reads them from `config`), the LRU maintenance pass, and the optional JSONL
+  file-watch (ADR-0009 action item 3).
 - [ ] **Governance maintenance wiring (ADR-0004).** Wire `VocabularyGovernor.govern`
   (eviction) into a maintenance pass + `VocabularyRepository.replace_entries`. Meaningful
   only once usage data exists (depends on live stamping above).

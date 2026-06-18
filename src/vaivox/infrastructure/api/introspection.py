@@ -1,17 +1,22 @@
 """Minimal localhost introspection HTTP API (ADR-0010).
 
-A read-only JSON API over the query use cases, built on the standard library so it
-adds no dependency. It is **off by default**, binds 127.0.0.1 only, supports an
-optional bearer token, and never mutates state. The MCP adapter and the gated mutating
-actions are deferred fast-follows (see ``.claude/skills/vaivox-debug/SKILL.md``).
+A JSON API over the application use cases, built on the standard library so it adds no
+dependency. It is **off by default**, binds 127.0.0.1 only, and supports an optional bearer
+token. The read surface never mutates state; a small set of **mutating actions** (reload /
+generate vocabulary, simulate an utterance) is **additionally gated** behind
+``api_actions_enabled`` (off by default) and returns 403 until enabled (ADR-0010). The MCP
+adapter is a deferred fast-follow (see ``.claude/skills/vaivox-debug/SKILL.md``).
 
 Endpoints:
-    GET  /healthz            -> ``{"status": "ok"}``
-    GET  /status             -> the :class:`~vaivox.application.queries.StatusReport`
-    GET  /metrics            -> the :class:`~vaivox.application.queries.LiveMetrics`
-    GET  /reconciliations    -> recent events (``?limit=N``, default 20)
-    GET  /vocabulary         -> the :class:`~vaivox.application.queries.VocabularyReport`
-    POST /reconcile/dry-run  -> ``{"text": "..."}`` -> staged reconciliation result
+    GET  /healthz             -> ``{"status": "ok"}``
+    GET  /status              -> the :class:`~vaivox.application.queries.StatusReport`
+    GET  /metrics             -> the :class:`~vaivox.application.queries.LiveMetrics`
+    GET  /reconciliations     -> recent events (``?limit=N``, default 20)
+    GET  /vocabulary          -> the :class:`~vaivox.application.queries.VocabularyReport`
+    POST /reconcile/dry-run   -> ``{"text": "..."}`` -> staged reconciliation result
+    POST /reconcile/simulate  -> ``{"text": "..."}`` -> reconcile + **dispatch** (gated)
+    POST /vocabulary/reload   -> re-read the phrase index from disk + hot-apply (gated)
+    POST /vocabulary/generate -> regenerate from VAICOM + hot-apply (gated)
 """
 
 from __future__ import annotations
@@ -32,6 +37,8 @@ from vaivox.application.queries import (
     DryRunReconcile,
     ListRecentReconciliations,
 )
+from vaivox.application.record_command import SimulateUtterance
+from vaivox.application.refresh_vocabulary import RefreshVocabulary, ReloadVocabulary
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -40,6 +47,9 @@ DEFAULT_API_PORT = 8765
 
 DEFAULT_RECONCILIATIONS_LIMIT = 20
 MAX_RECONCILIATIONS_LIMIT = 500
+
+#: POST paths for the gated mutating actions (ADR-0010), 403 unless actions are enabled.
+_ACTION_PATHS = frozenset({"/vocabulary/reload", "/vocabulary/generate", "/reconcile/simulate"})
 
 
 class _IntrospectionHTTPServer(ThreadingHTTPServer):
@@ -54,7 +64,11 @@ class _IntrospectionHTTPServer(ThreadingHTTPServer):
         recent_reconciliations: ListRecentReconciliations,
         compute_metrics: ComputeMetrics,
         describe_vocabulary: DescribeVocabulary,
+        refresh_vocabulary: RefreshVocabulary,
+        reload_vocabulary: ReloadVocabulary,
+        simulate: SimulateUtterance,
         token: str | None,
+        actions_enabled: bool,
     ) -> None:
         super().__init__(server_address, handler)
         self.describe_status = describe_status
@@ -62,7 +76,11 @@ class _IntrospectionHTTPServer(ThreadingHTTPServer):
         self.recent_reconciliations = recent_reconciliations
         self.compute_metrics = compute_metrics
         self.describe_vocabulary = describe_vocabulary
+        self.refresh_vocabulary = refresh_vocabulary
+        self.reload_vocabulary = reload_vocabulary
+        self.simulate = simulate
         self.token = token
+        self.actions_enabled = actions_enabled
 
 
 class _IntrospectionRequestHandler(BaseHTTPRequestHandler):
@@ -140,24 +158,54 @@ class _IntrospectionRequestHandler(BaseHTTPRequestHandler):
         if not self._authorized():
             self._send_json(HTTPStatus.UNAUTHORIZED, {"error": "unauthorized"})
             return
-        if self.path != "/reconcile/dry-run":
-            self._send_json(HTTPStatus.NOT_FOUND, {"error": "not found"})
+        path = urlsplit(self.path).path
+
+        if path == "/reconcile/dry-run":
+            text = self._read_text_payload()
+            if text is not None:
+                self._send_json(HTTPStatus.OK, asdict(self._api.dry_run.execute(text)))
+            return
+        if path in _ACTION_PATHS:
+            self._handle_action(path)
             return
 
+        self._send_json(HTTPStatus.NOT_FOUND, {"error": "not found"})
+
+    def _handle_action(self, path: str) -> None:
+        """Dispatch a gated mutating action (ADR-0010); 403 when actions are disabled."""
+        if not self._api.actions_enabled:
+            self._send_json(HTTPStatus.FORBIDDEN, {"error": "mutating actions disabled"})
+            return
+        if path == "/vocabulary/reload":
+            self._send_json(HTTPStatus.OK, asdict(self._api.reload_vocabulary.execute()))
+            return
+        if path == "/vocabulary/generate":
+            result = self._api.refresh_vocabulary.execute(force=True)
+            self._send_json(HTTPStatus.OK, asdict(result))
+            return
+        if path == "/reconcile/simulate":
+            text = self._read_text_payload()
+            if text is not None:
+                self._send_json(HTTPStatus.OK, asdict(self._api.simulate.execute(text)))
+
+    def _read_text_payload(self) -> str | None:
+        """Read and validate a ``{"text": "..."}`` JSON body, sending 400 on failure.
+
+        Returns:
+            The ``text`` string, or ``None`` after a 400 response (invalid JSON or no text).
+        """
         content_length = int(self.headers.get("Content-Length", 0))
         raw_body = self.rfile.read(content_length) if content_length else b""
         try:
             payload = json.loads(raw_body or b"{}")
         except json.JSONDecodeError:
             self._send_json(HTTPStatus.BAD_REQUEST, {"error": "invalid JSON body"})
-            return
-
+            return None
         text = payload.get("text") if isinstance(payload, dict) else None
         if not isinstance(text, str):
             self._send_json(HTTPStatus.BAD_REQUEST, {"error": "missing 'text' field"})
-            return
-
-        self._send_json(HTTPStatus.OK, asdict(self._api.dry_run.execute(text)))
+            return None
+        return text
 
     def log_message(self, format: str, *args: object) -> None:
         _LOGGER.debug("introspection api: " + format, *args)
@@ -173,9 +221,13 @@ class IntrospectionServer:
         recent_reconciliations: ListRecentReconciliations,
         compute_metrics: ComputeMetrics,
         describe_vocabulary: DescribeVocabulary,
+        refresh_vocabulary: RefreshVocabulary,
+        reload_vocabulary: ReloadVocabulary,
+        simulate: SimulateUtterance,
         host: str = DEFAULT_API_HOST,
         port: int = DEFAULT_API_PORT,
         token: str | None = None,
+        actions_enabled: bool = False,
     ) -> None:
         """Configure (but do not start) the introspection server.
 
@@ -185,18 +237,27 @@ class IntrospectionServer:
             recent_reconciliations: The recent-events query use case.
             compute_metrics: The live-metrics query use case.
             describe_vocabulary: The vocabulary query use case.
+            refresh_vocabulary: The generate-vocabulary action use case (gated).
+            reload_vocabulary: The reload-vocabulary-from-disk action use case (gated).
+            simulate: The simulate-utterance action use case (gated; dispatches for real).
             host: Bind address (localhost by default).
             port: Bind port (0 selects an ephemeral port).
             token: Optional bearer token required on every request.
+            actions_enabled: Whether the mutating actions are enabled (off by default;
+                ADR-0010 keeps the API non-destructive unless explicitly opted in).
         """
         self._describe_status = describe_status
         self._dry_run = dry_run
         self._recent_reconciliations = recent_reconciliations
         self._compute_metrics = compute_metrics
         self._describe_vocabulary = describe_vocabulary
+        self._refresh_vocabulary = refresh_vocabulary
+        self._reload_vocabulary = reload_vocabulary
+        self._simulate = simulate
         self._host = host
         self._port = port
         self._token = token or None
+        self._actions_enabled = actions_enabled
         self._server: _IntrospectionHTTPServer | None = None
         self._thread: threading.Thread | None = None
 
@@ -214,7 +275,11 @@ class IntrospectionServer:
             self._recent_reconciliations,
             self._compute_metrics,
             self._describe_vocabulary,
+            self._refresh_vocabulary,
+            self._reload_vocabulary,
+            self._simulate,
             self._token,
+            self._actions_enabled,
         )
         self._server = server
         self._thread = threading.Thread(

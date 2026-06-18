@@ -6,7 +6,8 @@ description: >-
   DCS command, inspecting effective config / loaded vocabulary / recent reconciliation
   events / live match metrics, or reproducing a reconciliation without a mic or
   VoiceAttack. Triggers: "why did command X not fire", "VAIVOX dry-run", "check the
-  reconciliation metrics", "what vocabulary is loaded".
+  reconciliation metrics", "what vocabulary is loaded", "simulate an utterance",
+  "regenerate / reload the VAICOM vocabulary".
 ---
 
 # VAIVOX runtime debug
@@ -16,9 +17,11 @@ cases (ADR-0010). It lets you inspect runtime state and reproduce a reconciliati
 **without a mic and without VoiceAttack**. The transport is the Python standard library
 (`http.server`) — no extra dependency.
 
-The API is **off by default**, binds **127.0.0.1 only**, never mutates state, never
-returns secrets (config is served through the redacted accessor), and supports an
-**optional bearer token**.
+The API is **off by default**, binds **127.0.0.1 only**, never returns secrets (config is
+served through the redacted accessor), and supports an **optional bearer token**. The read
+surface never mutates state; a few **mutating actions** (reload / generate vocabulary,
+simulate an utterance) are **additionally gated** behind `api_actions_enabled` (off by
+default) and return `403` until enabled — see §4.
 
 ## 1. Enable the API
 
@@ -32,6 +35,8 @@ api_host = 127.0.0.1
 api_port = 8765
 # optional shared secret; when set, every request needs the bearer header:
 api_token = your-token-here
+# opt in to the mutating actions (§4); the read endpoints do NOT need this:
+api_actions_enabled = true
 ```
 
 Restart VAIVOX. On startup the composition root wires the API only when
@@ -43,7 +48,8 @@ without it the server returns `401`.
 
 ## 2. Endpoints
 
-All responses are JSON. `GET` everywhere except the dry-run `POST`.
+All responses are JSON. `GET` for the read surface; `POST` for dry-run and the gated
+actions (§4).
 
 | Method | Path | Returns |
 | --- | --- | --- |
@@ -52,7 +58,10 @@ All responses are JSON. `GET` everywhere except the dry-run `POST`.
 | `GET` | `/metrics` | live match / wrong-match / not-found / unknown / abstain counts + rates |
 | `GET` | `/reconciliations?limit=N` | the last `N` recorded events, oldest first (default 20, max 500) |
 | `GET` | `/vocabulary` | loaded vocabulary entries + usage stats, grouped by kind |
-| `POST` | `/reconcile/dry-run` | run `{"text": "..."}` through the full pipeline |
+| `POST` | `/reconcile/dry-run` | run `{"text": "..."}` through the full pipeline (read-only) |
+| `POST` | `/reconcile/simulate` | **gated** — reconcile + actually dispatch `{"text": "..."}` (§4) |
+| `POST` | `/vocabulary/reload` | **gated** — re-read the phrase index from disk + hot-apply (§4) |
+| `POST` | `/vocabulary/generate` | **gated** — regenerate from VAICOM + hot-apply (§4) |
 
 ### `GET /metrics`
 
@@ -126,15 +135,59 @@ A missing/non-string `text` is `400`.
    suggests near-misses the snapper is conservatively declining).
 4. `GET /status` to confirm the effective STT backend and config.
 
+## 4. Mutating actions (gated, off by default)
+
+These have side effects, so they are gated behind `api_actions_enabled = true` (in
+addition to `api_enabled` and any token). Without it every action returns `403`; the read
+surface above stays available regardless. All are `POST` and go through the same
+application use cases as the app (no domain bypass).
+
+### `POST /vocabulary/generate`
+
+Force a VAICOM vocabulary regeneration (auto-discovers the install) and **hot-apply** the
+new phrase index without a restart (ADR-0005/0009) — the startup background refresh with
+`force=true`.
+
+```bash
+curl -s -X POST http://127.0.0.1:8765/vocabulary/generate
+# {"generated": true, "reason": "generated", "keyterm_count": 834,
+#  "phrase_count": 1290, "source": "C:/.../VAICOMPRO"}
+# no install found -> {"generated": false, "reason": "no VAICOM install found", ...}
+```
+
+### `POST /vocabulary/reload`
+
+Re-read the on-disk phrase index and swap it in at idle (no regeneration) — use after a
+hand-edit of `phrase_index.txt`.
+
+```bash
+curl -s -X POST http://127.0.0.1:8765/vocabulary/reload
+# {"reloaded": true, "phrases": 1290}
+```
+
+### `POST /reconcile/simulate`
+
+Like dry-run, but **actually dispatches** the resulting command to VoiceAttack (or the
+kneeboard) and records telemetry — the full path minus the mic/STT. The dispatch is
+surfaced in the UI so an agent-triggered command is never invisible.
+
+```bash
+curl -s -X POST http://127.0.0.1:8765/reconcile/simulate \
+  -H "Content-Type: application/json" -d '{"text": "texaco request rejoin"}'
+# {"destination": "voiceattack", "sent_text": "Texaco request rejoin", "snap": {...}}
+```
+
+A missing/non-string `text` is `400`. **This fires a real command** — prefer dry-run unless
+you intend the side effect.
+
+> Vocabulary swaps are idle-gated (ADR-0009): a reload/generate requested mid-utterance
+> applies at the next idle point, never mid-command.
+
 ## Deferred / next steps
 
 - **MCP server adapter (fast-follow, ADR-0010 item 3).** A thin MCP adapter would give
-  Claude Code / Codex *native* tool access over the **same** query use cases. It is
-  deliberately **not** built yet: it needs the `mcp` dependency, which is not in the
-  gate environment, so adding it now would break the depless gates / package smoke test.
-  When added it must reuse `application/queries.py` (no domain bypass) and stay
-  read-only by the same invariants.
-- **Mutating / action endpoints (ADR-0010 item 4).** Reload vocabulary, trigger
-  keyterm/phrase-index generation, simulate an utterance — to be gated behind an
-  explicit debug/agent mode, never destructive by default. This increment is
-  **read-only**; those are the next step.
+  Claude Code / Codex *native* tool access over the **same** use cases. It is deliberately
+  **not** built yet: it needs the `mcp` dependency, which is not in the gate environment,
+  so adding it now would break the depless gates / package smoke test. When added it must
+  reuse `application/queries.py` + the action use cases (no domain bypass) and keep the
+  same read-only-by-default / gated-actions invariants.

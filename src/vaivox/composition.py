@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from threading import Event
 
 from vaivox.application.ports import (
+    AudioRecorder,
     SpeechToText,
     SpeechToTextError,
     StatusLevel,
@@ -26,15 +27,21 @@ from vaivox.application.queries import (
     DryRunReconcile,
     ListRecentReconciliations,
 )
-from vaivox.application.record_command import StartRecording, StopAndReconcile
+from vaivox.application.record_command import (
+    SimulateUtterance,
+    StartRecording,
+    StopAndReconcile,
+)
+from vaivox.application.refresh_vocabulary import RefreshVocabulary, ReloadVocabulary
 from vaivox.application.shutdown import Shutdown
-from vaivox.domain.reconciliation.snapper import PhraseSnapper
+from vaivox.domain.reconciliation.snapper import build_snapper
 from vaivox.infrastructure.api.introspection import IntrospectionServer
 from vaivox.infrastructure.audio.recorder import SoundDeviceRecorder
 from vaivox.infrastructure.config.identity import VAIVOX
 from vaivox.infrastructure.config.settings import VaivoxConfiguration
 from vaivox.infrastructure.inbound.control_server import ControlSocketServer
 from vaivox.infrastructure.kneeboard.sink import KneeboardSink
+from vaivox.infrastructure.reload.phrase_snapper import ReloadablePhraseSnapper
 from vaivox.infrastructure.stt.factory import create_stt_backend
 from vaivox.infrastructure.system_clock import SystemClock
 from vaivox.infrastructure.telemetry.jsonl_reader import JsonlTelemetryReader
@@ -42,6 +49,7 @@ from vaivox.infrastructure.telemetry.jsonl_sink import JsonlTelemetrySink
 from vaivox.infrastructure.telemetry.null_sink import NullTelemetrySink
 from vaivox.infrastructure.vocabulary.jsonl_repository import JsonlVocabularyRepository
 from vaivox.infrastructure.vocabulary.phrase_index import load_phrase_index
+from vaivox.infrastructure.vocabulary.vaicom_generator import VaicomVocabularyGenerator
 from vaivox.infrastructure.voiceattack.sink import VoiceAttackCommandSink
 
 _LOGGER = logging.getLogger(__name__)
@@ -53,10 +61,19 @@ class WiredApp:
 
     Attributes:
         control_server: The inbound control socket server, ready to ``run()``.
+        phrase_snapper: The idle-hot-reloadable phrase snapper (ADR-0009). Held so a
+            later trigger (background generation, the reload API action) can call
+            ``reload(...)`` to swap in a regenerated index without a restart.
+        refresh_vocabulary: The VAICOM vocabulary refresh use case (ADR-0005). The entry
+            point runs it on a background thread at startup; a UI action can run it with
+            ``force=True``. It hot-applies the regenerated phrase index via
+            ``phrase_snapper`` on success.
         api_server: The introspection API server, or ``None`` when disabled.
     """
 
     control_server: ControlSocketServer
+    phrase_snapper: ReloadablePhraseSnapper
+    refresh_vocabulary: RefreshVocabulary
     api_server: IntrospectionServer | None = None
 
 
@@ -89,7 +106,7 @@ def build(
     kneeboard_sink = KneeboardSink(config.get_text_line_length, reporter)
     telemetry = build_telemetry_sink(config)
     clock = SystemClock()
-    snapper = build_phrase_snapper(config)
+    snapper = build_phrase_snapper(config, recorder, reporter)
 
     start_recording = StartRecording(recorder, reporter)
     stop_and_reconcile = StopAndReconcile(
@@ -120,6 +137,15 @@ def build(
         port=port,
     )
 
+    generator = VaicomVocabularyGenerator(config.app_data_location)
+
+    def apply_phrase_index() -> int:
+        phrases = load_phrase_index(config.app_data_location)
+        snapper.reload(phrases)
+        return len(phrases)
+
+    refresh_vocabulary = RefreshVocabulary(generator, reporter, apply_phrase_index)
+
     api_server: IntrospectionServer | None = None
     if config.get_bool_setting("api_enabled", False):
         data_dir = config.app_data_location
@@ -131,12 +157,21 @@ def build(
             ListRecentReconciliations(telemetry_reader),
             ComputeMetrics(telemetry_reader),
             DescribeVocabulary(vocabulary_repository),
+            refresh_vocabulary,
+            ReloadVocabulary(apply_phrase_index, reporter),
+            SimulateUtterance(config, snapper, command_sink, kneeboard_sink, telemetry, reporter),
             host=config.get_setting("api_host", VAIVOX.api_host),
             port=config.get_int_setting("api_port", VAIVOX.api_port),
             token=config.get_setting("api_token", ""),
+            actions_enabled=config.get_bool_setting("api_actions_enabled", False),
         )
 
-    return WiredApp(control_server=control_server, api_server=api_server)
+    return WiredApp(
+        control_server=control_server,
+        phrase_snapper=snapper,
+        refresh_vocabulary=refresh_vocabulary,
+        api_server=api_server,
+    )
 
 
 def build_telemetry_sink(config: VaivoxConfiguration) -> TelemetrySink:
@@ -160,28 +195,49 @@ def build_telemetry_sink(config: VaivoxConfiguration) -> TelemetrySink:
     return NullTelemetrySink()
 
 
-def build_phrase_snapper(config: VaivoxConfiguration) -> PhraseSnapper:
-    """Build the conservative phrase snapper from the generated index (ADR-0011).
+def build_phrase_snapper(
+    config: VaivoxConfiguration,
+    recorder: AudioRecorder,
+    reporter: StatusReporter,
+) -> ReloadablePhraseSnapper:
+    """Build the idle-hot-reloadable phrase snapper from the generated index (ADR-0011/0009).
 
-    The phrase index is read once here and frozen for the session (ADR-0009 does not
-    hot-swap it). It is **not** shipped (ADR-0005): until the generator writes
-    ``phrase_index.txt`` into the per-user data directory the loader returns an empty
-    list, which makes the snapper a no-op (every command is sent raw) so behaviour
-    parity is preserved on a fresh install.
+    The phrase index is read once here for the initial snapper. It is **not** shipped
+    (ADR-0005): until the generator writes ``phrase_index.txt`` into the per-user data
+    directory the loader returns an empty list, which makes the snapper a no-op (every
+    command is sent raw) so behaviour parity is preserved on a fresh install.
+
+    The snapper is wrapped in a :class:`~vaivox.infrastructure.reload.phrase_snapper.\
+ReloadablePhraseSnapper` so a regenerated index can be swapped in at idle without a
+    restart (ADR-0009): the swap is gated on the recorder being idle (never mid-utterance)
+    and surfaces a "vocabulary refreshed" status line. The reload is dormant until a
+    trigger calls ``reload(...)`` (background generation / the reload API action); in this
+    session it behaves exactly like the frozen snapper it wraps.
 
     Args:
         config: The effective application configuration (for the data-dir location).
+        recorder: The audio recorder, read for the idle gate (``not is_recording``).
+        reporter: The status reporter, signalled when an index actually swaps in.
 
     Returns:
-        A :class:`~vaivox.domain.reconciliation.snapper.PhraseSnapper` over the generated
-        phrase index, with the conservative default thresholds.
+        A :class:`~vaivox.infrastructure.reload.phrase_snapper.ReloadablePhraseSnapper`
+        over the generated phrase index, with the conservative default thresholds.
     """
     phrases = load_phrase_index(config.app_data_location)
     if phrases:
         _LOGGER.info("Loaded %d phrase-index entries for the snapper.", len(phrases))
     else:
         _LOGGER.debug("No phrase index present; the snapper is a no-op.")
-    return PhraseSnapper(phrases)
+
+    def announce_reload(count: int) -> None:
+        _LOGGER.info("Phrase index hot-reloaded: %d phrases.", count)
+        reporter.report(f"Vocabulary refreshed: {count} phrases", StatusLevel.SUCCESS)
+
+    return ReloadablePhraseSnapper(
+        build_snapper(phrases),
+        is_idle=lambda: not recorder.is_recording,
+        on_reload=announce_reload,
+    )
 
 
 def load_speech_to_text(

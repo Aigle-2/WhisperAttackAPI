@@ -14,6 +14,7 @@ from datetime import datetime
 
 import pytest
 
+from vaivox.application.ports import VocabularyGenerationResult
 from vaivox.application.queries import (
     ComputeMetrics,
     DescribeStatus,
@@ -21,6 +22,8 @@ from vaivox.application.queries import (
     DryRunReconcile,
     ListRecentReconciliations,
 )
+from vaivox.application.record_command import RouteOutcome
+from vaivox.application.refresh_vocabulary import ReloadResult
 from vaivox.domain.telemetry.model import MatchOutcome, ReconciliationOutcome, SnapSummary
 from vaivox.domain.vocabulary.model import (
     GovernedEntry,
@@ -89,7 +92,50 @@ class FakeVocabularyRepository:
         return list(self._entries.get(kind, []))
 
 
-def _make_server(token=None, telemetry=None, vocabulary=None):
+class FakeRefreshVocabulary:
+    def __init__(self, result=None):
+        self.calls = []
+        self._result = result or VocabularyGenerationResult(
+            generated=True,
+            reason="generated",
+            keyterm_count=34,
+            phrase_count=12,
+            source="C:/VAICOM",
+        )
+
+    def execute(self, force=False):
+        self.calls.append(force)
+        return self._result
+
+
+class FakeReloadVocabulary:
+    def __init__(self, phrases=7):
+        self.calls = 0
+        self._phrases = phrases
+
+    def execute(self):
+        self.calls += 1
+        return ReloadResult(reloaded=True, phrases=self._phrases)
+
+
+class FakeSimulate:
+    def __init__(self):
+        self.texts = []
+
+    def execute(self, text):
+        self.texts.append(text)
+        return RouteOutcome(destination="voiceattack", sent_text=text.title(), snap=None)
+
+
+def _make_server(
+    token=None,
+    telemetry=None,
+    vocabulary=None,
+    refresh=None,
+    reload=None,
+    simulate=None,
+    actions_enabled=False,
+):
     config = FakeConfig()
     telemetry = telemetry or FakeTelemetryReader()
     vocabulary = vocabulary or FakeVocabularyRepository()
@@ -99,9 +145,13 @@ def _make_server(token=None, telemetry=None, vocabulary=None):
         ListRecentReconciliations(telemetry),
         ComputeMetrics(telemetry),
         DescribeVocabulary(vocabulary),
+        refresh or FakeRefreshVocabulary(),
+        reload or FakeReloadVocabulary(),
+        simulate or FakeSimulate(),
         host="127.0.0.1",
         port=0,
         token=token,
+        actions_enabled=actions_enabled,
     )
 
 
@@ -291,3 +341,77 @@ def test_bearer_token_is_enforced_when_configured():
         assert status == 200
     finally:
         instance.stop()
+
+
+@pytest.mark.parametrize(
+    ("path", "body"),
+    [
+        ("/vocabulary/reload", {}),
+        ("/vocabulary/generate", {}),
+        ("/reconcile/simulate", {"text": "texaco request"}),
+    ],
+)
+def test_mutating_actions_are_forbidden_by_default(path, body):
+    # Actions are off unless explicitly enabled (ADR-0010): every one returns 403, and the
+    # read API stays available alongside.
+    instance, host, port = _running_server()
+    try:
+        with pytest.raises(urllib.error.HTTPError) as exc_info:
+            _post(host, port, path, body)
+    finally:
+        instance.stop()
+
+    assert exc_info.value.code == 403
+
+
+def test_generate_action_forces_regeneration_when_enabled():
+    refresh = FakeRefreshVocabulary()
+    instance, host, port = _running_server(actions_enabled=True, refresh=refresh)
+    try:
+        status, payload = _post(host, port, "/vocabulary/generate", {})
+    finally:
+        instance.stop()
+
+    assert status == 200
+    assert payload["generated"] is True
+    assert payload["phrase_count"] == 12
+    assert refresh.calls == [True]  # the action forces regeneration
+
+
+def test_reload_action_reports_live_phrase_count_when_enabled():
+    instance, host, port = _running_server(
+        actions_enabled=True, reload=FakeReloadVocabulary(phrases=99)
+    )
+    try:
+        status, payload = _post(host, port, "/vocabulary/reload", {})
+    finally:
+        instance.stop()
+
+    assert status == 200
+    assert payload == {"reloaded": True, "phrases": 99}
+
+
+def test_simulate_action_dispatches_and_returns_route_when_enabled():
+    simulate = FakeSimulate()
+    instance, host, port = _running_server(actions_enabled=True, simulate=simulate)
+    try:
+        status, payload = _post(host, port, "/reconcile/simulate", {"text": "texaco request"})
+    finally:
+        instance.stop()
+
+    assert status == 200
+    assert payload["destination"] == "voiceattack"
+    assert payload["sent_text"] == "Texaco Request"
+    assert payload["snap"] is None
+    assert simulate.texts == ["texaco request"]  # the use case actually ran
+
+
+def test_simulate_without_text_is_bad_request_when_enabled():
+    instance, host, port = _running_server(actions_enabled=True)
+    try:
+        with pytest.raises(urllib.error.HTTPError) as exc_info:
+            _post(host, port, "/reconcile/simulate", {"nope": 1})
+    finally:
+        instance.stop()
+
+    assert exc_info.value.code == 400

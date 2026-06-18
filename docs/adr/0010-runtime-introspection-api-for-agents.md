@@ -83,8 +83,16 @@ call.
 
 ## Action Items
 
-1. [ ] Define query use cases (status, config, vocab, reconciliations, metrics, dry-run).
-2. [ ] HTTP/JSON adapter (FastAPI) + auto OpenAPI; localhost + opt-in + optional token.
-3. [ ] MCP server adapter over the same use cases.
-4. [ ] Gate mutating actions behind debug/agent mode.
-5. [ ] Author the Claude Code skill + MCP tool docs + `AGENTS.md` debug recipes.
+1. [x] Define query use cases (status, config, vocab, reconciliations, metrics, dry-run)
+   (`application/queries.py`).
+2. [x] HTTP/JSON adapter; localhost + opt-in + optional token
+   (`infrastructure/api/introspection.py`). *Built on the stdlib `http.server` instead of
+   FastAPI to keep the gate environment dependency-free (no auto-OpenAPI as a result).*
+3. [ ] MCP server adapter over the same use cases (deferred — needs the `mcp` dependency).
+4. [x] Gate mutating actions behind debug/agent mode. `POST /vocabulary/generate` |
+   `/vocabulary/reload` | `/reconcile/simulate` over the `RefreshVocabulary` /
+   `ReloadVocabulary` / `SimulateUtterance` use cases, gated behind `api_actions_enabled`
+   (off by default, 403 otherwise); `route_command` is shared with the PTT flow so simulate
+   dispatches identically.
+5. [x] Author the Claude Code skill + `AGENTS.md` debug recipes (`vaivox-debug`).
+   *(MCP tool docs land with item 3.)*

@@ -212,9 +212,10 @@ Spelled aviation codes are normalized after transcription, so the keyterm list d
 need to include every code. For example, `U L M B`, `U-L-M-B`, or `E.S.N.J` are compacted
 to `ULMB` and `ESNJ` before text is sent to VoiceAttack.
 
-> Background generation on first run + an in-app "Refresh VAICOM vocabulary" control are
-> still planned (ADR-0005); for now run the generator above once (and again after you
-> change your VAICOM setup).
+> VAIVOX now runs this generation **automatically in the background** on first launch and
+> whenever it detects your VAICOM install changed, hot-applying the new phrase index
+> without a restart (ADR-0005/0009). The manual command above stays available as a
+> fallback; an in-app "Refresh VAICOM vocabulary" button is still planned.
 
 ### Optional STT providers
 

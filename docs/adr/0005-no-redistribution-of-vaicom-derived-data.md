@@ -65,8 +65,17 @@ plus background generation (step 2), so the user is never blocked.
 
 ## Action Items
 
-1. [ ] Implement VAICOM install auto-discovery (+ env/path override).
-2. [ ] Background generate-on-first-run / on-stale into `%LOCALAPPDATA%\VAIVOX`.
-3. [ ] Author a generic, non-VAICOM seed vocabulary with sourced provenance.
-4. [ ] Add UI status + "Refresh VAICOM vocabulary".
-5. [ ] Stop committing VAICOM-derived data; confirm VAICOM-Community's license.
+1. [x] Implement VAICOM install auto-discovery (+ env/path override).
+   `tools/generate_vaicom_keyterms.py:discover_vaicom_root` (`VAICOMPRO_DIR` + common
+   Steam/standalone `Apps\VAICOM*` locations).
+2. [x] Background generate-on-first-run / on-stale into `%LOCALAPPDATA%\VAIVOX`.
+   `RefreshVocabulary` use case + `VaicomVocabularyGenerator` adapter, run on a daemon
+   thread by `VaivoxApp`; hot-applies the regenerated phrase index via the reload seam
+   (ADR-0009). *Follow-up:* bundle/migrate the generator into the frozen build (it degrades
+   to "unavailable" in a packaged exe); the keyterm file applies on the next STT load.
+3. [x] Author a generic, non-VAICOM seed vocabulary with sourced provenance
+   (`domain/vocabulary/keyterms.py` `DEFAULT_DCS_KEYTERMS` + the phonetic alphabet).
+4. [ ] Add UI status + "Refresh VAICOM vocabulary" (a thin `RefreshVocabulary.execute(
+   force=True)` call + a generated/not-found indicator).
+5. [ ] Stop committing VAICOM-derived data; confirm VAICOM-Community's license. *(Data is
+   no longer committed; the license confirmation remains — see §3 of the punch-list.)*
