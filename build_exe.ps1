@@ -23,9 +23,9 @@ $ExcludeModules = @(
     "--exclude-module", "transformers",
     "--exclude-module", "ctranslate2"
 )
-$DataFiles = @(
-    "--add-data", "stt_backends\vaicom_keyterms.txt;stt_backends"
-)
+# VAICOM-derived vocabulary is not shipped (ADR-0005); it is generated locally into
+# %LOCALAPPDATA%\VAIVOX on demand. The app runs on the generic seed until then.
+$DataFiles = @()
 
 if ($Profile -eq "full") {
     $AppName = "VAIVOX-Full"
@@ -105,8 +105,7 @@ $ExpectedReleaseItems = @(
     "add_icon.png",
     "Set STT API Key.cmd",
     "Set ElevenLabs API Key.cmd",
-    "README_FIRST.txt",
-    "_internal\stt_backends\vaicom_keyterms.txt"
+    "README_FIRST.txt"
 )
 
 foreach ($Item in $ExpectedReleaseItems) {

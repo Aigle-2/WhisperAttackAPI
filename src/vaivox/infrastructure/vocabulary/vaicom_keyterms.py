@@ -1,49 +1,62 @@
-"""Load the generated VAICOM/DCS command vocabulary from disk.
+"""Load locally-generated VAICOM/DCS command vocabulary from disk.
 
-This is the infrastructure side of the vocabulary: the pure model lives in
-:mod:`vaivox.domain.vocabulary.keyterms`, while reading the generated file is an I/O
-concern and stays here. Phase 4 (ADR-0005) replaces the bundled file with
-auto-discovery + background generation; this loader keeps parity with the legacy
-``stt_backends`` location until then.
+VAICOM-derived vocabulary is **not** shipped with VAIVOX (ADR-0005): redistributing
+data derived from a VAICOM install is a licensing grey zone. Instead the generator
+(``tools/generate_vaicom_keyterms.py``) writes ``vaicom_keyterms.txt`` into the
+per-user VAIVOX data directory, and this loader reads it from there. Until that file
+exists VAIVOX runs on the generic, non-VAICOM seed
+(:data:`vaivox.domain.vocabulary.keyterms.DEFAULT_DCS_KEYTERMS` + the phonetic
+alphabet), so there is never a hard dependency on a generated file.
+
+The pure model lives in :mod:`vaivox.domain.vocabulary.keyterms`; reading the file is
+this infrastructure concern.
 """
 
 from __future__ import annotations
 
 import logging
-import sys
+import os
 from pathlib import Path
 
 _LOGGER = logging.getLogger(__name__)
 
 VAICOM_KEYTERMS_FILE = "vaicom_keyterms.txt"
 
+#: Optional explicit override pointing at a generated keyterm file.
+VAICOM_KEYTERMS_ENV = "VAIVOX_VAICOM_KEYTERMS"
 
-def _candidate_paths() -> list[Path]:
-    """Return the ordered locations to search for the keyterm file.
 
-    Covers the PyInstaller bundle (``sys._MEIPASS``) and the in-repo source layout,
-    matching where ``build_exe.ps1`` ships the file today.
+def _candidate_paths(data_dir: str | None) -> list[Path]:
+    """Return the ordered locations to search for the generated keyterm file.
+
+    Args:
+        data_dir: The per-user data directory generation writes into, if known.
 
     Returns:
-        Candidate paths in priority order.
+        Candidate paths in priority order (env override first, then the data dir).
     """
     candidates: list[Path] = []
-    meipass = getattr(sys, "_MEIPASS", None)
-    if meipass:
-        candidates.append(Path(meipass) / "stt_backends" / VAICOM_KEYTERMS_FILE)
-    repo_root = Path(__file__).resolve().parents[4]
-    candidates.append(repo_root / "stt_backends" / VAICOM_KEYTERMS_FILE)
+    override = os.getenv(VAICOM_KEYTERMS_ENV, "").strip()
+    if override:
+        candidates.append(Path(override))
+    if data_dir:
+        candidates.append(Path(data_dir) / VAICOM_KEYTERMS_FILE)
     return candidates
 
 
-def load_vaicom_keyterms() -> list[str]:
-    """Load generated VAICOM/DCS command vocabulary.
+def load_vaicom_keyterms(data_dir: str | None = None) -> list[str]:
+    """Load locally-generated VAICOM/DCS command vocabulary.
+
+    Args:
+        data_dir: The per-user VAIVOX data directory the generator writes into. When
+            ``None`` only the env override is consulted.
 
     Returns:
-        The non-comment, non-blank lines of the keyterm file, or an empty list when
-        the file is missing or unreadable (logged as a warning, never raised).
+        The non-comment, non-blank lines of the keyterm file, or an empty list when no
+        generated file is present (logged at debug level, never raised). An empty list
+        is normal before the first generation — the generic seed covers the gap.
     """
-    for path in _candidate_paths():
+    for path in _candidate_paths(data_dir):
         if not path.is_file():
             continue
         try:
@@ -54,8 +67,8 @@ def load_vaicom_keyterms() -> list[str]:
                     if line.strip() and not line.lstrip().startswith("#")
                 ]
         except OSError as error:
-            _LOGGER.warning("Failed to load VAICOM keyterm source file '%s': %s", path, error)
+            _LOGGER.warning("Failed to load VAICOM keyterm file '%s': %s", path, error)
             return []
 
-    _LOGGER.warning("VAICOM keyterm source file was not found: %s", VAICOM_KEYTERMS_FILE)
+    _LOGGER.debug("No generated VAICOM keyterm file found; using the generic seed.")
     return []

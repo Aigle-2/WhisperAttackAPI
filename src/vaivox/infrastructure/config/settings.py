@@ -44,6 +44,10 @@ class VaivoxConfiguration:
             app_location: Directory holding the shipped default configuration.
             app_data_location: Directory holding the user's custom overrides.
         """
+        # Retained so the "vaicom" keyterm source can read the locally-generated file
+        # from the per-user data directory (ADR-0005).
+        self._app_data_location = app_data_location
+
         default_config = self.load_configuration(app_location)
         custom_config = self.load_configuration(app_data_location, False)
         self.config = default_config | custom_config
@@ -397,7 +401,7 @@ class VaivoxConfiguration:
         if source in ("dcs_default", "dcs_defaults"):
             return list(DEFAULT_DCS_KEYTERMS)
         if source == "vaicom":
-            return load_vaicom_keyterms()
+            return load_vaicom_keyterms(self._app_data_location)
         if source in ("custom", "settings"):
             return [
                 *self._parse_keyterm_setting("stt_keyterms"),

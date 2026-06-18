@@ -39,6 +39,8 @@ PHONETIC_ALPHABET = [
     "Zulu",
 ]
 
+# Generic, NON-VAICOM-derived seed (ADR-0005): widely documented DCS callsigns and ATC
+# vocabulary, so VAIVOX works out-of-the-box before any local VAICOM generation runs.
 DEFAULT_DCS_KEYTERMS = [
     "Enfield",
     "Springfield",
