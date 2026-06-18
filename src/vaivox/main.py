@@ -18,10 +18,20 @@ _LOGGER = logging.getLogger(__name__)
 
 
 def _ensure_src_on_path() -> None:
-    """Make the in-repo ``src/`` importable when run from source as a script."""
-    src = Path(__file__).resolve().parents[1]
-    if src.is_dir() and str(src) not in sys.path:
-        sys.path.insert(0, str(src))
+    """Make the in-repo ``src/`` and repo root importable when run from source.
+
+    ``src/`` exposes the ``vaivox`` package; the repo root exposes ``tools/`` — the VAICOM
+    vocabulary generator (ADR-0005) that the background ``RefreshVocabulary`` adapter imports
+    lazily (``from tools import generate_vaicom_keyterms``). The ``vaivox`` console script only
+    puts the package directory on ``sys.path``, so without the repo root the generator reports
+    "generator unavailable" from a source run. A frozen build ships neither directory (the
+    ``is_dir`` guard skips both) and degrades to the generic seed as designed.
+    """
+    here = Path(__file__).resolve()
+    # parents[1] = .../src (the vaivox package); parents[2] = repo root (holds tools/).
+    for path in (here.parents[1], here.parents[2]):
+        if path.is_dir() and str(path) not in sys.path:
+            sys.path.insert(0, str(path))
 
 
 def _resolve_app_path() -> str:
