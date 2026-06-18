@@ -213,6 +213,8 @@ The distributable ZIP is created beside it:
 dist\release\WhisperAttackAPI v1.2.2-api.1.zip
 ```
 
+Any intermediate PyInstaller output is kept under `build`; only `dist\release` is meant to be published.
+
 The release folder follows the original WhisperAttack layout: the exe, `_internal`, `settings.cfg`, `fuzzy_words.txt`, `word_mappings.txt`, icons, and a small API-key helper are all at the top level.
 
 To build the larger offline-capable executable that includes the local `faster_whisper` backend, double-click:

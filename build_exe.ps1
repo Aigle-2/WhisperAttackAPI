@@ -30,7 +30,9 @@ if ($Profile -eq "full") {
 }
 
 $PythonPath = Join-Path $VenvPath "Scripts\python.exe"
-$DistPath = Join-Path $ProjectRoot "dist\$AppName"
+$PackageRoot = Join-Path $ProjectRoot "build\pyinstaller-dist"
+$PackagePath = Join-Path $PackageRoot $AppName
+$LegacyDistPath = Join-Path $ProjectRoot "dist\$AppName"
 $ReleaseRoot = Join-Path $ProjectRoot "dist\release"
 $ReleaseFolderName = "$AppName v$Version"
 $ReleasePath = Join-Path $ReleaseRoot $ReleaseFolderName
@@ -40,8 +42,11 @@ if ($Clean) {
     if (Test-Path $VenvPath) {
         Remove-Item -LiteralPath $VenvPath -Recurse -Force
     }
-    if (Test-Path $DistPath) {
-        Remove-Item -LiteralPath $DistPath -Recurse -Force
+    if (Test-Path $PackagePath) {
+        Remove-Item -LiteralPath $PackagePath -Recurse -Force
+    }
+    if (Test-Path $LegacyDistPath) {
+        Remove-Item -LiteralPath $LegacyDistPath -Recurse -Force
     }
     if (Test-Path $ReleasePath) {
         Remove-Item -LiteralPath $ReleasePath -Recurse -Force
@@ -64,6 +69,7 @@ if (!(Test-Path $PythonPath)) {
     --clean `
     --onedir `
     --noconsole `
+    --distpath $PackageRoot `
     --name $AppName `
     @ExcludeModules `
     whisper_attack.py
@@ -79,7 +85,7 @@ $Assets = @(
 )
 
 foreach ($Asset in $Assets) {
-    Copy-Item -LiteralPath (Join-Path $ProjectRoot $Asset) -Destination $DistPath -Force
+    Copy-Item -LiteralPath (Join-Path $ProjectRoot $Asset) -Destination $PackagePath -Force
 }
 
 if (Test-Path $ReleasePath) {
@@ -88,7 +94,7 @@ if (Test-Path $ReleasePath) {
 if (!(Test-Path $ReleaseRoot)) {
     New-Item -ItemType Directory -Path $ReleaseRoot | Out-Null
 }
-Copy-Item -LiteralPath $DistPath -Destination $ReleasePath -Recurse -Force
+Copy-Item -LiteralPath $PackagePath -Destination $ReleasePath -Recurse -Force
 
 $ExpectedReleaseItems = @(
     "_internal",
@@ -113,6 +119,10 @@ if (Test-Path $ZipPath) {
     Remove-Item -LiteralPath $ZipPath -Force
 }
 Compress-Archive -LiteralPath $ReleasePath -DestinationPath $ZipPath -Force
+
+if (Test-Path $LegacyDistPath) {
+    Remove-Item -LiteralPath $LegacyDistPath -Recurse -Force
+}
 
 Write-Host ""
 Write-Host "Build complete."
