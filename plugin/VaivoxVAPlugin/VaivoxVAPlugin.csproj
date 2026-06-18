@@ -1,0 +1,47 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    VAIVOX VoiceAttack plugin (ADR-0002 / ADR-0006).
+
+    VoiceAttack 2 hosts the plugin as a .NET Framework 4.x class library and loads it by
+    file name, so the assembly name is pinned to VaivoxVAPlugin.dll. The plugin talks to
+    VoiceAttack only through the late-bound `dynamic vaProxy` API, so VoiceAttack.dll is not
+    a hard compile dependency — it is referenced when present (the conventional setup) and
+    skipped otherwise, which also lets the project build standalone for a syntax/CI check.
+
+    Build (on a machine with VoiceAttack installed):
+        dotnet build -c Release
+        dotnet build -c Release -p:VoiceAttackDir="D:\Games\VoiceAttack"   # non-default path
+    Then copy bin\Release\net48\VaivoxVAPlugin.dll into VoiceAttack\Apps\VAIVOX\.
+  -->
+
+  <PropertyGroup>
+    <TargetFramework>net48</TargetFramework>
+    <AssemblyName>VaivoxVAPlugin</AssemblyName>
+    <RootNamespace>VaivoxServerCommand</RootNamespace>
+    <LangVersion>latest</LangVersion>
+    <Nullable>disable</Nullable>
+    <AutoGenerateBindingRedirects>true</AutoGenerateBindingRedirects>
+    <GenerateAssemblyInfo>true</GenerateAssemblyInfo>
+    <!-- Override on the command line if VoiceAttack lives elsewhere (see header). -->
+    <VoiceAttackDir Condition="'$(VoiceAttackDir)' == ''">C:\Program Files\VoiceAttack</VoiceAttackDir>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Build-time .NET Framework 4.8 reference assemblies so `dotnet build` works without a
+         full Visual Studio / targeting-pack install (keeps the build CI-reproducible). -->
+    <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies" Version="1.0.3" PrivateAssets="all" />
+    <!-- Required for the `dynamic vaProxy` calls on .NET Framework. -->
+    <Reference Include="Microsoft.CSharp" />
+  </ItemGroup>
+
+  <!-- The real VoiceAttack.dll, referenced only when the install is present. Not copied to
+       the output (VoiceAttack provides it at load time). -->
+  <ItemGroup Condition="Exists('$(VoiceAttackDir)\VoiceAttack.dll')">
+    <Reference Include="VoiceAttack">
+      <HintPath>$(VoiceAttackDir)\VoiceAttack.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+  </ItemGroup>
+
+</Project>

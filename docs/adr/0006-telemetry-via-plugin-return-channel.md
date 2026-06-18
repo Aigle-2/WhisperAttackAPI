@@ -108,7 +108,16 @@ in-project constraint, Option A is the cleaner fit.
 
 ## Action Items
 
-1. [ ] Define the result message format (text, matched, resolved command).
-2. [ ] Emit the result from the plugin after the match attempt.
-3. [ ] Add a `TelemetrySink` port + JSONL adapter in `%LOCALAPPDATA%\VAIVOX`.
-4. [ ] Build the offline review report (frequent not-founds, suggested mappings).
+1. [x] Define the result message format (text, matched, resolved command). One JSON line
+   `{ "text", "matched", "resolved_command" }` (newline-terminated), `resolved_command` =
+   the received text when matched (exact-name check) else `null`.
+2. [x] Emit the result from the plugin after the match attempt. `HandleVaivoxCommand`
+   replies on the same socket right after `Command.Exists` (before `Command.Execute`);
+   `VoiceAttackCommandSink.send` reads it back (short timeout; EOF/timeout/malformed →
+   `None`/unknown for backward compatibility) and `route_command` records it in
+   `ReconciliationOutcome.match` and stamps usage on a match. *Deploying* the rebuilt DLL +
+   the DCS smoke is the only hardware-gated remainder (see `TODO.md` §1).
+3. [x] Add a `TelemetrySink` port + JSONL adapter in `%LOCALAPPDATA%\VAIVOX` (Phase 5 §1:
+   `JsonlTelemetrySink`, config-gated `telemetry_enabled`).
+4. [ ] Build the offline review report (frequent not-founds, suggested mappings) — needs
+   accumulated live match data from the deploy above.

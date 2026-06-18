@@ -101,9 +101,19 @@ but never anything that does I/O (sockets, files, mic, network, UI).
     `vaivox-mcp` console script) serves the *same read query use cases* as FastMCP stdio
     tools — `mcp` is an optional extra, imported lazily so the gate stays dep-light. *Scope:*
     the MCP server is a read-only reader process; mutating actions stay on the HTTP API.
-  - **Cross-cutting blocker:** the C# plugin **return channel** (ADR-0006) gates the
-    match-signal-dependent work — live usage stamping (`mark_used`/recency), near-miss
-    capture, Tier 2 attribution — and needs a Windows/VoiceAttack build (not CI-testable).
+  - **Return channel** (ADR-0006) ✅ both sides: the C# plugin (`plugin/VaivoxVAPlugin/`)
+    replies one JSON line `{ text, matched, resolved_command }` on the command socket right
+    after `Command.Exists` (before `Command.Execute`); `VoiceAttackCommandSink.send` reads it
+    (short timeout; EOF/timeout/malformed → unknown, so an un-rebuilt plugin keeps parity),
+    and `route_command` records it in `ReconciliationOutcome.match` and — on a match — stamps
+    **live usage** via Tier 1 attribution (`mark_used`/recency). Attribution is a surface-form
+    Tier 1 proxy today (the pipeline still reads vocab from `config`, not the repository);
+    near-miss capture into telemetry (`SnapSummary.near_misses`) already lands on every
+    abstain. The plugin builds from a committed `VaivoxVAPlugin.csproj` (net48).
+    *Hardware-gated remainder (not CI-testable):* deploy the rebuilt DLL + re-point
+    `VAIVOX - VA Profile.vap` (ADR-0002) + the DCS smoke; then the follow-ups it unblocks —
+    the offline near-miss review report and Tier 2 counterfactual attribution (both want
+    accumulated live match data and the pipeline reading vocab from `VocabularyRepository`).
 
 During the migration the remaining legacy top-level modules (`whisper_attack.py`,
 `configuration.py`, `transcription_postprocess.py`, `stt_backends/`) are thin

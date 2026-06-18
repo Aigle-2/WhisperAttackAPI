@@ -73,6 +73,12 @@ separation from eroding.
 
 ## Action Items
 
-1. [ ] Introduce `ProductIdentity` in the config/composition layer.
-2. [ ] Generate a new plugin GUID; update the C# plugin + bundled profile.
-3. [ ] Route data-dir, log, ports, titles through `ProductIdentity`.
+1. [x] Introduce `ProductIdentity` in the config/composition layer (Phase 4:
+   `infrastructure/config/identity.py`).
+2. [x] Generate a new plugin GUID; update the C# plugin + bundled profile. GUID
+   `{ED0BA443-726F-4A9F-AF05-DB400F39A501}` is set in `plugin/VaivoxVAPlugin/VaivoxVAPlugin.cs`,
+   and the plugin now has a reproducible `VaivoxVAPlugin.csproj` (net48) building
+   `VaivoxVAPlugin.dll`. *Hardware-gated remainder:* re-point the commands in
+   `VAIVOX - VA Profile.vap` to the new GUID inside VoiceAttack and deploy the DLL (see
+   `plugin/VaivoxVAPlugin/README.md` and `TODO.md` §1).
+3. [x] Route data-dir, log, ports, titles through `ProductIdentity` (Phase 4).

@@ -142,7 +142,16 @@ namespace VaivoxServerCommand
 
                     vaProxy.WriteToLog($"Received VAIVOX command: '{receivedMessage}'", "grey");
 
-                    if (vaProxy.Command.Exists(receivedMessage))
+                    // ADR-0006 return channel: decide the match, reply on the SAME socket,
+                    // then dispatch. Replying before Command.Execute keeps the round-trip off
+                    // the (potentially slow) in-game radio call, so the server learns the
+                    // outcome with negligible latency. Command.Exists is an exact-name check,
+                    // so the resolved command is the received text when matched.
+                    bool matched = vaProxy.Command.Exists(receivedMessage);
+                    string resolvedCommand = matched ? receivedMessage : null;
+                    await SendMatchOutcome(stream, receivedMessage, matched, resolvedCommand);
+
+                    if (matched)
                     {
                         vaProxy.Command.Execute(receivedMessage, true, true);
                     }
@@ -156,6 +165,75 @@ namespace VaivoxServerCommand
                     vaProxy.WriteToLog($"Error reading command: {ex.Message}", "red");
                 }
             }
+        }
+
+        // The VAIVOX server reads one JSON line back on the command socket right after it
+        // sends the command (ADR-0006). The reply is best-effort: a server running an older
+        // build simply will not read it, and any failure here must never break dispatch.
+        private static async Task SendMatchOutcome(
+            NetworkStream stream, string text, bool matched, string resolvedCommand)
+        {
+            try
+            {
+                string payload = BuildOutcomeJson(text, matched, resolvedCommand) + "\n";
+                byte[] data = Encoding.UTF8.GetBytes(payload);
+                await stream.WriteAsync(data, 0, data.Length);
+            }
+            catch (Exception)
+            {
+                // A missing or short reply is treated as "unknown" by the server, which then
+                // records the event without stamping usage and carries on — so swallow any
+                // write/socket error rather than throwing across the plugin boundary.
+            }
+        }
+
+        // Build the { text, matched, resolved_command } reply by hand so the plugin keeps
+        // zero third-party dependencies (no JSON library); resolved_command is null when the
+        // command did not match.
+        private static string BuildOutcomeJson(string text, bool matched, string resolvedCommand)
+        {
+            string matchedLiteral = matched ? "true" : "false";
+            return "{\"text\": " + JsonStringOrNull(text)
+                + ", \"matched\": " + matchedLiteral
+                + ", \"resolved_command\": " + JsonStringOrNull(resolvedCommand) + "}";
+        }
+
+        // Serialize a string as a JSON string literal with the required escaping, or the
+        // literal `null` for a null value.
+        private static string JsonStringOrNull(string value)
+        {
+            if (value == null)
+            {
+                return "null";
+            }
+
+            StringBuilder builder = new StringBuilder(value.Length + 2);
+            builder.Append('"');
+            foreach (char c in value)
+            {
+                switch (c)
+                {
+                    case '"': builder.Append("\\\""); break;
+                    case '\\': builder.Append("\\\\"); break;
+                    case '\b': builder.Append("\\b"); break;
+                    case '\f': builder.Append("\\f"); break;
+                    case '\n': builder.Append("\\n"); break;
+                    case '\r': builder.Append("\\r"); break;
+                    case '\t': builder.Append("\\t"); break;
+                    default:
+                        if (c < ' ')
+                        {
+                            builder.Append("\\u").Append(((int)c).ToString("x4"));
+                        }
+                        else
+                        {
+                            builder.Append(c);
+                        }
+                        break;
+                }
+            }
+            builder.Append('"');
+            return builder.ToString();
         }
     }
 }

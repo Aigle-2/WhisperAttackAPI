@@ -16,24 +16,42 @@ adapter** (`vaivox-mcp`) + `vaivox-debug` skill (ADR-0010).
 
 ## 1. Blocked — needs a Windows + VoiceAttack + DCS machine (not CI-testable)
 
-These gate the match-signal-dependent work; everything buildable without them is done.
+The reconciliation return loop (ADR-0006) is now **implemented on both sides** and the
+plugin build is reproducible. What is left here is the hardware **deploy + `.vap` re-point +
+DCS smoke** that *activates* it live. Until the rebuilt plugin is deployed the server
+degrades cleanly to "unknown" against the old (pre-return-channel) plugin (behaviour parity).
 
-- [ ] **C# plugin return channel (ADR-0006).** After `Command.Exists`, have
-  `plugin/VaivoxVAPlugin/VaivoxVAPlugin.cs` report `{ text, matched, resolved_command }`
-  back on the same socket; read it in `infrastructure/voiceattack/` and populate
-  `ReconciliationOutcome.match`. **This is the key unblocker** for the three items below.
-- [ ] **Live usage stamping / recency (ADR-0004).** On a matched outcome, run Tier 1
-  attribution and call `VocabularyRepository.mark_used(credited_ids, now)` from
-  `StopAndReconcile`. Seam is in place (`attribute_tier1` → `credited_ids` → `mark_used`);
-  it just needs the `matched` signal above.
-- [ ] **Near-miss capture (ADR-0006 §3).** When the snap abstains / no match, record the
-  top-N nearest phrases. The snapper already emits near-misses into telemetry; this is the
-  match-signal-gated review/report side.
+- [x] **C# plugin return channel (ADR-0006) — code done.**
+  `plugin/VaivoxVAPlugin/VaivoxVAPlugin.cs` replies `{ text, matched, resolved_command }` on
+  the same socket (before `Command.Execute`); `VoiceAttackCommandSink.send` reads it (short
+  timeout, EOF/timeout/malformed → unknown) and `route_command` populates
+  `ReconciliationOutcome.match`. Tested with in-memory fakes + a real-socket round-trip.
+  *Hardware-gated:* the deploy + smoke below to see it live.
+- [x] **Live usage stamping / recency (ADR-0004) — code done.** On a matched outcome
+  `route_command` runs Tier 1 attribution and calls
+  `VocabularyRepository.mark_used(credited_ids, clock.now())`. *Reachable scope:* attribution
+  is a surface-form Tier 1 proxy today — the live pipeline reads vocab from `config` (not the
+  repository) and emits no per-edit provenance, so an entry is credited when its canonical
+  term survives into the matched command; precise per-edit provenance waits on the pipeline
+  reading vocab from `VocabularyRepository`. Activated by the deploy below.
+- [ ] **Near-miss capture (ADR-0006 §3).** The snapper already records near-misses into
+  telemetry (`SnapSummary.near_misses`) on every abstain. *Remaining:* the offline
+  review/report that proposes new mappings/aliases from frequent not-founds — needs
+  accumulated live match data (so it follows the deploy below).
 - [ ] **Tier 2 counterfactual attribution (ADR-0004).** Pipeline-replay + phrase-index
-  oracle on ambiguous matches. Larger; needs the match signal.
-- [ ] **C# `dotnet` build + bundled `.vap` re-point (ADR-0002).** Build the plugin DLL
-  (no `.csproj` is committed — it depends on the local VoiceAttack SDK path) and re-point
-  the commands in `VAIVOX - VA Profile.vap` to the new plugin GUID inside VoiceAttack.
+  oracle on ambiguous matches. Larger; needs the match signal **and** the pipeline reading
+  vocab from `VocabularyRepository` (so attribution can credit by exact edit, not surface form).
+- [x] **C# `dotnet` build — reproducible.** `plugin/VaivoxVAPlugin/VaivoxVAPlugin.csproj`
+  (net48, pinned `VaivoxVAPlugin.dll` name, optional `VoiceAttack.dll` reference via
+  `-p:VoiceAttackDir`, CI-buildable via `Microsoft.NETFramework.ReferenceAssemblies`) builds
+  the DLL standalone (the plugin is all late-bound `dynamic`). *Hardware-gated:* re-point the
+  commands in `VAIVOX - VA Profile.vap` to the new plugin GUID inside VoiceAttack and copy the
+  built DLL into `VoiceAttack\Apps\VAIVOX\`.
+- [ ] **DCS end-to-end smoke (ADR-0006/0002).** With VoiceAttack + VAICOM + DCS: PTT a known
+  command → fires in-game + `matched=true` + a usage hit in `%LOCALAPPDATA%\VAIVOX\
+  <kind>.usage.json` + `GET /metrics` shows a real `match`; PTT an unknown command →
+  `matched=false` + near-miss recorded + no stamp. Recipe in
+  `plugin/VaivoxVAPlugin/README.md`.
 - [ ] **Generator end-to-end (ADR-0005).** Run `python tools/generate_vaicom_keyterms.py`
   against a real VAICOM install; verify the emitted `%LOCALAPPDATA%\VAIVOX\vaicom_keyterms.txt`
   + `phrase_index.txt` shape (the phrase index must line up with VoiceAttack's actual
@@ -114,5 +132,7 @@ These gate the match-signal-dependent work; everything buildable without them is
 
 ---
 
-_Update this file as items land (and prefer adding a new ADR over editing decisions). When
-the C# return channel ships, revisit section 1 — most of it unblocks at once._
+_Update this file as items land (and prefer adding a new ADR over editing decisions). The
+C# return channel has now shipped (code, both sides); section 1's remaining work is the
+hardware deploy + `.vap` re-point + DCS smoke that activates it, then the follow-ups it
+unblocks (the near-miss review report, Tier 2 attribution)._
