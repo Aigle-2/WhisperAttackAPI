@@ -6,7 +6,7 @@
 
 ## Context
 
-The codebase is an amateur fork. The functional core is sound but the structure
+The codebase is a legacy fork. The functional core is sound but the structure
 is not: `whisper_server.py` is a god-module mixing a socket server, audio
 recording, text cleanup, fuzzy matching, the VoiceAttack sink and the kneeboard
 sink in one class. There are no enforced layering rules and the domain logic

@@ -5,7 +5,7 @@ This directory records the load-bearing decisions for the **VAIVOX** rewrite
 
 VAIVOX sits on top of **VoiceAttack 2** and **VAICOM Community** and turns
 push-to-talk speech into DCS radio commands. The rewrite exists to replace an
-amateur-grade architecture with a maintainable, testable, modular one *before*
+legacy architecture with a maintainable, testable, modular one *before*
 new reconciliation features are built on top of it.
 
 ## Conventions

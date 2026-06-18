@@ -2,7 +2,7 @@
 
 VAIVOX turns push-to-talk speech into DCS radio commands on top of **VoiceAttack 2**
 + **VAICOM Community** (Windows desktop app). It is a divergence of WhisperAttackAPI,
-mid-rewrite from an amateur layout to a hexagonal one. Decisions live in
+mid-rewrite from a legacy layout to a hexagonal one. Decisions live in
 [`docs/adr/`](docs/adr/); the phased roadmap is [`docs/MIGRATION_PLAN.md`](docs/MIGRATION_PLAN.md).
 
 ## Architecture (ADR-0001): hexagonal, dependencies point inward
@@ -51,9 +51,26 @@ but never anything that does I/O (sockets, files, mic, network, UI).
   *Deferred follow-ups:* full ADR-0005 VAICOM auto-discovery + background generation +
   UI "Refresh" control; and the C# `dotnet` build / `.vap` re-point (verified by hand,
   not in CI).
-- **Next — Phase 5:** the reconciliation features on clean seams — governance
-  (ADR-0004), telemetry return-channel (ADR-0006), phrase-snap (Axis B), the eval
-  harness (ADR-0008), and the enriched agent API/MCP (ADR-0010).
+- **Phase 5** 🚧 (in progress) the reconciliation features, on clean seams:
+  - **A — Governance** (ADR-0004) ✅ core: `domain/vocabulary/` `VocabularyEntry` +
+    `VocabularyGovernor` (rank by recency/hits, LRU eviction with DEFAULT protection +
+    grace window, Tier 1 token-provenance attribution), the `VocabularyRepository` port,
+    and a JSONL source + usage-sidecar adapter.
+  - **C — Telemetry** (ADR-0006) ✅ §1: `JsonlTelemetrySink` appends each
+    `ReconciliationOutcome` to `%LOCALAPPDATA%\VAIVOX`, config-gated (`telemetry_enabled`,
+    default on).
+  - **Eval harness** (ADR-0008) ✅: `tests/eval/` — VAICOM match-oracle mock, a curated
+    golden dataset, metrics (match / wrong-match / abstain) + a committed baseline gate;
+    the decisive guard is `wrong_match == 0`.
+  - **B — Phrase snap** (ADR-0011) ✅: conservative three-band `PhraseSnapper`
+    (snap / abstain+near-miss / raw, runner-up margin), wired into `StopAndReconcile`
+    (VoiceAttack path only) + recorded in telemetry; a no-op until a phrase index exists.
+    The eval recovers every near-miss with `wrong_match == 0` held. *Deferred:* the
+    VAICOM phrase-index generator (untestable in CI) and recipient segmentation.
+  - **Agent API/MCP** (ADR-0010) — pending.
+  - **Cross-cutting blocker:** the C# plugin **return channel** (ADR-0006) gates the
+    match-signal-dependent work — live usage stamping (`mark_used`/recency), near-miss
+    capture, Tier 2 attribution — and needs a Windows/VoiceAttack build (not CI-testable).
 
 During the migration the legacy top-level modules (`whisper_attack.py`,
 `whisper_server.py`, `configuration.py`, `stt_backends/`, …) are thin re-export/launcher

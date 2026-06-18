@@ -1,6 +1,6 @@
 # VAIVOX — Migration Plan
 
-From the amateur-grade WhisperAttackAPI layout to a hexagonal, SOLID, tooled
+From the legacy WhisperAttackAPI layout to a hexagonal, SOLID, tooled
 codebase, then onto the three reconciliation features. Decisions are recorded in
 [adr/](adr/).
 
@@ -118,18 +118,29 @@ green. **Deferred:** full ADR-0005 auto-discovery + background generation + UI "
 VAICOM vocabulary"; the C# `dotnet` build + bundled `.vap` re-point (binary; done by hand
 in VoiceAttack, not verifiable in CI).
 
-### Phase 5 — Reconciliation features (on clean seams)
-- **A — Governance** (ADR-0004): JSONL vocab + usage sidecar + `VocabularyGovernor`
-  + Tier 1/2 attribution; **reload model** (ADR-0009): idle-gated hot atomic swap.
-- **C — Telemetry** (ADR-0006): plugin return channel + `TelemetrySink` + report.
-- **B — Phrase snap** (Axis B): phrase index + conservative whole-utterance snap
-  with abstain (same scorer as the near-miss top-N).
-- **Eval harness** (ADR-0008): LLM dataset + VAICOM mock + metrics, CI-gated.
-- **Agent API + skills** (ADR-0010): enrich the introspection API
-  (telemetry / vocab / metrics endpoints + MCP adapter) and ship the agent
-  skill / prompts.
-Order: A and C first (C's "entry fired" event powers A's recency), then B (which
-relies on telemetry to tune thresholds safely).
+### Phase 5 — Reconciliation features (on clean seams) 🚧 (in progress)
+- **A — Governance** (ADR-0004) ✅ core: `domain/vocabulary/` model + `VocabularyGovernor`
+  (rank by recency/hits, LRU eviction with DEFAULT protection + grace window, Tier 1
+  attribution), `VocabularyRepository` port, JSONL source + usage-sidecar adapter.
+  *Deferred:* Tier 2 counterfactual; the **reload model** (ADR-0009) idle-gated hot
+  atomic swap; live `mark_used` wiring (blocked on the match signal, below).
+- **C — Telemetry** (ADR-0006) ✅ §1 ("always"): `JsonlTelemetrySink` +
+  config-gated wiring. *Deferred:* the **plugin return channel** (`MatchOutcome`) —
+  needs the C# rebuild — and with it usage stamping and near-miss capture.
+- **Eval harness** (ADR-0008) ✅: `tests/eval/` VAICOM mock + curated golden dataset +
+  metrics + committed baseline gate (`wrong_match == 0`). *Deferred:* the LLM-generated
+  dataset augmentation (the human-curated golden set is in place).
+- **B — Phrase snap** (ADR-0011) ✅: conservative three-band `PhraseSnapper` with abstain
+  (same scorer as the near-miss top-N), live-wired into `StopAndReconcile` + recorded in
+  telemetry (no-op until a phrase index exists). The eval recovers every near-miss with
+  `wrong_match == 0` held. *Deferred:* the VAICOM phrase-index **generator** (needs a real
+  install; untestable in CI) and recipient segmentation.
+- **Agent API + skills** (ADR-0010) — pending: enrich the introspection API
+  (telemetry / vocab / metrics endpoints + MCP adapter) and ship the agent skill /
+  prompts.
+Order: A and C landed first (C's "entry fired" event powers A's recency), then B (which
+relies on the eval/telemetry to tune thresholds safely). The match-signal-dependent
+pieces (A's recency, C's outcome, near-miss) wait on the C# return channel.
 **Exit:** a committed reconciliation **metric** (match / wrong-match / abstain) with
 no regression, and a measurable drop in `not found` without wrong-command snaps.
 

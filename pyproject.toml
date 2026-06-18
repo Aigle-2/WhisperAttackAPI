@@ -5,7 +5,7 @@
 # quality gates defined in ADR-0007 (ruff, mypy, pytest+coverage, import-linter).
 #
 # IMPORTANT (Phase 1 scope): the strict gates target only the NEW `src/vaivox/`
-# tree. The legacy amateur modules (`whisper_*.py`, `configuration.py`,
+# tree. The legacy modules (`whisper_*.py`, `configuration.py`,
 # `stt_backends/`, ...) are deliberately excluded / loosened so every gate is green
 # without rewriting code that Phase 2+ will move. See the `extend-exclude` and the
 # mypy `[[tool.mypy.overrides]]` blocks below.
