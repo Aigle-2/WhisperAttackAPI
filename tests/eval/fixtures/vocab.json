@@ -1,0 +1,21 @@
+{
+  "_note": "Frozen vocab snapshot for the reconciliation eval (ADR-0008). Reproducibility requires this never change implicitly; hot-reload (ADR-0009) must not leak in.",
+  "word_mappings": {
+    "inter": "Enter"
+  },
+  "fuzzy_words": [
+    "Texaco",
+    "Overlord",
+    "Springfield",
+    "Magic",
+    "Colt",
+    "Arco",
+    "Kobuleti"
+  ],
+  "phonetic_alphabet": [
+    "Alpha", "Bravo", "Charlie", "Delta", "Echo", "Foxtrot", "Golf", "Hotel",
+    "India", "Juliet", "Kilo", "Lima", "Mike", "November", "Oscar", "Papa",
+    "Quebec", "Romeo", "Sierra", "Tango", "Uniform", "Victor", "Whiskey",
+    "X-ray", "Yankee", "Zulu"
+  ]
+}

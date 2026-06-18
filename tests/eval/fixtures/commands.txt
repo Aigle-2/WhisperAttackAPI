@@ -1,0 +1,16 @@
+# Frozen VAICOM command set the match oracle knows about (ADR-0008 fixture).
+# Generic, publicly-documented DCS callsigns/ATC phrasing — NOT VAICOM-derived (ADR-0005).
+# One valid command phrase per line; comments (#) and blanks ignored.
+Texaco request rejoin
+Texaco request fuel
+Overlord bogey dope
+Overlord picture
+Springfield request startup
+Colt request startup
+Arco request rejoin
+Magic ready to copy
+Kobuleti inbound
+Kobuleti request taxi
+tune ULMB
+set heading 270
+button 5

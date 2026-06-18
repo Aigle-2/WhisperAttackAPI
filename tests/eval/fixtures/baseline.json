@@ -1,0 +1,12 @@
+{
+  "_note": "Committed reconciliation-eval baseline (ADR-0008). The eval gate asserts no regression vs these. Update deliberately (with justification) when reconciliation behavior intentionally improves, like the golden characterization tests.",
+  "total": 12,
+  "match": 9,
+  "wrong_match": 0,
+  "not_found": 3,
+  "abstain": 0,
+  "near_miss_recoverable": 3,
+  "match_rate": 0.75,
+  "wrong_match_rate": 0.0,
+  "not_found_rate": 0.25
+}

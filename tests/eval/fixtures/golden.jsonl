@@ -1,0 +1,12 @@
+{"raw_stt": "Texaco request rejoin", "expected_command": "Texaco request rejoin", "tags": ["clean"]}
+{"raw_stt": "texaco, request rejoin.", "expected_command": "Texaco request rejoin", "tags": ["punctuation", "casing"]}
+{"raw_stt": "kobuletti inbound", "expected_command": "Kobuleti inbound", "tags": ["misheard_callsign", "accented"]}
+{"raw_stt": "tune U L M B", "expected_command": "tune ULMB", "tags": ["spelled_code"]}
+{"raw_stt": "set heading two seven zero", "expected_command": "set heading 270", "tags": ["number_form"]}
+{"raw_stt": "button five", "expected_command": "button 5", "tags": ["number_form"]}
+{"raw_stt": "overlord bogey dope", "expected_command": "Overlord bogey dope", "tags": ["casing"]}
+{"raw_stt": "Overlord picture", "expected_command": "Overlord picture", "tags": ["clean"]}
+{"raw_stt": "magic ready to copy", "expected_command": "Magic ready to copy", "tags": ["casing"]}
+{"raw_stt": "uh Springfield request startup", "expected_command": "Springfield request startup", "tags": ["filler"]}
+{"raw_stt": "texako request rejoin", "expected_command": "Texaco request rejoin", "tags": ["misheard_callsign"]}
+{"raw_stt": "colt request start up", "expected_command": "Colt request startup", "tags": ["word_split"]}
