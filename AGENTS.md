@@ -75,11 +75,13 @@ but never anything that does I/O (sockets, files, mic, network, UI).
     match-signal-dependent work — live usage stamping (`mark_used`/recency), near-miss
     capture, Tier 2 attribution — and needs a Windows/VoiceAttack build (not CI-testable).
 
-During the migration the legacy top-level modules (`whisper_attack.py`,
-`whisper_server.py`, `configuration.py`, `stt_backends/`, …) are thin re-export/launcher
-**shims that delegate into `src/vaivox/`** (the single source of truth). `whisper_attack.py`
-now just launches `vaivox.main`; `whisper_server.py` is superseded and kept only as a
-short-lived rollback reference. New behavior goes in `src/vaivox/`.
+During the migration the remaining legacy top-level modules (`whisper_attack.py`,
+`configuration.py`, `transcription_postprocess.py`, `stt_backends/`) are thin
+re-export/launcher **shims that delegate into `src/vaivox/`** (the single source of truth).
+`whisper_attack.py` now just launches `vaivox.main`. The fully-migrated god-module and UI
+modules (`whisper_server.py`, `writer.py`, `theme.py`, `word_mappings.py`) were **deleted**
+in the Phase 5 cleanup — their behavior lives in `infrastructure/ui/` + the use cases. New
+behavior goes in `src/vaivox/`.
 
 ## Quality gates (ADR-0007)
 

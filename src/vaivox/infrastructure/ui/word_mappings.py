@@ -24,6 +24,7 @@ class VaivoxWordMappings:
             add_word_mapping: Callback invoked with ``(aliases, replacement)`` on OK.
         """
         from tkinter import LEFT, StringVar, font
+
         from ttkbootstrap import Button, Entry, Frame, Label, Toplevel
 
         self.add_word_mapping = add_word_mapping
