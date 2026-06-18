@@ -8,7 +8,7 @@ from tkinter import PhotoImage, font, LEFT, DISABLED, WORD, W, NSEW
 import darkdetect
 from pystray import Icon, Menu, MenuItem
 from ttkbootstrap import Window, Toplevel, Button, Label, Style
-from ttkbootstrap.scrolled import ScrolledText
+from ttkbootstrap.widgets.scrolled import ScrolledText
 from ttkbootstrap.constants import *
 from PIL import Image
 from pid import PidFile, PidFileError
