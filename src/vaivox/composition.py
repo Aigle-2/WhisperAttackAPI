@@ -19,7 +19,13 @@ from vaivox.application.ports import (
     StatusReporter,
     TelemetrySink,
 )
-from vaivox.application.queries import DescribeStatus, DryRunReconcile
+from vaivox.application.queries import (
+    ComputeMetrics,
+    DescribeStatus,
+    DescribeVocabulary,
+    DryRunReconcile,
+    ListRecentReconciliations,
+)
 from vaivox.application.record_command import StartRecording, StopAndReconcile
 from vaivox.application.shutdown import Shutdown
 from vaivox.domain.reconciliation.snapper import PhraseSnapper
@@ -31,8 +37,10 @@ from vaivox.infrastructure.inbound.control_server import ControlSocketServer
 from vaivox.infrastructure.kneeboard.sink import KneeboardSink
 from vaivox.infrastructure.stt.factory import create_stt_backend
 from vaivox.infrastructure.system_clock import SystemClock
+from vaivox.infrastructure.telemetry.jsonl_reader import JsonlTelemetryReader
 from vaivox.infrastructure.telemetry.jsonl_sink import JsonlTelemetrySink
 from vaivox.infrastructure.telemetry.null_sink import NullTelemetrySink
+from vaivox.infrastructure.vocabulary.jsonl_repository import JsonlVocabularyRepository
 from vaivox.infrastructure.vocabulary.phrase_index import load_phrase_index
 from vaivox.infrastructure.voiceattack.sink import VoiceAttackCommandSink
 
@@ -114,9 +122,15 @@ def build(
 
     api_server: IntrospectionServer | None = None
     if config.get_bool_setting("api_enabled", False):
+        data_dir = config.app_data_location
+        telemetry_reader = JsonlTelemetryReader(data_dir)
+        vocabulary_repository = JsonlVocabularyRepository(data_dir)
         api_server = IntrospectionServer(
             DescribeStatus(recorder, config),
             DryRunReconcile(config),
+            ListRecentReconciliations(telemetry_reader),
+            ComputeMetrics(telemetry_reader),
+            DescribeVocabulary(vocabulary_repository),
             host=config.get_setting("api_host", VAIVOX.api_host),
             port=config.get_int_setting("api_port", VAIVOX.api_port),
             token=config.get_setting("api_token", ""),

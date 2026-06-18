@@ -104,6 +104,30 @@ class TelemetrySink(Protocol):
 
 
 @runtime_checkable
+class TelemetryReader(Protocol):
+    """Driven port: read back recorded reconciliation outcomes (ADR-0010).
+
+    The read counterpart of :class:`TelemetrySink`, powering the introspection API's
+    recent-events and live-metrics queries. It returns reconstructed domain value
+    objects (not raw rows) so query use cases can introspect typed fields; the adapter
+    degrades gracefully (an absent or malformed store yields an empty list, never an
+    exception into a read-only query).
+    """
+
+    def recent(self, limit: int) -> list[ReconciliationOutcome]:
+        """Return up to ``limit`` most recent outcomes, oldest first.
+
+        Args:
+            limit: The maximum number of outcomes to return (most recent retained). A
+                non-positive limit yields an empty list.
+
+        Returns:
+            The reconstructed outcomes in recording order (oldest first), at most
+            ``limit`` long; empty when nothing has been recorded yet.
+        """
+
+
+@runtime_checkable
 class VocabularyRepository(Protocol):
     """Driven port: the structured-vocabulary store (ADR-0004, Axis A).
 
