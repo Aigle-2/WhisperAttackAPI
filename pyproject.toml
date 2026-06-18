@@ -23,44 +23,58 @@ name = "vaivox"
 version = "0.1.0"
 description = "Turns push-to-talk speech into DCS radio commands via VoiceAttack 2 + VAICOM Community."
 readme = "README.md"
-requires-python = ">=3.10"
+# Single supported Python: 3.12. Managed and pinned by uv (.python-version + uv.lock).
+requires-python = ">=3.12"
 license = { file = "LICENSE" }
 authors = [{ name = "Aigle_2" }]
 keywords = ["dcs", "voiceattack", "vaicom", "speech-to-text", "push-to-talk"]
 classifiers = [
     "Private :: Do Not Upload",
     "Programming Language :: Python :: 3 :: Only",
-    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.12",
     "Operating System :: Microsoft :: Windows",
 ]
 
-# Runtime dependencies for the API-backed transcription path (mirrors the former
-# requirements-api.txt). The optional local faster-whisper backend lives in [full].
+# Core runtime: the only deps the importable package + the pure domain need (and the
+# only runtime deps the quality gates import). The GUI/audio/network adapters import
+# their libraries lazily, so they live in the optional `app`/`full` extras below — a
+# default `uv sync` (core + the dev group) is all the gates need.
 dependencies = [
+    "rapidfuzz==3.14.5",
+    "text2digits==0.1.2",
+]
+
+[project.optional-dependencies]
+# The desktop app runtime (GUI, audio capture, hotkeys, tray) — the former
+# requirements-api.txt. Install with `uv sync --extra app`.
+app = [
     "ttkbootstrap",
     "keyboard",
     "pyperclip",
-    "rapidfuzz",
     "sounddevice",
     "soundfile",
-    "text2digits",
     "pystray",
     "pillow",
     "pid",
     "darkdetect",
     "wcwidth",
 ]
-
-[project.optional-dependencies]
-# Local, on-device speech-to-text (the former requirements.txt additions).
-# Note: CUDA torch wheels need an extra index, e.g.
-#   pip install "vaivox[full]" --extra-index-url https://download.pytorch.org/whl/cu126
+# Local, on-device speech-to-text on top of the app runtime (the former
+# requirements.txt). Install with `uv sync --extra full`. CUDA torch wheels need the
+# PyTorch index, e.g. `uv sync --extra full --index pytorch=https://download.pytorch.org/whl/cu126`.
 full = [
+    "vaivox[app]",
     "torch",
     "faster-whisper",
     "transformers",
 ]
-# Developer toolchain — the quality gates from ADR-0007.
+
+[project.scripts]
+vaivox = "vaivox.main:main"
+
+# Developer toolchain — the quality gates (ADR-0007). A PEP 735 dependency group, so
+# `uv sync` installs it by default; it is NOT part of the published wheel's extras.
+[dependency-groups]
 dev = [
     "ruff==0.15.0",
     "mypy>=1.10",
@@ -70,9 +84,10 @@ dev = [
     "import-linter>=2.0",
     "pre-commit>=3.7",
 ]
-
-[project.scripts]
-vaivox = "vaivox.main:main"
+# The PyInstaller toolchain for `build_exe.ps1` (kept out of the default dev sync).
+build = [
+    "pyinstaller>=6",
+]
 
 [project.urls]
 Homepage = "https://github.com/Aigle-2/WhisperAttackAPI"
@@ -81,11 +96,23 @@ Homepage = "https://github.com/Aigle-2/WhisperAttackAPI"
 packages = ["src/vaivox"]
 
 # ---------------------------------------------------------------------------
+# uv — single Python (see .python-version) and a reproducible universal lock.
+# This is a Windows desktop app whose CI runs on Linux, so the lock is solved for
+# just those two platforms; that also lets the heavy `full` extra (torch) resolve
+# cleanly without macOS wheel gaps.
+# ---------------------------------------------------------------------------
+[tool.uv]
+environments = [
+    "sys_platform == 'win32'",
+    "sys_platform == 'linux'",
+]
+
+# ---------------------------------------------------------------------------
 # Ruff — lint + format (ADR-0007). Google-convention docstrings via the `D` rules.
 # Scoped to the new tree; legacy modules are excluded until Phase 2 moves them.
 # ---------------------------------------------------------------------------
 [tool.ruff]
-target-version = "py310"
+target-version = "py312"
 line-length = 100
 src = ["src", "tests"]
 extend-exclude = [
@@ -133,7 +160,7 @@ convention = "google"
 # third-party libraries without stubs are silenced (forward-looking for Phase 2+).
 # ---------------------------------------------------------------------------
 [tool.mypy]
-python_version = "3.10"
+python_version = "3.12"
 strict = true
 files = ["src/vaivox"]
 mypy_path = ["src"]

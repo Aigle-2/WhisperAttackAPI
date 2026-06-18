@@ -1,40 +1,49 @@
-# Building a WhisperAttack Server Executable
+# Building a VAIVOX / WhisperAttack executable
 
-These instructions document how to build an application executable (exe) version of Whisper Attack. This can be run as a standard application without needing to install Python or any Python packages.
+How to build a standalone application executable (exe) that runs without a
+system-wide Python install. For the day-to-day contributor workflow (quality gates,
+project layout, the dependency rule) see **[AGENTS.md](AGENTS.md)** — this file only
+covers running locally and producing the exe.
 
 ## Requirements
 
-- **Python 3.11** (must be in your PATH)
-  - Install from [python.org](https://www.python.org/downloads/release/python-3119), use [this link](https://www.python.org/ftp/python/3.11.9/python-3.11.9-amd64.exe) for the Windows (64-bit) installer.
-  - NOTE! v3.12 3.13 etc... will NOT work - PyTorch only provides official wheels for Python 3.8 → 3.11
-
-![python](https://github.com/user-attachments/assets/1b23945c-2635-40ea-a8b1-51bbfbe2a7b4)
+- **Python 3.12** — but you do **not** install it yourself. The project is managed by
+  [uv](https://docs.astral.sh/uv/); uv reads [`.python-version`](.python-version) and
+  downloads/pins the exact interpreter automatically. Install uv from
+  <https://docs.astral.sh/uv/getting-started/installation/>.
+- Every dependency version is frozen in [`uv.lock`](uv.lock), so builds are
+  reproducible. (The old `requirements*.txt` files are gone — dependencies live in
+  [`pyproject.toml`](pyproject.toml).)
 
 ## Logging
 
-Because the executable won't be running as a console application the logging needs to go to a file so that it can be viewed. The log file will be written to `C:\Users\username\AppData\Local\WhisperAttack\WhisperAttack.log` file. The log file will be overwritten every time the WhisperAttack server is started.
+Because the executable does not run as a console application, logging goes to
+`C:\Users\<username>\AppData\Local\WhisperAttack\WhisperAttack.log`. The log file is
+overwritten every time the server starts.
 
-## Running the WhisperAtack Python app locally
+## Running locally (no build)
 
-WhisperAttack can be run locally without needing to build an executable during development.
-
-Install the dependencies using the below command:
-
-```console
-pip install -r requirements.txt
-```
-
-**NOTE:** These dependencies should be removed prior to building the executable as per the instructions for starting with a clean environment.
-
-Run WhisperAttack using the below command:
+Install the app runtime (GUI + audio) and launch it:
 
 ```console
-python whisper_attack.py
+uv sync --extra app        # API backends (elevenlabs/openai/deepgram)
+uv run vaivox              # or:  uv run python whisper_attack.py
 ```
 
-## Creating the executable file
+For the local on-device faster-whisper backend, sync the full extra instead:
 
-The recommended build is the API-only executable. It excludes Torch, faster-whisper, and related local model dependencies so the package is smaller and does not reserve GPU resources that DCS needs.
+```console
+uv sync --extra full       # adds torch / faster-whisper / transformers
+```
+
+> CUDA torch wheels come from the PyTorch index, e.g.
+> `uv sync --extra full --index pytorch=https://download.pytorch.org/whl/cu126`.
+
+## Creating the executable
+
+The recommended build is the **API-only** executable. It excludes Torch,
+faster-whisper, and related local-model dependencies, so the package is smaller and
+does not reserve GPU resources DCS needs.
 
 Double-click:
 
@@ -49,101 +58,31 @@ dist\release\WhisperAttackAPI v1.2.2-api.1\WhisperAttackAPI.exe
 dist\release\WhisperAttackAPI v1.2.2-api.1.zip
 ```
 
-To build the larger offline-capable executable with local `faster_whisper` support, double-click:
+For the larger offline-capable build with local `faster_whisper` support, double-click:
 
 ```console
 build_full.cmd
 ```
 
-The commands below document the manual PyInstaller flow if you need to debug the build script.
+Both wrappers call [`build_exe.ps1`](build_exe.ps1), which uses uv end to end:
+`uv sync --frozen --extra app|full --group build` to install the locked deps + the
+PyInstaller toolchain, then `uv run pyinstaller … src\vaivox\main.py`. The build
+bundles assets (`settings.cfg`, `fuzzy_words.txt`, `word_mappings.txt`, the icons, the
+API-key `.cmd` helpers, `README_FIRST.txt`) and verifies them, then zips the release.
 
-### PowerShell
-
-The command prompt will be prefixed with `PS` to show that this is a PowerShell terminal. The commands below are being run from within the directory containing the WhisperAttack source code, in this example it is `D:\src\github\WhisperAttack`.
-
-Allow PowerShell to execute the command to activate the Python virtual environment. The `-Scope Process` means that it is allowed just for this process, e.g. if run from within Visual Studio Code, vs. being set globally which could be a security risk.
-
-```console
-Set-ExecutionPolicy Unrestricted -Scope Process
-```
-
-### Starting with a clean environment
-
-When PyInstaller builds the application it will look in your local Python library paths, as well as the paths in the virtual environment
-to locate the packages it needs. To ensure that you have a clean environment you should uninstall any packages in your local cache.
-
-Run the below command to uninstall the packages that will be reinstalled as part of the build. Accept all prompts to remove packages.
-
-```command
-pip uninstall -r requirements.txt
-```
-
-### Building the application
-
-Create the Python virtual environment so that dependencies are installed here to keep separate from the global ones.
+### Manual PyInstaller flow (debugging the build)
 
 ```console
-python -m venv .venv
+uv sync --frozen --extra app --group build
+uv run pyinstaller --onedir --noconsole --paths src --name WhisperAttackAPI src\vaivox\main.py
 ```
 
-Activate the virtual environment so you're working in it. Your command prompt will now have a `(.venv)` prefix so that you know it is active.
+`--noconsole` hides the console window; a VAIVOX icon appears in the Windows system
+tray. The entry point is `src\vaivox\main.py` (the single `vaivox.main` bootstrap);
+`whisper_attack.py` remains as a thin launcher into it.
 
-```console
-.venv\Scripts\Activate.ps1
-```
+### Cleaning up
 
-Install PyInstaller so that it can build the executable. This must be done after activating the virtual environment
-so that it can locate the dependencies in the virtual environment.
-
-```console
-pip install pyinstaller
-```
-
-Install the Python dependencies required by WhisperAttack.
-
-```console
-pip install -r requirements.txt
-```
-
-Run PyInstaller to create an executable of WhisperAttack, this will be created in the `dist\whisper_attack` directory.
-
-The `--noconsole` parameter means that when WhisperAttack is run no window is displayed. A WhisperAttack icon will be displayed in the Windows system tray.
-
-```console
-pyinstaller --onedir --noconsole whisper_attack.py
-```
-
-### Packaging the application
-
-Copy the following files into the `dist\whisper_attack` directory as these must be located beside the executable
-
-- settings.cfg
-- fuzzy_words.txt
-- word_mappings.txt
-- whisper_attack_icon.png
-- add_icon.png
-- Set STT API Key.cmd
-- Set ElevenLabs API Key.cmd
-- README_FIRST.txt
-
-The `whisper_attack` folder, and all its contents (including the `_internal` folder), can be moved to the location of your choice. Rename `whisper_attack.exe` to `WhisperAttackAPI.exe`.
-
-The contents of the `whisper_attack` folder can be zipped up if needing to distribute.
-
-### Running the application
-
-Double-click the `WhisperAttackAPI.exe` file to run it. The full build may take a little while the first time it runs, especially if it is downloading the Whisper model if it was not already installed.
-
-An application window will be opened when it has started up and display logging information information. Full information is also logged to the `C:\Users\username\AppData\Local\WhisperAttack\WhisperAttack.log` file. You may need to close and reopen the log file if your editor does not automatically update when lines are added to the file.
-
-The application can be exited using either by right-clicking the WhisperAttack icon in the system tray, or by closing VoiceAttack.
-
-### Cleaning up after the build
-
-Once you are happy with the executable and do not need to rebuild with any further changes you can run the below command to deactivate the virtual environment and then close the terminal.
-
-```console
-.\.venv\Scripts\deactivate.bat
-```
-
-Delete the `.venv`, `.venv-build-api`, `.venv-build-full`, `build`, and `dist` directories.
+`build_exe.ps1 -Clean` removes the build/release output. uv manages the `.venv`
+in-place, so there is nothing else to deactivate or delete; re-running a build
+re-syncs from `uv.lock` automatically.

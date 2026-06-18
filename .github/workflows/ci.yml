@@ -16,35 +16,29 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      # uv provisions the pinned Python (.python-version) and installs the exact
+      # locked toolchain (uv.lock). `uv sync` installs the project's core deps
+      # (rapidfuzz/text2digits) + the `dev` group — everything the gates need, and
+      # nothing from the GUI/audio `app`/`full` extras (they import lazily).
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
         with:
-          python-version: "3.10"
+          enable-cache: true
 
-      # The gate tooling plus the two pure libraries the reconciliation domain
-      # imports (rapidfuzz, text2digits). The heavy app/UI deps are not needed:
-      # gates run against the source tree (src/ is on PYTHONPATH / pytest pythonpath).
-      # rapidfuzz/text2digits are pinned so the golden characterization tests are
-      # reproducible; ruff is pinned to match the formatter locally.
-      - name: Install gate tooling
-        run: |
-          python -m pip install --upgrade pip
-          python -m pip install ruff==0.15.0 mypy pytest pytest-cov "import-linter>=2.0" \
-            rapidfuzz==3.14.5 text2digits==0.1.2
+      - name: Sync gate environment (pinned Python + locked deps)
+        run: uv sync --locked
 
       - name: Ruff lint
-        run: ruff check .
+        run: uv run ruff check .
 
       - name: Ruff format (check only)
-        run: ruff format --check .
+        run: uv run ruff format --check .
 
       - name: Mypy (strict, src/vaivox)
-        run: mypy
+        run: uv run mypy
 
       - name: Import-linter (architecture contracts)
-        env:
-          PYTHONPATH: src
-        run: lint-imports --config pyproject.toml --no-cache
+        run: uv run lint-imports --config pyproject.toml --no-cache
 
       - name: Pytest (+ coverage)
-        run: pytest --cov=vaivox --cov-report=term-missing
+        run: uv run pytest --cov=vaivox --cov-report=term-missing

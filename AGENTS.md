@@ -53,14 +53,15 @@ short-lived rollback reference. New behavior goes in `src/vaivox/`.
 
 Strict gates are scoped to the new `src/vaivox/` tree. Legacy modules are excluded
 (ruff `extend-exclude`) or loosened (mypy per-module `ignore_errors`) so the gates are
-green without rewriting code a later phase will move. Run them all from the repo root:
+green without rewriting code a later phase will move. Run them all from the repo root
+with **uv** (it provisions the pinned Python and the locked toolchain on first run):
 
 ```bash
-ruff check .                # lint
-ruff format --check .       # formatting (Google-convention docstrings via D rules)
-mypy                        # strict, scoped to src/vaivox
-pytest                      # unit / architecture tests (add --cov=vaivox for coverage)
-PYTHONPATH=src lint-imports --config pyproject.toml   # architecture contracts
+uv run ruff check .                       # lint
+uv run ruff format --check .              # formatting (Google-convention docstrings)
+uv run mypy                               # strict, scoped to src/vaivox
+uv run lint-imports --config pyproject.toml   # architecture contracts
+uv run pytest --cov=vaivox                # unit / contract / integration / architecture
 ```
 
 The architecture contracts also run in-process inside `pytest`
@@ -68,20 +69,35 @@ The architecture contracts also run in-process inside `pytest`
 
 ## Dev setup
 
+The project is managed by **[uv](https://docs.astral.sh/uv/)** and targets **Python
+3.12** (pinned in `.python-version`; every dependency is frozen in `uv.lock`).
+
 ```bash
-pip install -e .[dev]       # toolchain + runtime deps
+uv sync                     # gate essentials: core deps + the `dev` group, on 3.12
 pre-commit install          # optional: run the gates on commit
+```
+
+`uv sync` deliberately installs only what the gates need — the pure core deps
+(`rapidfuzz`, `text2digits`) plus the `dev` group. The GUI/audio/network runtime is
+opt-in because its libraries are imported lazily:
+
+```bash
+uv sync --extra app         # + ttkbootstrap/sounddevice/keyboard/... (run the real app)
+uv sync --extra full        # + torch/faster-whisper/transformers (local STT)
+uv run vaivox               # launch the app (needs --extra app or full)
 ```
 
 Running from source uses a small `sys.path` shim in `vaivox.main` (and the
 `whisper_attack.py` launcher) so the in-repo `src/vaivox` package is importable; the
-PyInstaller build targets `src/vaivox/main.py` and passes `--paths src`. Tests get `src`
-via the pytest `pythonpath` setting — no install required just to run the gates.
+PyInstaller build (`build_exe.ps1`) targets `src/vaivox/main.py` and passes `--paths src`.
+`uv sync` installs `vaivox` editable, so `import vaivox` and `lint-imports` work without
+extra path setup; the pytest `pythonpath` setting still exposes the legacy top-level
+shims.
 
 ## Conventions
 
-- **Python 3.10+** (`X | None` typing is used). Type everything in `src/vaivox/`; mypy is
-  strict there.
+- **Python 3.12** (single supported version; `requires-python = ">=3.12"`, ruff/mypy
+  target 3.12). Type everything in `src/vaivox/`; mypy is strict there.
 - **Google-style docstrings** on public modules/classes/functions in `src/vaivox/`.
 - **Tests** live under `tests/{unit,contract,integration,architecture}`; the
   docstring/annotation rules are relaxed for them. The STT **contract test**

@@ -1,7 +1,8 @@
 # Pre-commit hooks for the VAIVOX quality gates (ADR-0007).
 #
 # ruff / mypy / import-linter run as `system` hooks so they use the exact tools and
-# pyproject configuration from your environment (install with `pip install -e .[dev]`).
+# pyproject configuration from your environment (install with `uv sync`, then run the
+# hooks via `uv run pre-commit run --all-files`).
 # `--force-exclude` makes ruff honour the pyproject `extend-exclude` even when
 # pre-commit passes explicit (staged) file paths, so legacy modules are never touched.
 #

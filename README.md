@@ -285,7 +285,7 @@ stt_backend=faster_whisper
 whisper_model=small.en
 ```
 
-This requires the full executable built with `build_full.cmd` or a Python environment installed from `requirements.txt`.
+This requires the full executable built with `build_full.cmd` or a Python environment set up with `uv sync --extra full`.
 
 ### word_mappings.txt
 

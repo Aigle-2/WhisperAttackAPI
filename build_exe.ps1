@@ -12,9 +12,11 @@ $ErrorActionPreference = "Stop"
 $ProjectRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 Set-Location $ProjectRoot
 
+# The "api" profile installs the GUI/audio runtime only (uv extra `app`); "full" adds
+# the local faster-whisper STT stack (uv extra `full`). Dependencies and the Python
+# version come from pyproject.toml + uv.lock + .python-version — no requirements*.txt.
 $AppName = "WhisperAttackAPI"
-$RequirementsFile = "requirements-api.txt"
-$VenvPath = Join-Path $ProjectRoot ".venv-build-api"
+$SyncExtra = "app"
 $ExcludeModules = @(
     "--exclude-module", "torch",
     "--exclude-module", "faster_whisper",
@@ -27,12 +29,10 @@ $DataFiles = @(
 
 if ($Profile -eq "full") {
     $AppName = "WhisperAttackAPI-Full"
-    $RequirementsFile = "requirements.txt"
-    $VenvPath = Join-Path $ProjectRoot ".venv-build-full"
+    $SyncExtra = "full"
     $ExcludeModules = @()
 }
 
-$PythonPath = Join-Path $VenvPath "Scripts\python.exe"
 $PackageRoot = Join-Path $ProjectRoot "build\pyinstaller-dist"
 $PackagePath = Join-Path $PackageRoot $AppName
 $LegacyDistPath = Join-Path $ProjectRoot "dist\$AppName"
@@ -42,9 +42,6 @@ $ReleasePath = Join-Path $ReleaseRoot $ReleaseFolderName
 $ZipPath = Join-Path $ReleaseRoot "$ReleaseFolderName.zip"
 
 if ($Clean) {
-    if (Test-Path $VenvPath) {
-        Remove-Item -LiteralPath $VenvPath -Recurse -Force
-    }
     if (Test-Path $PackagePath) {
         Remove-Item -LiteralPath $PackagePath -Recurse -Force
     }
@@ -59,25 +56,21 @@ if ($Clean) {
     }
 }
 
-if (!(Test-Path $PythonPath)) {
-    python -m venv $VenvPath
-}
+# Provision the pinned Python (.python-version) and the locked deps for this profile,
+# plus the PyInstaller build group. --frozen builds strictly from the committed lock.
+uv sync --frozen --extra $SyncExtra --group build
 
-& $PythonPath -m pip install --upgrade pip
-& $PythonPath -m pip install pyinstaller
-& $PythonPath -m pip install -r $RequirementsFile
+$PyInstallerArgs = @(
+    "pyinstaller",
+    "--noconfirm",
+    "--clean",
+    "--onedir",
+    "--noconsole",
+    "--distpath", $PackageRoot,
+    "--name", $AppName
+) + $ExcludeModules + $DataFiles + @("--paths", "src", "src\vaivox\main.py")
 
-& $PythonPath -m PyInstaller `
-    --noconfirm `
-    --clean `
-    --onedir `
-    --noconsole `
-    --distpath $PackageRoot `
-    --name $AppName `
-    @ExcludeModules `
-    @DataFiles `
-    --paths src `
-    src\vaivox\main.py
+uv run @PyInstallerArgs
 
 $Assets = @(
     "settings.cfg",
