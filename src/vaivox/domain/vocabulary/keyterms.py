@@ -70,6 +70,7 @@ DEFAULT_DCS_KEYTERMS = [
 
 DEFAULT_STT_KEYTERM_SOURCES = [
     "custom",
+    "mission_f10",
     "phonetic_alphabet",
     "fuzzy_words",
     "word_mapping_replacements",

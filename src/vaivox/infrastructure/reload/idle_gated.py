@@ -49,6 +49,7 @@ class IdleGatedSwap[T]:
         self._lock = Lock()
         self._current = initial
         self._pending: T | None = None
+        self._pending_announce = True
         self._is_idle = is_idle
         self._on_swap = on_swap
 
@@ -63,13 +64,13 @@ class IdleGatedSwap[T]:
             The live value (the just-applied staged value when a deferred swap landed here).
         """
         with self._lock:
-            applied = self._apply_pending_if_idle_locked()
+            applied, announce = self._apply_pending_if_idle_locked()
             value = self._current
-        if applied:
+        if applied and announce:
             self._announce(value)
         return value
 
-    def request_swap(self, value: T) -> bool:
+    def request_swap(self, value: T, announce: bool = True) -> bool:
         """Stage ``value`` and apply it immediately if idle, else defer to the next read.
 
         The latest staged value wins: requesting again before an apply replaces the
@@ -77,6 +78,7 @@ class IdleGatedSwap[T]:
 
         Args:
             value: The replacement to make live at the next idle checkpoint.
+            announce: Whether the observer should be notified when this swap applies.
 
         Returns:
             ``True`` if the swap was applied now (idle), ``False`` if it was staged for the
@@ -84,24 +86,25 @@ class IdleGatedSwap[T]:
         """
         with self._lock:
             self._pending = value
-            applied = self._apply_pending_if_idle_locked()
+            self._pending_announce = announce
+            applied, should_announce = self._apply_pending_if_idle_locked()
             current = self._current
-        if applied:
+        if applied and should_announce:
             self._announce(current)
         return applied
 
-    def _apply_pending_if_idle_locked(self) -> bool:
+    def _apply_pending_if_idle_locked(self) -> tuple[bool, bool]:
         """Promote the pending value to live when idle. The caller must hold the lock.
 
         Returns:
-            ``True`` if a pending value was promoted, ``False`` otherwise.
+            A pair of ``(applied, announce)`` flags for the pending value.
         """
         pending = self._pending
         if pending is not None and self._is_idle():
             self._current = pending
             self._pending = None
-            return True
-        return False
+            return True, self._pending_announce
+        return False, False
 
     def _announce(self, value: T) -> None:
         """Fire the observer for a freshly-applied swap (called outside the lock)."""

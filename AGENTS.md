@@ -90,6 +90,14 @@ but never anything that does I/O (sockets, files, mic, network, UI).
     phrases"; exposed on `WiredApp.phrase_snapper` for a reload trigger. The eval stays on
     a frozen `PhraseSnapper` (no leak). *Deferred:* the vocabulary swap (waits on the
     pipeline reading vocab from `VocabularyRepository`), the LRU pass, and the file-watch.
+  - **Command browser + mission pull log** (UI) ✅: a toolbar **Commands** button opens a
+    non-modal window (`infrastructure/ui/commands_window.py`) listing every speakable
+    command — the live `phrase_snapper.phrase_index` (permanent vocabulary + the mission
+    F10 overlay), sorted alphabetically with a live search box (filter, arrow-key nav,
+    Enter to focus/copy). It polls the index so a vocabulary refresh or an F10 poll updates
+    it in place. The mission F10 poll (`RefreshMissionVocabulary`) reports a **count-only**
+    line on each changed pull — `N commands pulled, X new (M total)` — diffing against the
+    previous poll so re-polling the same mission stays quiet.
   - **Agent API/MCP** (ADR-0010) ✅ read API **+ gated actions + MCP**: introspection
     endpoints `/status`, `/metrics`, `/reconciliations`, `/vocabulary` + `POST
     /reconcile/dry-run` over query use cases (off by default, localhost, optional bearer
@@ -210,5 +218,11 @@ The full debug recipes (curl examples, the dry-run workflow, the gated actions, 
   When changing reconciliation behavior, update the **golden characterization tests** in
   `tests/unit/test_reconciliation.py` deliberately — they pin parity with the original
   implementation.
+- Whenever an agent gets access to a real-life example of STT prediction, phrase
+  snapping, VoiceAttack result, near-miss, wrong match, or abstain behavior, add it to
+  the relevant test dataset before or alongside the fix. Prefer the eval fixtures in
+  `tests/eval/` for end-to-end reconciliation/snap outcomes and focused unit/integration
+  tests for narrow regressions. This keeps the dataset growing from actual operator
+  evidence and makes future threshold/scoring changes safer.
 - Don't reformat or tighten types on the `tools/` scripts just to satisfy a gate; they're
   excluded on purpose (utility code, not part of the strict tree).

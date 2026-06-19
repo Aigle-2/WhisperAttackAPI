@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from typing import TYPE_CHECKING
 
 from vaivox.application.ports import ReconciliationVocabulary
@@ -21,6 +21,11 @@ if TYPE_CHECKING:
     from vaivox.infrastructure.config.settings import VaivoxConfiguration
 
 
+def _empty_keyterms() -> tuple[str, ...]:
+    """Return no dynamic keyterms."""
+    return ()
+
+
 class SttKeyterms:
     """Resolve and budget STT provider keyterms."""
 
@@ -28,10 +33,12 @@ class SttKeyterms:
         self,
         config: VaivoxConfiguration,
         vocabulary: ReconciliationVocabulary,
+        mission_keyterms: Callable[[], Iterable[str]] | None = None,
     ) -> None:
         """Wire configuration and reconciliation vocabulary sources."""
         self._config = config
         self._vocabulary = vocabulary
+        self._mission_keyterms = mission_keyterms or _empty_keyterms
 
     def get_stt_keyterm_sources(self) -> list[str]:
         """Return configured keyterm source names."""
@@ -149,6 +156,8 @@ class SttKeyterms:
             return list(DEFAULT_DCS_KEYTERMS)
         if source == "vaicom":
             return load_vaicom_keyterms(self._config.app_data_location)
+        if source in ("mission_f10", "f10_mission"):
+            return list(self._mission_keyterms())
         if source in ("custom", "settings"):
             return [
                 *self._parse_keyterm_setting("stt_keyterms"),

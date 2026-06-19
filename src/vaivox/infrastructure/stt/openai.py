@@ -50,11 +50,7 @@ class OpenAIBackend:
         self.prompt_keyterm_char_budget = config.get_provider_int(
             "openai", "prompt_keyterm_char_budget", 6000
         )
-        self.keyterms = keyterms.get_budgeted_stt_keyterms(
-            self.provider_name,
-            max_terms=self.max_prompt_keyterms,
-            max_total_chars=self.prompt_keyterm_char_budget,
-        )
+        self._keyterms = keyterms
         self.api_key = ""
 
     def load(self) -> None:
@@ -128,9 +124,18 @@ class OpenAIBackend:
 
     def _build_prompt(self) -> str:
         prompt = self.config.get_stt_prompt() or DEFAULT_DCS_PROMPT
-        if not self.include_keyterms_in_prompt or not self.keyterms:
+        keyterms = self._budgeted_keyterms()
+        if not self.include_keyterms_in_prompt or not keyterms:
             return prompt
-        return f"{prompt} Expected DCS/VAICOM keyterms and phrases: {', '.join(self.keyterms)}."
+        return f"{prompt} Expected DCS/VAICOM keyterms and phrases: {', '.join(keyterms)}."
+
+    def _budgeted_keyterms(self) -> list[str]:
+        """Return keyterms for this request, including any live mission overlay."""
+        return self._keyterms.get_budgeted_stt_keyterms(
+            self.provider_name,
+            max_terms=self.max_prompt_keyterms,
+            max_total_chars=self.prompt_keyterm_char_budget,
+        )
 
     def _validate_response_format(self) -> None:
         supported_formats = self._supported_response_formats()

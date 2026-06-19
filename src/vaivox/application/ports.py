@@ -229,6 +229,31 @@ class VocabularyGenerationResult:
     source: str | None = None
 
 
+@dataclass(frozen=True)
+class MissionVocabularySnapshot:
+    """Ephemeral mission-scoped vocabulary discovered from the live simulator session.
+
+    Attributes:
+        phrases: The current mission-only command phrases. They are intentionally not
+            persisted in the structured vocabulary source because they expire with the
+            mission/server context.
+        source: Human-readable source location used to discover the phrases, if any.
+        reason: Short status suitable for logs and diagnostics.
+    """
+
+    phrases: tuple[str, ...]
+    source: str | None = None
+    reason: str = "loaded"
+
+
+@runtime_checkable
+class MissionVocabularySource(Protocol):
+    """Driven port: read mission-scoped dynamic command phrases."""
+
+    def load(self) -> MissionVocabularySnapshot:
+        """Return the current mission-only dynamic command phrases."""
+
+
 @runtime_checkable
 class VocabularyGenerator(Protocol):
     """Driven port: (re)generate the VAICOM-derived vocabulary into the data dir (ADR-0005).

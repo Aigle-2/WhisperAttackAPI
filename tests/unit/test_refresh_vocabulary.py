@@ -7,8 +7,13 @@ real VAICOM install (the adapter's own discovery/staleness lives in its test).
 
 from __future__ import annotations
 
-from vaivox.application.ports import StatusLevel, VocabularyGenerationResult
+from vaivox.application.ports import (
+    MissionVocabularySnapshot,
+    StatusLevel,
+    VocabularyGenerationResult,
+)
 from vaivox.application.refresh_vocabulary import (
+    RefreshMissionVocabulary,
     RefreshVocabulary,
     ReloadVocabulary,
 )
@@ -37,6 +42,16 @@ class FakeReporter:
 
     def messages(self):
         return [message for message, _level in self.lines]
+
+
+class FakeMissionSource:
+    def __init__(self, snapshots):
+        self._snapshots = list(snapshots)
+
+    def load(self):
+        if len(self._snapshots) == 1:
+            return self._snapshots[0]
+        return self._snapshots.pop(0)
 
 
 def _make(stale, result):
@@ -114,3 +129,62 @@ def test_reload_vocabulary_applies_from_disk_and_reports_count():
     assert result.phrases == 42  # the live count is surfaced
     assert applied == [True]  # re-read + hot-applied (no generation)
     assert any("Reloading vocabulary" in message for message in reporter.messages())
+
+
+def test_mission_vocabulary_applies_only_when_the_overlay_changes():
+    reporter = FakeReporter()
+    source = FakeMissionSource(
+        [
+            MissionVocabularySnapshot(("Action CHECK IN",), source="VAICOMPRO.log"),
+            MissionVocabularySnapshot(("Action CHECK IN",), source="VAICOMPRO.log"),
+            MissionVocabularySnapshot((), source="VAICOMPRO.log", reason="no F10 commands found"),
+        ]
+    )
+    applied: list[tuple[str, ...]] = []
+
+    def apply(phrases):
+        applied.append(tuple(phrases))
+        return 12 + len(phrases)
+
+    use_case = RefreshMissionVocabulary(source, reporter, apply)
+
+    first = use_case.execute()
+    second = use_case.execute()
+    third = use_case.execute()
+
+    assert first.changed is True
+    assert first.mission_phrases == 1
+    assert first.new_phrases == 1  # nothing was loaded before, so the lone phrase is new
+    assert first.live_phrases == 13
+    assert second.changed is False
+    assert third.changed is True
+    assert third.mission_phrases == 0
+    assert third.new_phrases == 0
+    assert applied == [("Action CHECK IN",), ()]
+    assert any("Mission F10 vocabulary refreshed" in message for message in reporter.messages())
+    assert any("Mission F10 vocabulary cleared" in message for message in reporter.messages())
+
+
+def test_mission_vocabulary_reports_only_the_newly_pulled_command_count():
+    reporter = FakeReporter()
+    source = FakeMissionSource(
+        [
+            MissionVocabularySnapshot(("Action CHECK IN", "Action FENCE IN"), source="log"),
+            MissionVocabularySnapshot(
+                ("Action CHECK IN", "Action FENCE IN", "Action RTB"), source="log"
+            ),
+        ]
+    )
+
+    use_case = RefreshMissionVocabulary(source, reporter, lambda phrases: 100 + len(phrases))
+
+    first = use_case.execute()
+    second = use_case.execute()
+
+    assert first.mission_phrases == 2
+    assert first.new_phrases == 2  # both phrases are new on the first pull
+    assert second.changed is True
+    assert second.mission_phrases == 3
+    assert second.new_phrases == 1  # only "Action RTB" was added since the previous poll
+    assert any("2 commands pulled, 2 new" in message for message in reporter.messages())
+    assert any("3 commands pulled, 1 new" in message for message in reporter.messages())

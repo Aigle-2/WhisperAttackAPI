@@ -20,8 +20,11 @@ from typing import TYPE_CHECKING, Any, cast
 
 from vaivox import composition
 from vaivox.application.ports import StatusLevel
+from vaivox.domain.reconciliation.snapper import DEFAULT_HIGH
 from vaivox.infrastructure.config.identity import VAIVOX
 from vaivox.infrastructure.config.settings import VaivoxConfiguration
+from vaivox.infrastructure.ui.commands_window import VaivoxCommands
+from vaivox.infrastructure.ui.settings import VaivoxSettings
 from vaivox.infrastructure.ui.theme import (
     TAG_BLACK,
     TAG_BLUE,
@@ -70,6 +73,7 @@ class VaivoxApp:
         self.app_data_dir = app_data_dir
         self.exit_event = Event()
         self._vocabulary_refresh_lock = threading.Lock()
+        self._commands_window: VaivoxCommands | None = None
 
         self.window = Window(
             title=VAIVOX.window_title,
@@ -80,6 +84,7 @@ class VaivoxApp:
         theme = self.get_theme()
         cast(Any, self.window.style).theme_use("darkly" if theme == THEME_DARK else "flatly")
         palette = theme_config[theme]
+        self.palette = palette
 
         custom_font = font.Font(family="GG Sans", size=11)
         style = Style()  # type: ignore[no-untyped-call]
@@ -123,7 +128,7 @@ class VaivoxApp:
 
         toolbar = Frame(shell, style="Toolbar.TFrame")
         toolbar.grid(row=1, column=0, sticky=NSEW, pady=(10, 8))
-        toolbar.grid_columnconfigure(4, weight=1)
+        toolbar.grid_columnconfigure(6, weight=1)
 
         add_word_mapping_button = Button(
             toolbar,
@@ -143,16 +148,28 @@ class VaivoxApp:
         self.refresh_button.grid(row=0, column=1, sticky=W, padx=(0, 8))
         Button(
             toolbar,
+            text="Commands",
+            style="secondary.TButton",
+            command=self.open_commands,
+        ).grid(row=0, column=2, sticky=W, padx=(0, 8))
+        Button(
+            toolbar,
             text="Clear log",
             style="secondary.TButton",
             command=self.clear_log,
-        ).grid(row=0, column=2, sticky=W, padx=(0, 8))
+        ).grid(row=0, column=3, sticky=W, padx=(0, 8))
+        Button(
+            toolbar,
+            text="Settings",
+            style="secondary.TButton",
+            command=self.open_settings,
+        ).grid(row=0, column=4, sticky=W, padx=(0, 8))
         Button(
             toolbar,
             text="Open data folder",
             style="secondary.TButton",
             command=self.open_data_folder,
-        ).grid(row=0, column=3, sticky=W)
+        ).grid(row=0, column=5, sticky=W)
         api_state = "on" if self.config.get_bool_setting("api_enabled", False) else "off"
         telemetry_state = "on" if self.config.get_bool_setting("telemetry_enabled", True) else "off"
         Label(
@@ -163,7 +180,7 @@ class VaivoxApp:
             ),
             style="ToolbarMeta.TLabel",
             anchor="e",
-        ).grid(row=0, column=4, sticky="e", padx=(16, 0))
+        ).grid(row=0, column=6, sticky="e", padx=(16, 0))
 
         text_area = ScrolledText(
             shell,
@@ -201,7 +218,9 @@ class VaivoxApp:
         )
         self.control_server = wired.control_server
         self.api_server = wired.api_server
+        self.phrase_snapper = wired.phrase_snapper
         self.refresh_vocabulary = wired.refresh_vocabulary
+        self.refresh_mission_vocabulary = wired.refresh_mission_vocabulary
         self.reconciliation_vocabulary = wired.reconciliation_vocabulary
         self.stt_keyterms = wired.stt_keyterms
         self.add_word_mapping_use_case = wired.add_word_mapping
@@ -225,6 +244,11 @@ class VaivoxApp:
         # no-op when up to date, falls back to the seed when no install is found, and
         # hot-applies a regenerated phrase index at idle (ADR-0009) — never blocking start.
         threading.Thread(daemon=True, target=self._refresh_vocabulary_in_background).start()
+        if self.config.get_bool_setting("mission_f10_poll_enabled", True):
+            threading.Thread(
+                daemon=True,
+                target=self._poll_mission_vocabulary_in_background,
+            ).start()
 
     def run(self) -> None:
         """Run the Tk main loop (blocks until the window is destroyed)."""
@@ -242,6 +266,22 @@ class VaivoxApp:
             _LOGGER.exception("Background vocabulary refresh failed.")
         finally:
             self._vocabulary_refresh_lock.release()
+
+    def _poll_mission_vocabulary_in_background(self) -> None:
+        """Poll VAICOM's live F10 menu imports and hot-apply the mission overlay."""
+        interval = self.config.get_int_setting(
+            "mission_f10_poll_interval_seconds",
+            15,
+            min_value=5,
+            max_value=3600,
+        )
+        while not self.exit_event.is_set():
+            try:
+                self.refresh_mission_vocabulary.execute()
+            except Exception:
+                _LOGGER.exception("Mission F10 vocabulary refresh failed.")
+            if self.exit_event.wait(interval):
+                break
 
     def _configure_window_styles(
         self,
@@ -383,6 +423,55 @@ class VaivoxApp:
                 self.writer.write(str(error), TAG_RED)
 
         VaivoxWordMappings(self.window, update_word_mapping)
+
+    def open_commands(self) -> None:
+        """Open (or re-focus) the window listing every speakable command.
+
+        The window reads the live phrase index (permanent vocabulary + the mission F10
+        overlay) and polls it, so it tracks hot-reloads from a vocabulary refresh or a
+        mission poll. Only one instance is kept open at a time.
+        """
+        if self._commands_window is not None:
+            self._commands_window.lift()
+            return
+        self._commands_window = VaivoxCommands(
+            self.window,
+            get_commands=lambda: self.phrase_snapper.phrase_index,
+            palette=self.palette,
+            on_close=self._on_commands_closed,
+        )
+
+    def _on_commands_closed(self) -> None:
+        """Drop the single-instance reference once the commands window is closed."""
+        self._commands_window = None
+
+    def open_settings(self) -> None:
+        """Open the runtime settings modal."""
+        required_score = self.config.get_float_setting(
+            "snap_high", DEFAULT_HIGH, min_value=0.0, max_value=100.0
+        )
+        VaivoxSettings(self.window, required_score, self.save_required_snap_score)
+
+    def save_required_snap_score(self, required_score: float) -> bool:
+        """Persist and apply the phrase-snap required score from the settings modal."""
+        value = f"{required_score:.1f}"
+        try:
+            self.config.set_custom_settings({"snap_high": value})
+            applied = self.phrase_snapper.rebuild_current()
+        except Exception as error:
+            _LOGGER.exception("Failed to save phrase snap settings.")
+            self.writer.report(f"Failed to save settings: {error}", StatusLevel.ERROR)
+            return False
+
+        if applied:
+            status = f"Phrase snap required score: {value}"
+            level = StatusLevel.SUCCESS
+        else:
+            status = f"Phrase snap required score saved: {value} (pending)"
+            level = StatusLevel.WARNING
+        self.writer.report(status, level)
+        self._set_status(status)
+        return True
 
     def refresh_vocabulary_from_ui(self) -> None:
         """Start a user-requested VAICOM vocabulary refresh on a background thread."""

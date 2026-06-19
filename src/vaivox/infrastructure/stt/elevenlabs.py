@@ -49,11 +49,7 @@ class ElevenLabsBackend:
         self.temperature = config.get_provider_setting("elevenlabs", "temperature", "")
         self.max_keyterms = config.get_provider_int("elevenlabs", "max_keyterms", 900)
         self.max_keyterm_chars = config.get_provider_int("elevenlabs", "max_keyterm_chars", 50)
-        self.keyterms = keyterms.get_budgeted_stt_keyterms(
-            self.provider_name,
-            max_terms=self.max_keyterms,
-            max_term_chars=self.max_keyterm_chars,
-        )
+        self._keyterms = keyterms
         self.api_key = ""
 
     def load(self) -> None:
@@ -96,7 +92,7 @@ class ElevenLabsBackend:
         ]
         if self.temperature:
             fields.append(("temperature", self.temperature))
-        for keyterm in self.keyterms:
+        for keyterm in self._budgeted_keyterms():
             fields.append(("keyterms", keyterm))
 
         body, content_type = self._build_multipart_body(fields, audio_path)
@@ -146,6 +142,14 @@ class ElevenLabsBackend:
             return " ".join(str(transcript.get("text", "")) for transcript in transcripts).strip()
 
         raise SpeechToTextError("ElevenLabs response did not contain transcript text.")
+
+    def _budgeted_keyterms(self) -> list[str]:
+        """Return keyterms for this request, including any live mission overlay."""
+        return self._keyterms.get_budgeted_stt_keyterms(
+            self.provider_name,
+            max_terms=self.max_keyterms,
+            max_term_chars=self.max_keyterm_chars,
+        )
 
     def _bool_value(self, value: bool) -> str:
         return "true" if value else "false"

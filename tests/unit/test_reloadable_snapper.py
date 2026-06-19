@@ -79,6 +79,17 @@ def test_on_swap_fires_once_per_applied_swap_only() -> None:
     assert seen == ["b"]
 
 
+def test_swap_can_apply_without_announcing() -> None:
+    seen: list[str] = []
+    swap: IdleGatedSwap[str] = IdleGatedSwap("a", is_idle=lambda: True, on_swap=seen.append)
+
+    applied = swap.request_swap("b", announce=False)
+
+    assert applied is True
+    assert swap.current() == "b"
+    assert seen == []
+
+
 # --- ReloadablePhraseSnapper -------------------------------------------------------
 
 
@@ -160,3 +171,28 @@ def test_reload_uses_the_injected_builder_so_settings_thresholds_persist() -> No
 
     assert applied is True
     assert seen == [(), ("overlord bogey dope",)]  # initial + reload both via the injection
+
+
+def test_rebuild_current_applies_changed_settings_without_reload_notice() -> None:
+    counts: list[int] = []
+    threshold = {"high": 90.0}
+
+    def build(phrases: list[str] | tuple[str, ...]) -> PhraseSnapper:
+        return PhraseSnapper(phrases, high=threshold["high"], low=60.0, margin=15.0)
+
+    snapper = ReloadablePhraseSnapper(
+        build(["Remove the Wheelchocks"]),
+        is_idle=lambda: True,
+        on_reload=counts.append,
+        build=build,
+    )
+    command = "Chief remove the wheel chocks"
+
+    assert snapper.snap(command).decision is SnapDecision.ABSTAINED
+
+    threshold["high"] = 88.0
+    applied = snapper.rebuild_current()
+
+    assert applied is True
+    assert counts == []
+    assert snapper.snap(command).decision is SnapDecision.SNAPPED

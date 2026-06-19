@@ -10,7 +10,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
-from threading import Event
+from threading import Event, Lock
 
 from vaivox.application.ports import (
     AudioRecorder,
@@ -32,7 +32,11 @@ from vaivox.application.record_command import (
     StartRecording,
     StopAndReconcile,
 )
-from vaivox.application.refresh_vocabulary import RefreshVocabulary, ReloadVocabulary
+from vaivox.application.refresh_vocabulary import (
+    RefreshMissionVocabulary,
+    RefreshVocabulary,
+    ReloadVocabulary,
+)
 from vaivox.application.shutdown import Shutdown
 from vaivox.application.vocabulary_commands import AddWordMapping
 from vaivox.domain.reconciliation.snapper import (
@@ -56,6 +60,10 @@ from vaivox.infrastructure.telemetry.null_sink import NullTelemetrySink
 from vaivox.infrastructure.vocabulary.jsonl_repository import JsonlVocabularyRepository
 from vaivox.infrastructure.vocabulary.legacy_files import load_legacy_vocabulary
 from vaivox.infrastructure.vocabulary.migration import migrate_legacy_vocabulary
+from vaivox.infrastructure.vocabulary.mission_f10 import (
+    DEFAULT_MAX_MISSION_F10_PHRASES,
+    VaicomF10MissionVocabulary,
+)
 from vaivox.infrastructure.vocabulary.phrase_index import load_phrase_index
 from vaivox.infrastructure.vocabulary.reconciliation_vocabulary import (
     RepositoryReconciliationVocabulary,
@@ -79,6 +87,9 @@ class WiredApp:
             point runs it on a background thread at startup; a UI action can run it with
             ``force=True``. It hot-applies the regenerated phrase index via
             ``phrase_snapper`` on success.
+        refresh_mission_vocabulary: The current-mission F10 overlay refresh use case. It
+            polls VAICOM's live log, keeps the phrases out of permanent vocabulary, and
+            hot-applies the overlay through ``phrase_snapper``.
         reconciliation_vocabulary: Projection of structured vocabulary used by the runtime
             reconciliation pipeline.
         stt_keyterms: Provider keyterm builder used by STT adapters and startup diagnostics.
@@ -89,6 +100,7 @@ class WiredApp:
     control_server: ControlSocketServer
     phrase_snapper: ReloadablePhraseSnapper
     refresh_vocabulary: RefreshVocabulary
+    refresh_mission_vocabulary: RefreshMissionVocabulary
     reconciliation_vocabulary: RepositoryReconciliationVocabulary
     stt_keyterms: SttKeyterms
     add_word_mapping: AddWordMapping
@@ -137,7 +149,17 @@ def build(
         clock.now(),
     )
     reconciliation_vocabulary = RepositoryReconciliationVocabulary(vocabulary_repository)
-    stt_keyterms = SttKeyterms(config, reconciliation_vocabulary)
+    mission_phrase_lock = Lock()
+    mission_phrases: tuple[str, ...] = ()
+
+    def get_mission_phrases() -> tuple[str, ...]:
+        with mission_phrase_lock:
+            return mission_phrases
+
+    def get_mission_keyterms() -> list[str]:
+        return _mission_keyterms_from_phrases(get_mission_phrases())
+
+    stt_keyterms = SttKeyterms(config, reconciliation_vocabulary, get_mission_keyterms)
     speech_to_text = create_stt_backend(config, stt_keyterms)
     command_sink = VoiceAttackCommandSink(
         config.get_voiceattack_host(), config.get_voiceattack_port(), reporter
@@ -180,11 +202,32 @@ def build(
     generator = VaicomVocabularyGenerator(config.app_data_location)
 
     def apply_phrase_index() -> int:
-        phrases = load_phrase_index(config.app_data_location)
+        phrases = _merge_phrase_indexes(
+            load_phrase_index(config.app_data_location),
+            get_mission_phrases(),
+        )
         snapper.reload(phrases)
         return len(phrases)
 
+    def apply_mission_phrase_index(phrases: Sequence[str]) -> int:
+        nonlocal mission_phrases
+        with mission_phrase_lock:
+            mission_phrases = tuple(phrases)
+        return apply_phrase_index()
+
     refresh_vocabulary = RefreshVocabulary(generator, reporter, apply_phrase_index)
+    mission_log_path = config.get_setting("mission_f10_log_path", "").strip() or None
+    mission_max_phrases = config.get_int_setting(
+        "mission_f10_max_phrases",
+        DEFAULT_MAX_MISSION_F10_PHRASES,
+        min_value=1,
+        max_value=5000,
+    )
+    refresh_mission_vocabulary = RefreshMissionVocabulary(
+        VaicomF10MissionVocabulary(mission_log_path, max_phrases=mission_max_phrases),
+        reporter,
+        apply_mission_phrase_index,
+    )
 
     api_server: IntrospectionServer | None = None
     if config.get_bool_setting("api_enabled", False):
@@ -218,11 +261,41 @@ def build(
         control_server=control_server,
         phrase_snapper=snapper,
         refresh_vocabulary=refresh_vocabulary,
+        refresh_mission_vocabulary=refresh_mission_vocabulary,
         reconciliation_vocabulary=reconciliation_vocabulary,
         stt_keyterms=stt_keyterms,
         add_word_mapping=add_word_mapping,
         api_server=api_server,
     )
+
+
+def _merge_phrase_indexes(base: Sequence[str], mission: Sequence[str]) -> list[str]:
+    """Merge permanent and mission-scoped phrase indexes without duplicating phrases."""
+    merged: list[str] = []
+    seen: set[str] = set()
+    for phrase in (*base, *mission):
+        normalized = phrase.strip()
+        if not normalized:
+            continue
+        key = normalized.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        merged.append(normalized)
+    return merged
+
+
+def _mission_keyterms_from_phrases(phrases: Sequence[str]) -> list[str]:
+    """Build STT keyterms from mission F10 phrases, including raw names without Action."""
+    keyterms: list[str] = []
+    for phrase in phrases:
+        normalized = phrase.strip()
+        if not normalized:
+            continue
+        keyterms.append(normalized)
+        if normalized.lower().startswith("action "):
+            keyterms.append(normalized[7:].strip())
+    return keyterms
 
 
 def build_telemetry_sink(config: VaivoxConfiguration) -> TelemetrySink:
@@ -284,11 +357,12 @@ ReloadablePhraseSnapper` so a regenerated index can be swapped in at idle withou
     # tune against the eval / telemetry without a code change. Defaults are the
     # eval-calibrated constants. The same builder seeds the initial snapper and every
     # hot-reload, so a regenerated index keeps the configured calibration (ADR-0009).
-    high = config.get_float_setting("snap_high", DEFAULT_HIGH)
-    low = config.get_float_setting("snap_low", DEFAULT_LOW)
-    margin = config.get_float_setting("snap_margin", DEFAULT_MARGIN)
-
     def build(index: Sequence[str]) -> PhraseSnapper:
+        high = config.get_float_setting("snap_high", DEFAULT_HIGH, min_value=0.0, max_value=100.0)
+        low = config.get_float_setting("snap_low", DEFAULT_LOW, min_value=0.0, max_value=100.0)
+        margin = config.get_float_setting(
+            "snap_margin", DEFAULT_MARGIN, min_value=0.0, max_value=100.0
+        )
         return PhraseSnapper(index, high=high, low=low, margin=margin)
 
     def announce_reload(count: int) -> None:

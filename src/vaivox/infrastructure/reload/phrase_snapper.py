@@ -51,6 +51,7 @@ class ReloadablePhraseSnapper:
         """Wire the initial snapper, the idle/observer callbacks, and the reload builder."""
         self._on_reload = on_reload
         self._build = build
+        self._phrases = initial.phrase_index
         self._swap: IdleGatedSwap[PhraseSnapper] = IdleGatedSwap(initial, is_idle, self._announce)
 
     def snap(self, text: str) -> SnapResult:
@@ -75,7 +76,22 @@ class ReloadablePhraseSnapper:
             ``True`` if the new index was applied immediately (idle), ``False`` if it was
             staged for the next idle checkpoint.
         """
-        return self._swap.request_swap(self._build(phrases))
+        self._phrases = tuple(phrases)
+        return self._swap.request_swap(self._build(self._phrases))
+
+    def rebuild_current(self) -> bool:
+        """Rebuild the live phrase index with the current builder, without reload notice.
+
+        Settings changes such as ``snap_high`` affect the builder rather than the phrase
+        list. This method reapplies those settings through the same idle gate as a
+        vocabulary reload, but suppresses the vocabulary-refresh observer because the
+        phrase index itself did not change.
+
+        Returns:
+            ``True`` if the rebuilt snapper was applied immediately, ``False`` if it was
+            staged for the next idle checkpoint.
+        """
+        return self._swap.request_swap(self._build(self._phrases), announce=False)
 
     @property
     def phrase_index(self) -> tuple[str, ...]:

@@ -730,6 +730,12 @@ def parse_wso_caches(vaicom_root: Path, terms: list[str]) -> None:
 
 
 def parse_vaicom_log(vaicom_root: Path, terms: list[str]) -> None:
+    """Parse historical F10 import lines from VAICOM's log.
+
+    Kept for compatibility with old tooling, but the packaged permanent generator no
+    longer calls it: live F10 menu items are mission-scoped and belong in the ephemeral
+    mission overlay handled by ``infrastructure.vocabulary.mission_f10``.
+    """
     path = vaicom_root / "Logs" / "VAICOMPRO.log"
     if not path.is_file():
         return
@@ -831,7 +837,6 @@ def generate_keyterms(
     parse_voiceattack_profiles(vaicom_root, terms)
     parse_icao_overrides(saved_games, terms)
     parse_wso_caches(vaicom_root, terms)
-    parse_vaicom_log(vaicom_root, terms)
 
     deduped = dedupe_words(dedupe_terms(terms))
     return [

@@ -16,6 +16,7 @@ from vaivox.infrastructure.config.identity import VAIVOX
 
 _DEFAULT_THEME = "default"
 _DEFAULT_API_MAX_POST_BYTES = 16 * 1024
+_SETTINGS_FILE = "settings.cfg"
 _REDACTED = "<redacted>"
 _SENSITIVE_KEY_PARTS = ("api_key", "secret", "token", "password")
 _LOCALHOST_NAMES = {"localhost"}
@@ -70,6 +71,7 @@ class VaivoxConfiguration:
 
         default_config = self.load_configuration(app_location)
         custom_config = self.load_configuration(app_data_location, False)
+        self._custom_config = custom_config
         self.config = default_config | custom_config
 
     def load_configuration(self, location: str, default: bool = True) -> dict[str, str]:
@@ -87,7 +89,7 @@ class VaivoxConfiguration:
         """
         logging.info("Loading %s configuration...", "default" if default else "custom")
         config: dict[str, str] = {}
-        settings_file = os.path.join(location, "settings.cfg")
+        settings_file = os.path.join(location, _SETTINGS_FILE)
         if os.path.isfile(settings_file):
             try:
                 with open(settings_file, encoding="utf-8") as f:
@@ -110,6 +112,68 @@ class VaivoxConfiguration:
 
         logging.info("Loaded configuration: %s", _redact_configuration(config))
         return config
+
+    def set_custom_settings(self, settings: Mapping[str, str]) -> None:
+        """Persist per-user setting overrides and apply them to the live configuration.
+
+        Existing comments and unrelated settings in the user ``settings.cfg`` are kept.
+        Values are written to the per-user data directory only; the shipped default
+        configuration in the application directory is never modified.
+
+        Args:
+            settings: Key/value overrides to store in the user's ``settings.cfg``.
+
+        Raises:
+            ConfigurationError: If the user settings file cannot be written.
+        """
+        updates = {
+            key.strip(): str(value).strip() for key, value in settings.items() if key.strip()
+        }
+        if not updates:
+            return
+
+        settings_file = os.path.join(self._app_data_location, _SETTINGS_FILE)
+        lines: list[str] = []
+        if os.path.isfile(settings_file):
+            try:
+                with open(settings_file, encoding="utf-8") as file:
+                    lines = file.read().splitlines()
+            except OSError as error:
+                logging.error("Failed to read custom settings from '%s': %s", settings_file, error)
+                raise ConfigurationError("Failed to read custom settings") from error
+
+        seen: set[str] = set()
+        rewritten: list[str] = []
+        for line in lines:
+            stripped = line.strip()
+            if not stripped or stripped.startswith("#") or "=" not in line:
+                rewritten.append(line)
+                continue
+
+            key, _old_value = line.split("=", maxsplit=1)
+            normalized_key = key.strip()
+            if normalized_key in updates:
+                rewritten.append(f"{normalized_key}={updates[normalized_key]}")
+                seen.add(normalized_key)
+            else:
+                rewritten.append(line)
+
+        missing = [key for key in updates if key not in seen]
+        if missing and rewritten and rewritten[-1].strip():
+            rewritten.append("")
+        rewritten.extend(f"{key}={updates[key]}" for key in missing)
+
+        try:
+            os.makedirs(self._app_data_location, exist_ok=True)
+            with open(settings_file, "w", encoding="utf-8") as file:
+                file.write("\n".join(rewritten))
+                file.write("\n")
+        except OSError as error:
+            logging.error("Failed to write custom settings to '%s': %s", settings_file, error)
+            raise ConfigurationError("Failed to write custom settings") from error
+
+        self._custom_config.update(updates)
+        self.config.update(updates)
 
     @property
     def app_location(self) -> str:
@@ -178,18 +242,43 @@ class VaivoxConfiguration:
             return default
         return parsed
 
-    def get_float_setting(self, key: str, default: float) -> float:
-        """Return a float configuration setting, falling back to ``default``."""
+    def get_float_setting(
+        self,
+        key: str,
+        default: float,
+        min_value: float | None = None,
+        max_value: float | None = None,
+    ) -> float:
+        """Return a float configuration setting, bounded and fallback-safe."""
         value = self.config.get(key)
         if value is None:
             return default
         try:
-            return float(value)
+            parsed = float(value)
         except ValueError:
             logging.warning(
                 "Invalid float value for '%s': %s. Using default %s.", key, value, default
             )
             return default
+        if min_value is not None and parsed < min_value:
+            logging.warning(
+                "Float value for '%s' below minimum (%s < %s). Using default %s.",
+                key,
+                parsed,
+                min_value,
+                default,
+            )
+            return default
+        if max_value is not None and parsed > max_value:
+            logging.warning(
+                "Float value for '%s' above maximum (%s > %s). Using default %s.",
+                key,
+                parsed,
+                max_value,
+                default,
+            )
+            return default
+        return parsed
 
     def get_provider_setting(self, provider: str, key: str, default: str = "") -> str:
         """Return a provider-specific setting, falling back to a generic ``stt_*`` one."""

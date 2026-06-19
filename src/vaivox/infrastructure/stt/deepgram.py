@@ -43,9 +43,7 @@ class DeepgramBackend:
         self.smart_format = config.get_provider_bool("deepgram", "smart_format", True)
         self.detect_language = config.get_provider_bool("deepgram", "detect_language", False)
         self.max_keyterms = config.get_provider_int("deepgram", "max_keyterms", 100)
-        self.keyterms = keyterms.get_budgeted_stt_keyterms(
-            self.provider_name, max_terms=self.max_keyterms
-        )
+        self._keyterms = keyterms
         self.api_key = ""
 
     def load(self) -> None:
@@ -121,10 +119,16 @@ class DeepgramBackend:
         elif self.language:
             query.append(("language", self.language))
 
-        for keyterm in self.keyterms:
+        for keyterm in self._budgeted_keyterms():
             query.append(("keyterm", keyterm))
 
         return parse.urlunparse(parsed._replace(query=parse.urlencode(query)))
+
+    def _budgeted_keyterms(self) -> list[str]:
+        """Return keyterms for this request, including any live mission overlay."""
+        return self._keyterms.get_budgeted_stt_keyterms(
+            self.provider_name, max_terms=self.max_keyterms
+        )
 
     def _extract_text(self, payload: dict[str, Any]) -> str:
         channels = payload.get("results", {}).get("channels", [])

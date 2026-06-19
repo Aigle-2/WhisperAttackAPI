@@ -16,10 +16,11 @@ takes effect on the next launch; only the phrase index is hot-applied in the liv
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 
 from vaivox.application.ports import (
+    MissionVocabularySource,
     StatusLevel,
     StatusReporter,
     VocabularyGenerationResult,
@@ -130,3 +131,86 @@ class ReloadVocabulary:
         self._reporter.report("Reloading vocabulary from disk...", StatusLevel.DETAIL)
         phrases = self._apply_phrase_index()
         return ReloadResult(reloaded=True, phrases=phrases)
+
+
+@dataclass(frozen=True)
+class MissionVocabularyRefreshResult:
+    """Outcome of one mission-scoped vocabulary refresh pass.
+
+    Attributes:
+        changed: Whether the mission overlay changed and was applied.
+        mission_phrases: Number of mission-only phrases in the latest snapshot.
+        new_phrases: How many of those phrases were not present in the previous snapshot
+            (the count surfaced to the operator when the F10 poll pulls fresh commands).
+        live_phrases: Total live phrase-index size after applying the overlay, or
+            ``None`` when nothing changed.
+        source: Human-readable source location used by the adapter, if any.
+        reason: Short status from the adapter.
+    """
+
+    changed: bool
+    mission_phrases: int
+    new_phrases: int = 0
+    live_phrases: int | None = None
+    source: str | None = None
+    reason: str = "loaded"
+
+
+class RefreshMissionVocabulary:
+    """Refresh the ephemeral mission F10 overlay and hot-apply it when it changes."""
+
+    def __init__(
+        self,
+        source: MissionVocabularySource,
+        reporter: StatusReporter,
+        apply_mission_phrases: Callable[[Sequence[str]], int],
+    ) -> None:
+        """Wire the source, reporter, and live overlay apply hook.
+
+        Args:
+            source: Adapter that reads the current mission-only command phrases.
+            reporter: User-facing status reporter.
+            apply_mission_phrases: Replaces the mission overlay in the live phrase index
+                and returns the total phrase count now active.
+        """
+        self._source = source
+        self._reporter = reporter
+        self._apply_mission_phrases = apply_mission_phrases
+        self._phrases: tuple[str, ...] = ()
+
+    def execute(self) -> MissionVocabularyRefreshResult:
+        """Refresh the mission overlay if the discovered F10 phrases changed."""
+        snapshot = self._source.load()
+        if snapshot.phrases == self._phrases:
+            return MissionVocabularyRefreshResult(
+                changed=False,
+                mission_phrases=len(snapshot.phrases),
+                source=snapshot.source,
+                reason=snapshot.reason,
+            )
+
+        previous_count = len(self._phrases)
+        previous_keys = {phrase.lower() for phrase in self._phrases}
+        new_count = sum(1 for phrase in snapshot.phrases if phrase.lower() not in previous_keys)
+        self._phrases = snapshot.phrases
+        live_phrases = self._apply_mission_phrases(snapshot.phrases)
+        mission_count = len(snapshot.phrases)
+
+        if mission_count:
+            new_suffix = f", {new_count} new" if new_count else ""
+            self._reporter.report(
+                f"Mission F10 vocabulary refreshed: {mission_count} commands pulled"
+                f"{new_suffix} ({live_phrases} total)",
+                StatusLevel.SUCCESS,
+            )
+        elif previous_count:
+            self._reporter.report("Mission F10 vocabulary cleared", StatusLevel.INFO)
+
+        return MissionVocabularyRefreshResult(
+            changed=True,
+            mission_phrases=mission_count,
+            new_phrases=new_count,
+            live_phrases=live_phrases,
+            source=snapshot.source,
+            reason=snapshot.reason,
+        )

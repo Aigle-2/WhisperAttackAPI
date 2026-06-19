@@ -144,7 +144,11 @@ generator, and ADR-0005 **background** generation on first run / on stale all no
   both files to `%LOCALAPPDATA%\VAIVOX` (unit-tested on synthetic fixtures; end-to-end
   needs a real install). The `HIGH` / `LOW` / `MARGIN` thresholds are overridable in
   `settings.cfg` (`snap_high` / `snap_low` / `snap_margin`), injected via the snapper
-  builder so a hot-reload keeps the calibration. *Deferred:* recipient segmentation.
+  builder so a hot-reload keeps the calibration. Dynamic VAICOM-imported F10 menu
+  commands are kept out of the permanent files: VAIVOX polls `VAICOMPRO.log` for the
+  current mission's `Action ...` commands, hot-applies them as an in-memory mission
+  overlay, and feeds them into API STT keyterms per transcription. *Deferred:* recipient
+  segmentation.
 - **Agent API + skills** (ADR-0010) ✅ read API **+ gated actions**: the localhost
   introspection API serves `/status`, `/metrics`, `/reconciliations`, `/vocabulary` +
   `POST /reconcile/dry-run` over read-only query use cases, plus the **mutating actions**
