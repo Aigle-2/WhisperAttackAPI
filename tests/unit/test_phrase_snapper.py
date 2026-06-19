@@ -66,6 +66,19 @@ def test_spoken_compound_snaps_to_stored_single_token_phrase() -> None:
     assert result.score >= DEFAULT_HIGH
 
 
+def test_hyphenated_transcript_snaps_to_space_separated_phrase() -> None:
+    # Real operator evidence: Whisper transcribed "TACAN Air-to-Air"; the stored command is
+    # "TACAN Air to Air". The hyphen used to drop token_sort_ratio to 75 (an abstain); folding
+    # connector punctuation to spaces restores the exact match so it snaps cleanly.
+    snapper = PhraseSnapper(["TACAN Air to Air", "TACAN Air refuel", "TACAN Oscar Alfa Lima"])
+
+    result = snapper.snap("TACAN Air-to-Air")
+
+    assert result.decision is SnapDecision.SNAPPED
+    assert result.text == "TACAN Air to Air"  # original casing of the stored phrase
+    assert result.score == 100.0
+
+
 def test_mid_confidence_abstains_and_reports_near_miss() -> None:
     # A score in [LOW, HIGH): the snapper holds the text and emits a near-miss instead.
     snapper = PhraseSnapper(INDEX, high=99.0, low=50.0, margin=1.0)

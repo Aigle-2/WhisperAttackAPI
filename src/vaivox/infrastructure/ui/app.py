@@ -221,6 +221,8 @@ class VaivoxApp:
         self.phrase_snapper = wired.phrase_snapper
         self.refresh_vocabulary = wired.refresh_vocabulary
         self.refresh_mission_vocabulary = wired.refresh_mission_vocabulary
+        self.get_core_phrases = wired.get_core_phrases
+        self.get_mission_phrases = wired.get_mission_phrases
         self.reconciliation_vocabulary = wired.reconciliation_vocabulary
         self.stt_keyterms = wired.stt_keyterms
         self.add_word_mapping_use_case = wired.add_word_mapping
@@ -427,16 +429,17 @@ class VaivoxApp:
     def open_commands(self) -> None:
         """Open (or re-focus) the window listing every speakable command.
 
-        The window reads the live phrase index (permanent vocabulary + the mission F10
-        overlay) and polls it, so it tracks hot-reloads from a vocabulary refresh or a
-        mission poll. Only one instance is kept open at a time.
+        The window has a Core tab (permanent vocabulary) and an F10 tab (the mission
+        overlay), each polling its live source so it tracks hot-reloads from a vocabulary
+        refresh or a mission poll. Only one instance is kept open at a time.
         """
         if self._commands_window is not None:
             self._commands_window.lift()
             return
         self._commands_window = VaivoxCommands(
             self.window,
-            get_commands=lambda: self.phrase_snapper.phrase_index,
+            get_core_commands=self.get_core_phrases,
+            get_mission_commands=self.get_mission_phrases,
             palette=self.palette,
             on_close=self._on_commands_closed,
         )

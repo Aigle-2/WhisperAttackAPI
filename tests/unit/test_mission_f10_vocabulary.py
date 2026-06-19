@@ -45,18 +45,55 @@ def test_parse_f10_phrases_uses_latest_mission_blocks_only() -> None:
     assert parse_f10_phrases(text) == ["Action CHECK IN", "Action FENCE OUT"]
 
 
-def test_adapter_loads_configured_vaicom_log(tmp_path) -> None:
+def test_adapter_ignores_f10_already_in_the_log_at_startup(tmp_path) -> None:
     log = tmp_path / "VAICOMPRO.log"
     log.write_text(
-        "Set menu F10 item: Action Activate SA-6 Site, ActionIndex: 2, Command ID: 20010",
+        "Set menu F10 item: Action STALE FROM LAST SESSION, ActionIndex: 1, Command ID: 20001\n",
         encoding="utf-8",
     )
 
+    # The first poll baselines on whatever is already there (a previous session) and pulls
+    # nothing — a restart purges the overlay instead of re-pulling stale imports.
     snapshot = VaicomF10MissionVocabulary(str(log)).load()
 
-    assert snapshot.phrases == ("Action Activate SA-6 Site",)
+    assert snapshot.phrases == ()
     assert snapshot.source == str(log)
+
+
+def test_adapter_pulls_only_f10_appended_after_startup(tmp_path) -> None:
+    log = tmp_path / "VAICOMPRO.log"
+    log.write_text(
+        "Set menu F10 item: Action STALE, ActionIndex: 1, Command ID: 20001\n",
+        encoding="utf-8",
+    )
+    adapter = VaicomF10MissionVocabulary(str(log))
+
+    assert adapter.load().phrases == ()  # baseline captured; pre-existing content ignored
+
+    with open(log, "a", encoding="utf-8") as handle:
+        handle.write(
+            "Set menu F10 item: Action Activate SA-6 Site, ActionIndex: 2, Command ID: 20010\n"
+        )
+    snapshot = adapter.load()
+
+    assert snapshot.phrases == ("Action Activate SA-6 Site",)
     assert snapshot.reason == "loaded"
+
+
+def test_adapter_rereads_in_full_when_the_log_is_rotated(tmp_path) -> None:
+    log = tmp_path / "VAICOMPRO.log"
+    log.write_text("old session noise\n" * 50, encoding="utf-8")
+    adapter = VaicomF10MissionVocabulary(str(log))
+
+    assert adapter.load().phrases == ()  # baseline on the large stale log
+
+    # VAICOM truncates its log for a new session; the shrunk file is re-read from the start.
+    log.write_text(
+        "Set menu F10 item: Action FENCE IN, ActionIndex: 0, Command ID: 20002\n",
+        encoding="utf-8",
+    )
+
+    assert adapter.load().phrases == ("Action FENCE IN",)
 
 
 def test_adapter_reports_no_install_when_auto_discovery_finds_nothing() -> None:

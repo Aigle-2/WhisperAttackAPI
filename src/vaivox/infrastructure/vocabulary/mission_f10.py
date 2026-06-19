@@ -4,6 +4,13 @@ VAICOM imports DCS F10 menu actions as command phrases prefixed with ``Action`` 
 them in ``Logs/VAICOMPRO.log``. These phrases are mission/server scoped: they should help
 the live STT request and phrase snapper, but they must not be folded into the permanent
 VAIVOX vocabulary source.
+
+They are also **session scoped**: ``VAICOMPRO.log`` outlives a VAIVOX restart, so the
+adapter records a baseline (the log size at the first poll) and only parses lines appended
+after it. Whatever is already in the log when VAIVOX starts is treated as stale (a previous
+mission/session) and ignored — a restart therefore purges the F10 overlay instead of
+re-pulling it. A log that shrank since the baseline (VAICOM rotated/truncated it for a new
+session) is re-read in full.
 """
 
 from __future__ import annotations
@@ -35,7 +42,10 @@ _LEGACY_F10_RE = re.compile(
 
 
 class VaicomF10MissionVocabulary:
-    """Read the current mission's imported F10 commands from VAICOM's log.
+    """Read F10 commands imported during the current VAIVOX session from VAICOM's log.
+
+    Content already present at startup is ignored (see the module docstring), so the
+    overlay is purged on restart and only reflects F10 imports from the live session.
 
     Args:
         log_path: Optional explicit ``VAICOMPRO.log`` path. When omitted, the adapter
@@ -54,9 +64,17 @@ class VaicomF10MissionVocabulary:
         self._log_path = Path(log_path) if log_path else None
         self._discover = discover
         self._max_phrases = max_phrases
+        # Byte offset into the log captured at the first poll (= VAIVOX startup). Lines
+        # before it are stale (pre-restart) and ignored; ``None`` until the first poll.
+        self._baseline: int | None = None
 
     def load(self) -> MissionVocabularySnapshot:
-        """Return mission-only F10 command phrases currently visible in VAICOM's log."""
+        """Return mission-only F10 commands imported since VAIVOX started.
+
+        Only the part of ``VAICOMPRO.log`` appended after the startup baseline is parsed,
+        so a restart purges the previous overlay rather than re-pulling stale imports (see
+        the module docstring).
+        """
         path = self._resolve_log_path()
         if path is None:
             return MissionVocabularySnapshot((), reason="no VAICOM install found")
@@ -66,7 +84,7 @@ class VaicomF10MissionVocabulary:
             )
 
         try:
-            text = path.read_text(encoding="utf-8", errors="ignore")
+            text = self._read_since_baseline(path)
         except OSError as error:
             _LOGGER.warning("Failed to read VAICOM F10 log '%s': %s", path, error)
             return MissionVocabularySnapshot(
@@ -79,6 +97,24 @@ class VaicomF10MissionVocabulary:
             source=str(path),
             reason="loaded" if phrases else "no F10 commands found",
         )
+
+    def _read_since_baseline(self, path: Path) -> str:
+        """Return log text appended since the startup baseline, maintaining the baseline.
+
+        The first call records the current size as the baseline and returns nothing (all
+        existing content is pre-restart). Later calls return only bytes appended past it; a
+        log that shrank below the baseline was rotated/truncated, so it is re-read in full.
+        """
+        size = path.stat().st_size
+        if self._baseline is None:
+            # First poll: treat everything already in the log as stale and ignore it.
+            self._baseline = size
+        elif size < self._baseline:
+            # Log rotated/truncated for a fresh VAICOM session: re-read from the start.
+            self._baseline = 0
+        with open(path, "rb") as file:
+            file.seek(self._baseline)
+            return file.read().decode("utf-8", errors="ignore")
 
     def _resolve_log_path(self) -> Path | None:
         if self._log_path is not None:

@@ -14,3 +14,6 @@ Kobuleti request taxi
 tune ULMB
 set heading 270
 button 5
+TACAN Air to Air
+TACAN Air refuel
+TACAN Oscar Alfa Lima

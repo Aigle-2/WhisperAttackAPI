@@ -91,13 +91,15 @@ but never anything that does I/O (sockets, files, mic, network, UI).
     a frozen `PhraseSnapper` (no leak). *Deferred:* the vocabulary swap (waits on the
     pipeline reading vocab from `VocabularyRepository`), the LRU pass, and the file-watch.
   - **Command browser + mission pull log** (UI) ✅: a toolbar **Commands** button opens a
-    non-modal window (`infrastructure/ui/commands_window.py`) listing every speakable
-    command — the live `phrase_snapper.phrase_index` (permanent vocabulary + the mission
-    F10 overlay), sorted alphabetically with a live search box (filter, arrow-key nav,
-    Enter to focus/copy). It polls the index so a vocabulary refresh or an F10 poll updates
-    it in place. The mission F10 poll (`RefreshMissionVocabulary`) reports a **count-only**
-    line on each changed pull — `N commands pulled, X new (M total)` — diffing against the
-    previous poll so re-polling the same mission stays quiet.
+    non-modal window (`infrastructure/ui/commands_window.py`) with **Core** and **F10** tabs
+    — the live permanent vocabulary (`WiredApp.get_core_phrases`) and the mission F10 overlay
+    (`WiredApp.get_mission_phrases`) respectively — each sorted alphabetically with a live
+    search box (filter, arrow-key nav, horizontal scroll, Enter to focus/copy). Each tab
+    polls its source so a vocabulary refresh or an F10 poll updates it in place. The mission
+    F10 poll (`RefreshMissionVocabulary`) reports a **count-only** line on each changed pull
+    — `N commands pulled, X new (M total)` — diffing against the previous poll so re-polling
+    the same mission stays quiet; the F10 reader is session-scoped (`mission_f10.py` baselines
+    the log at startup) so a restart purges the overlay instead of re-pulling stale imports.
   - **Agent API/MCP** (ADR-0010) ✅ read API **+ gated actions + MCP**: introspection
     endpoints `/status`, `/metrics`, `/reconciliations`, `/vocabulary` + `POST
     /reconcile/dry-run` over query use cases (off by default, localhost, optional bearer

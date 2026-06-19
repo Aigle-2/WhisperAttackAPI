@@ -32,11 +32,16 @@ infrastructure concern. An empty index makes :meth:`PhraseSnapper.snap` a no-op 
 
 from __future__ import annotations
 
+import re
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
 from enum import StrEnum
 
 from rapidfuzz import fuzz
+
+#: Connector punctuation (hyphens, dashes, slashes, …) folded to a space before matching,
+#: so a transcript like "Air-to-Air" scores against the stored "Air to Air" as one phrase.
+_PUNCTUATION = re.compile(r"[^\w\s]", flags=re.UNICODE)
 
 #: Minimum best score (0-100) to consider snapping to the best phrase.
 DEFAULT_HIGH = 90.0
@@ -201,18 +206,24 @@ class PhraseSnapper:
 
 
 def _normalize(text: str) -> str:
-    """Normalize a phrase for matching (lowercase, collapse whitespace).
+    """Normalize a phrase for matching (lowercase, fold punctuation to spaces, collapse).
 
-    Mirrors the eval oracle's ``normalize`` so the snapper and the match oracle agree on
-    what counts as the same phrase.
+    Connector punctuation is treated as a word boundary: a transcript like
+    ``"TACAN Air-to-Air"`` must score against the canonical ``"TACAN Air to Air"`` as the
+    *same* phrase, not lose points for the hyphen splitting one token off from three.
+
+    This intentionally diverges from the eval oracle's ``normalize``, which models
+    VoiceAttack's punctuation-*sensitive* ``Command.Exists``. The snapper's job is to
+    recognize the equivalence and snap to the canonical phrase — which VoiceAttack then
+    accepts — so it normalizes more aggressively than the acceptance test it feeds.
 
     Args:
         text: The phrase to normalize.
 
     Returns:
-        The lowercased, whitespace-collapsed phrase.
+        The lowercased, punctuation-folded, whitespace-collapsed phrase.
     """
-    return " ".join(text.lower().split())
+    return " ".join(_PUNCTUATION.sub(" ", text.lower()).split())
 
 
 def _score(query: str, choice: str) -> float:

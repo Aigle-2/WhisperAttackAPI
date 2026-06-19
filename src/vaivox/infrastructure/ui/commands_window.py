@@ -1,16 +1,18 @@
 """Window listing every speakable command, with live search (UI adapter).
 
-The window shows the union of the permanent ("core") command phrases and the
-mission-scoped F10 overlay — exactly the live phrase index the snapper matches against
-(:class:`~vaivox.infrastructure.reload.phrase_snapper.ReloadablePhraseSnapper`). The list
-is sorted alphabetically (case-insensitively) and filtered live from a search box: typing
-narrows the list and selects the closest match, the arrow keys move the selection without
-leaving the search box, and Enter moves focus into the list. Because the phrase index is
-hot-reloaded when the VAICOM vocabulary regenerates or the mission F10 poll pulls new
-commands (ADR-0005/0009), the window polls its source and re-renders when it changes, so an
-open window stays current without a reopen.
+The window is a two-tab notebook: a **Core** tab over the permanent command phrases and an
+**F10** tab over the mission-scoped F10 overlay (each the live phrase set the snapper
+matches against). Within a tab the list is sorted alphabetically (case-insensitively) and
+filtered live from a search box: typing narrows the list and selects the closest match, the
+arrow keys move the selection without leaving the search box, and Enter moves focus into the
+list. A horizontal scrollbar keeps long bracketed command templates
+(``[Radio] [Channel] [1..18]``) fully readable rather than clipping them at the edge.
 
-ttkbootstrap and tkinter are imported lazily inside the constructor so the module imports
+Because the phrase sets are hot-reloaded when the VAICOM vocabulary regenerates or the
+mission F10 poll pulls new commands (ADR-0005/0009), each tab polls its source and re-renders
+when it changes, so an open window stays current without a reopen.
+
+ttkbootstrap and tkinter are imported lazily inside the constructors so the module imports
 without the UI stack installed (matching the other ``infrastructure/ui`` adapters).
 """
 
@@ -22,9 +24,12 @@ from typing import TYPE_CHECKING, Any
 from vaivox.infrastructure.ui.theme import TAG_BLACK, TAG_BLUE
 
 if TYPE_CHECKING:
+    from tkinter import Misc
+    from tkinter.font import Font
+
     from ttkbootstrap import Window
 
-#: How often (ms) the window re-reads its command source to pick up hot-reloads.
+#: How often (ms) each tab re-reads its command source to pick up hot-reloads.
 _POLL_INTERVAL_MS = 1000
 
 
@@ -69,78 +74,75 @@ def filter_commands(commands: Sequence[str], query: str) -> list[str]:
     return [command for command in commands if needle in command.lower()]
 
 
-class VaivoxCommands:
-    """A non-modal window listing every speakable command, with live search."""
+class _CommandsTab:
+    """One notebook tab: a live-searchable, alphabetically-sorted command list."""
 
     def __init__(
         self,
-        root: Window,
+        parent: Misc,
         get_commands: Callable[[], Sequence[str]],
         palette: Mapping[str, str],
-        on_close: Callable[[], None] | None = None,
+        custom_font: Font,
+        empty_message: str,
     ) -> None:
-        """Build and display the commands window.
+        """Build the search box, count label, and scrolled listbox into ``parent``.
 
         Args:
-            root: The parent application window.
-            get_commands: Returns the current speakable command phrases (the live phrase
-                index: core + mission F10). Polled so the list tracks hot-reloads.
+            parent: The notebook page frame to populate.
+            get_commands: Returns this tab's current command phrases (polled live).
             palette: The active theme palette (used to colour the non-themed listbox).
-            on_close: Optional callback invoked when the window is closed (so the app can
-                drop its single-instance reference).
+            custom_font: The shared UI font.
+            empty_message: The count-label text shown when the source is empty.
         """
-        from tkinter import BOTH, END, LEFT, RIGHT, Listbox, Scrollbar, StringVar, X, Y, font
+        from tkinter import (
+            BOTH,
+            END,
+            EW,
+            HORIZONTAL,
+            LEFT,
+            NS,
+            NSEW,
+            VERTICAL,
+            Listbox,
+            Scrollbar,
+            StringVar,
+            X,
+        )
 
-        from ttkbootstrap import Entry, Frame, Label, Toplevel
+        from ttkbootstrap import Entry, Frame, Label
 
         self._get_commands = get_commands
-        self._on_close = on_close
+        self._empty_message = empty_message
         self._all_commands: list[str] = []
         self._filtered: list[str] = []
         self._signature: tuple[str, ...] = ()
-        self._after_id: str | None = None
+        self._end = END
 
-        window_width = 560
-        window_height = 640
-        parent_x = root.winfo_x()
-        parent_y = root.winfo_y()
-        parent_width = root.winfo_width()
-        parent_height = root.winfo_height()
-        x = parent_x + (parent_width // 2) - (window_width // 2)
-        y = parent_y + (parent_height // 2) - (window_height // 2)
-
-        window = Toplevel(
-            title="Available commands",
-            size=(window_width, window_height),
-            position=(x, y),
-            transient=root,
-        )
-        self._window: Any = window
-
-        custom_font = font.Font(family="GG Sans", size=11)
         self._query: Any = StringVar()
-
-        search_frame = Frame(window)
-        search_frame.pack(fill=X, padx=16, pady=(16, 6))
+        search_frame = Frame(parent)
+        search_frame.pack(fill=X, padx=12, pady=(12, 6))
         Label(search_frame, text="Search").pack(side=LEFT, padx=(0, 8))
         entry = Entry(search_frame, textvariable=self._query, font=custom_font)
         entry.pack(side=LEFT, fill=X, expand=True)
         self._entry: Any = entry
 
         self._count: Any = StringVar(value="")
-        Label(window, textvariable=self._count, bootstyle="secondary").pack(
-            anchor="w", padx=16, pady=(0, 8)
+        Label(parent, textvariable=self._count, bootstyle="secondary").pack(
+            anchor="w", padx=12, pady=(0, 6)
         )
 
-        list_frame = Frame(window)
-        list_frame.pack(fill=BOTH, expand=True, padx=16, pady=(0, 16))
-        scrollbar = Scrollbar(list_frame)
-        scrollbar.pack(side=RIGHT, fill=Y)
+        list_frame = Frame(parent)
+        list_frame.pack(fill=BOTH, expand=True, padx=12, pady=(0, 12))
+        list_frame.grid_rowconfigure(0, weight=1)
+        list_frame.grid_columnconfigure(0, weight=1)
+        yscroll = Scrollbar(list_frame, orient=VERTICAL)
+        xscroll = Scrollbar(list_frame, orient=HORIZONTAL)
         listbox = Listbox(
             list_frame,
             font=custom_font,
             activestyle="none",
-            yscrollcommand=scrollbar.set,
+            yscrollcommand=yscroll.set,
+            xscrollcommand=xscroll.set,
             background=palette["text_background"],
             foreground=palette[TAG_BLACK],
             selectbackground=palette[TAG_BLUE],
@@ -149,10 +151,12 @@ class VaivoxCommands:
             borderwidth=0,
             exportselection=False,
         )
-        listbox.pack(side=LEFT, fill=BOTH, expand=True)
-        scrollbar.configure(command=listbox.yview)
+        listbox.grid(row=0, column=0, sticky=NSEW)
+        yscroll.grid(row=0, column=1, sticky=NS)
+        xscroll.grid(row=1, column=0, sticky=EW)
+        yscroll.configure(command=listbox.yview)
+        xscroll.configure(command=listbox.xview)
         self._listbox: Any = listbox
-        self._end = END
 
         self._query.trace_add("write", self._on_query_changed)
         entry.bind("<Down>", self._select_next)
@@ -161,26 +165,14 @@ class VaivoxCommands:
         listbox.bind("<Return>", self._copy_selection)
         listbox.bind("<Double-Button-1>", self._copy_selection)
 
-        window.protocol("WM_DELETE_WINDOW", self._close)
+        self.refresh()
 
-        self._refresh_commands()
-        entry.focus_set()
-        self._after_id = window.after(_POLL_INTERVAL_MS, self._poll)
-
-    def lift(self) -> None:
-        """Bring an already-open window to the front and focus the search box."""
-        self._window.deiconify()
-        self._window.lift()
-        self._window.focus_force()
+    def focus_search(self) -> None:
+        """Move keyboard focus to this tab's search box."""
         self._entry.focus_set()
 
-    def _poll(self) -> None:
-        """Re-read the command source and reschedule (live hot-reload tracking)."""
-        self._refresh_commands()
-        self._after_id = self._window.after(_POLL_INTERVAL_MS, self._poll)
-
-    def _refresh_commands(self) -> None:
-        """Reload + re-render only when the underlying command set changed."""
+    def refresh(self) -> None:
+        """Reload + re-render only when this tab's command set changed."""
         commands = tuple(self._get_commands())
         if commands == self._signature:
             return
@@ -212,7 +204,7 @@ class VaivoxCommands:
         total = len(self._all_commands)
         shown = len(self._filtered)
         if total == 0:
-            self._count.set("No commands yet — refresh the VAICOM vocabulary")
+            self._count.set(self._empty_message)
         elif shown == total:
             self._count.set(f"{total} commands")
         else:
@@ -277,9 +269,88 @@ class VaivoxCommands:
         """Copy the selected command to the clipboard (Enter / double-click in the list)."""
         command = self._selected_command()
         if command is not None:
-            self._window.clipboard_clear()
-            self._window.clipboard_append(command)
+            self._listbox.clipboard_clear()
+            self._listbox.clipboard_append(command)
         return "break"
+
+
+class VaivoxCommands:
+    """A non-modal window with Core / F10 tabs listing every speakable command."""
+
+    def __init__(
+        self,
+        root: Window,
+        get_core_commands: Callable[[], Sequence[str]],
+        get_mission_commands: Callable[[], Sequence[str]],
+        palette: Mapping[str, str],
+        on_close: Callable[[], None] | None = None,
+    ) -> None:
+        """Build and display the commands window.
+
+        Args:
+            root: The parent application window.
+            get_core_commands: Returns the live permanent command phrases (Core tab).
+            get_mission_commands: Returns the live mission F10 command phrases (F10 tab).
+            palette: The active theme palette (used to colour the non-themed listboxes).
+            on_close: Optional callback invoked when the window is closed (so the app can
+                drop its single-instance reference).
+        """
+        from tkinter import BOTH, font
+
+        from ttkbootstrap import Frame, Notebook, Toplevel
+
+        self._on_close = on_close
+        self._after_id: str | None = None
+
+        window_width = 620
+        window_height = 680
+        parent_x = root.winfo_x()
+        parent_y = root.winfo_y()
+        parent_width = root.winfo_width()
+        parent_height = root.winfo_height()
+        x = parent_x + (parent_width // 2) - (window_width // 2)
+        y = parent_y + (parent_height // 2) - (window_height // 2)
+
+        window = Toplevel(
+            title="Available commands",
+            size=(window_width, window_height),
+            position=(x, y),
+            transient=root,
+        )
+        self._window: Any = window
+
+        custom_font = font.Font(family="GG Sans", size=11)
+        notebook = Notebook(window)
+        notebook.pack(fill=BOTH, expand=True, padx=12, pady=12)
+
+        self._tabs: list[_CommandsTab] = []
+        specs: list[tuple[str, Callable[[], Sequence[str]], str]] = [
+            ("Core", get_core_commands, "No core commands yet — refresh the VAICOM vocabulary"),
+            ("F10", get_mission_commands, "No F10 commands pulled this session"),
+        ]
+        for label, get_commands, empty_message in specs:
+            page = Frame(notebook)
+            notebook.add(page, text=label)
+            self._tabs.append(_CommandsTab(page, get_commands, palette, custom_font, empty_message))
+
+        window.protocol("WM_DELETE_WINDOW", self._close)
+        if self._tabs:
+            self._tabs[0].focus_search()
+        self._after_id = window.after(_POLL_INTERVAL_MS, self._poll)
+
+    def lift(self) -> None:
+        """Bring an already-open window to the front and focus the first tab's search box."""
+        self._window.deiconify()
+        self._window.lift()
+        self._window.focus_force()
+        if self._tabs:
+            self._tabs[0].focus_search()
+
+    def _poll(self) -> None:
+        """Re-read every tab's source and reschedule (live hot-reload tracking)."""
+        for tab in self._tabs:
+            tab.refresh()
+        self._after_id = self._window.after(_POLL_INTERVAL_MS, self._poll)
 
     def _close(self) -> None:
         """Cancel the poll timer, notify the owner, and destroy the window."""

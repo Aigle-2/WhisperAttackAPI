@@ -56,6 +56,33 @@ def test_generate_phrase_index_keeps_command_phrases_drops_single_words(tmp_path
     assert index == sorted(index, key=str.lower)  # deterministic order
 
 
+def test_generate_phrase_index_preserves_balanced_brackets_in_templates(tmp_path):
+    root = tmp_path / "VAICOMPRO"
+    (root / "Export").mkdir(parents=True)
+    (root / "Profiles").mkdir()
+    (root / "Export" / "keywords.txt").write_text("", encoding="utf-8")
+    vap = (
+        "<Command><CommandString>"
+        "[Radio] [Channel] [1..18];Radar Focus Target [1..20]"
+        "</CommandString></Command>"
+    )
+    (root / "Profiles" / "test.vap").write_text(vap, encoding="utf-8")
+
+    index = generate_phrase_index(root, tmp_path / "saved")
+
+    # Placeholder templates keep their brackets intact (the old strip("[]") unbalanced them
+    # into "Radio] [Channel] [1..18" / "Radar Focus Target [1..20").
+    assert "[Radio] [Channel] [1..18]" in index
+    assert "Radar Focus Target [1..20]" in index
+    assert all(phrase.count("[") == phrase.count("]") for phrase in index)
+
+
+def test_clean_term_unwraps_a_single_bracket_group_but_not_a_multi_slot_phrase():
+    assert generator.clean_term("[Channel]") == "Channel"
+    assert generator.clean_term("[Radio] [Channel] [1..18]") == "[Radio] [Channel] [1..18]"
+    assert generator.clean_term("Radar Focus Target [1..20]") == "Radar Focus Target [1..20]"
+
+
 def test_phrase_index_round_trips_through_the_app_loader(tmp_path):
     root = _make_vaicom_root(tmp_path)
     data_dir = tmp_path / "data"

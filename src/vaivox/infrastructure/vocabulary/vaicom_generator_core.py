@@ -639,7 +639,18 @@ def clean_term(value: object) -> str:
     term = re.sub(r"<[^>]+>", " ", term)
     term = term.replace("\ufeff", "")
     term = re.sub(r"\([^)]*mHz[^)]*\)", " ", term, flags=re.IGNORECASE)
-    term = term.strip().strip("*").strip("[]")
+    term = term.strip().strip("*").strip()
+    # Unwrap a term that is a single bracketed group ("[Channel]" -> "Channel"), but leave
+    # brackets that delimit placeholders inside a phrase alone, so multi-slot command
+    # templates ("[Radio] [Channel] [1..18]") are not mangled into unbalanced text.
+    while (
+        len(term) >= 2
+        and term[0] == "["
+        and term[-1] == "]"
+        and "[" not in term[1:-1]
+        and "]" not in term[1:-1]
+    ):
+        term = term[1:-1].strip()
     term = term.replace("_", " ")
     term = re.sub(r"\s+", " ", term).strip()
     term = unicodedata.normalize("NFKD", term).encode("ascii", "ignore").decode("ascii")

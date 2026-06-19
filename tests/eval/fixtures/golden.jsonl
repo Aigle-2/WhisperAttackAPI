@@ -10,3 +10,4 @@
 {"raw_stt": "uh Springfield request startup", "expected_command": "Springfield request startup", "tags": ["filler"]}
 {"raw_stt": "texako request rejoin", "expected_command": "Texaco request rejoin", "tags": ["misheard_callsign"]}
 {"raw_stt": "colt request start up", "expected_command": "Colt request startup", "tags": ["word_split"]}
+{"raw_stt": "TACAN Air-to-Air", "expected_command": "TACAN Air to Air", "tags": ["punctuation", "hyphen", "phrase_snap"]}

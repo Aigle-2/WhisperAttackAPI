@@ -94,6 +94,10 @@ class WiredApp:
             reconciliation pipeline.
         stt_keyterms: Provider keyterm builder used by STT adapters and startup diagnostics.
         add_word_mapping: Use case backing the UI "Add mapping" action.
+        get_core_phrases: Live permanent command phrases (the merged snap index minus the
+            mission overlay) — the "Core" tab of the UI commands browser.
+        get_mission_phrases: Live mission-scoped F10 command phrases — the "F10" tab of the
+            UI commands browser.
         api_server: The introspection API server, or ``None`` when disabled.
     """
 
@@ -104,6 +108,8 @@ class WiredApp:
     reconciliation_vocabulary: RepositoryReconciliationVocabulary
     stt_keyterms: SttKeyterms
     add_word_mapping: AddWordMapping
+    get_core_phrases: Callable[[], tuple[str, ...]]
+    get_mission_phrases: Callable[[], tuple[str, ...]]
     api_server: IntrospectionServer | None = None
 
 
@@ -215,6 +221,14 @@ def build(
             mission_phrases = tuple(phrases)
         return apply_phrase_index()
 
+    def get_core_phrases() -> tuple[str, ...]:
+        # The snapper's live index is the permanent vocabulary merged with the mission
+        # overlay; subtract the overlay so the "Core" tab shows only permanent commands.
+        mission_keys = {phrase.strip().lower() for phrase in get_mission_phrases()}
+        return tuple(
+            phrase for phrase in snapper.phrase_index if phrase.strip().lower() not in mission_keys
+        )
+
     refresh_vocabulary = RefreshVocabulary(generator, reporter, apply_phrase_index)
     mission_log_path = config.get_setting("mission_f10_log_path", "").strip() or None
     mission_max_phrases = config.get_int_setting(
@@ -265,6 +279,8 @@ def build(
         reconciliation_vocabulary=reconciliation_vocabulary,
         stt_keyterms=stt_keyterms,
         add_word_mapping=add_word_mapping,
+        get_core_phrases=get_core_phrases,
+        get_mission_phrases=get_mission_phrases,
         api_server=api_server,
     )
 
