@@ -15,8 +15,6 @@ namespace VaivoxServerCommand
         private const int ListenerPort = 65433;
         private const string StartVaivoxRecordingContext = "Start VAIVOX Recording";
         private const string StopVaivoxRecordingContext = "Stop VAIVOX Recording";
-        private const string StartLegacyRecordingContext = "Start Whisper Recording";
-        private const string StopLegacyRecordingContext = "Stop Whisper Recording";
 
         private static bool _isRunning = true;
         private static TcpListener _listener = null;
@@ -71,10 +69,7 @@ namespace VaivoxServerCommand
                 {
                     switch (contextinput)
                     {
-                        // Prefer the VAIVOX context names. The Whisper names remain as
-                        // compatibility aliases for profiles configured before the rebrand.
                         case StartVaivoxRecordingContext:
-                        case StartLegacyRecordingContext:
                             {
                                 SendControlCommand(stream, "start");
                                 vaProxy.WriteToLog("Start VAIVOX recording", "grey");
@@ -82,7 +77,6 @@ namespace VaivoxServerCommand
                             }
 
                         case StopVaivoxRecordingContext:
-                        case StopLegacyRecordingContext:
                             {
                                 SendControlCommand(stream, "stop");
                                 vaProxy.WriteToLog("Stop VAIVOX recording", "grey");

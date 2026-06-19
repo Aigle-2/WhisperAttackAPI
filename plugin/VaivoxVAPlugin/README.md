@@ -18,6 +18,11 @@ These ports mirror `vaivox.infrastructure.config.identity.ProductIdentity`. The 
 fresh so VoiceAttack treats VAIVOX as a separate plugin from any upstream WhisperAttack
 install.
 
+VAIVOX supports side-by-side installation with upstream WhisperAttack by keeping a
+separate plugin GUID, display name, app folder, profile name, and `%LOCALAPPDATA%\VAIVOX`
+data directory. Running both STT servers at the same time is not supported yet because
+the default localhost ports are still shared.
+
 ## Return channel (ADR-0006)
 
 After receiving a command on the listener port, the plugin runs
@@ -69,8 +74,9 @@ Then copy `plugin\VaivoxVAPlugin\bin\Release\net48\VaivoxVAPlugin.dll` into
 3. Bind your push-to-talk buttons to the two commands the plugin matches on:
    - `Start VAIVOX Recording` -> sends `start`
    - `Stop VAIVOX Recording` -> sends `stop`
-   (`Start Whisper Recording` / `Stop Whisper Recording` are still accepted as legacy
-   aliases for already-configured profiles.)
+
+The plugin intentionally matches only VAIVOX-named contexts, so an upstream
+WhisperAttack profile can remain installed without sharing action names with VAIVOX.
 
 ## End-to-end smoke (manual, needs VoiceAttack + VAICOM + DCS)
 

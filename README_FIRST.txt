@@ -15,6 +15,11 @@ Quick start
 
 VoiceAttack / VAICOM connects to the VAIVOX server on 127.0.0.1:65432.
 
+VAIVOX can be installed alongside upstream WhisperAttack because it uses its own
+VoiceAttack plugin GUID, Apps\VAIVOX folder, profile name, and %LOCALAPPDATA%\VAIVOX data
+directory. Do not run both STT servers at the same time yet; the localhost ports are still
+shared.
+
 Configuration files
 -------------------
 

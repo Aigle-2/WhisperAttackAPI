@@ -11,6 +11,10 @@ as a network service.
 - A non-local `voiceattack_host` logs a warning because commands would leave the local
   machine.
 
+These defaults allow VAIVOX to be installed side by side with upstream WhisperAttack
+without clobbering files or VoiceAttack plugin identity, but they do not support running
+both STT servers at the same time while the localhost ports are shared.
+
 ## Introspection API
 
 The HTTP introspection API is off by default. When enabled, it is restricted to localhost

@@ -79,6 +79,19 @@ def test_voiceattack_profile_template_uses_vaivox_name() -> None:
     assert b"send_command.py" not in inflated
 
 
+def test_voiceattack_plugin_uses_only_vaivox_context_names() -> None:
+    """The VAIVOX plugin must not accept upstream WhisperAttack action names."""
+    repo_root = Path(__file__).resolve().parents[2]
+    plugin_source = (
+        repo_root / "plugin" / "VaivoxVAPlugin" / "VaivoxVAPlugin.cs"
+    ).read_text(encoding="utf-8")
+
+    assert "Start VAIVOX Recording" in plugin_source
+    assert "Stop VAIVOX Recording" in plugin_source
+    assert "Start Whisper Recording" not in plugin_source
+    assert "Stop Whisper Recording" not in plugin_source
+
+
 def test_project_version_matches_runtime_identity() -> None:
     """The package metadata and runtime identity share one canonical version."""
     repo_root = Path(__file__).resolve().parents[2]

@@ -114,6 +114,11 @@ ships a freshly-GUID'd plugin (separate from upstream WhisperAttack), re-point e
 VoiceAttack command's plugin function to the **VAIVOX** plugin — see
 [plugin/VaivoxVAPlugin/README.md](plugin/VaivoxVAPlugin/README.md).
 
+VAIVOX is intended to install side by side with upstream WhisperAttack: it uses its own
+plugin GUID, VoiceAttack app folder, profile name, log, config, and
+`%LOCALAPPDATA%\VAIVOX` data directory. Running both STT servers at the same time is not
+supported in this release because the default localhost ports remain `65432` and `65433`.
+
 For the local socket/API/telemetry posture, see [docs/SECURITY_MODEL.md](docs/SECURITY_MODEL.md).
 
 ---
