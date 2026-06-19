@@ -66,7 +66,7 @@ docs/  adr/  MIGRATION_PLAN.md
 | `configuration.py` | `infrastructure/config/settings.py` + a domain config VO |
 | `word_mappings.py`, `writer.py`, `theme.py` | `infrastructure/ui/` |
 | `whisper_attack.py` | `infrastructure/ui/` (window+tray) + `main.py` + `composition.py` |
-| `tools/generate_vaicom_keyterms.py` | stays; extended to emit the phrase index |
+| `tools/generate_vaicom_keyterms.py` | CLI wrapper; runtime generator lives in `src/vaivox/infrastructure/vocabulary/` |
 | `VoiceAttackPlugin/WhisperAttack/` | `plugin/VaivoxVAPlugin/` (new GUID) |
 | `build_*.cmd`, `build_exe.ps1` | `packaging/` + `build.py` + CI |
 | `requirements*.txt` | `pyproject.toml` (`[full]` extra) |
@@ -139,8 +139,8 @@ generator, and ADR-0005 **background** generation on first run / on stale all no
 - **B — Phrase snap** (ADR-0011) ✅: conservative three-band `PhraseSnapper` with abstain
   (same scorer as the near-miss top-N), live-wired into `StopAndReconcile` + recorded in
   telemetry (no-op until a phrase index exists). The eval recovers every near-miss with
-  `wrong_match == 0` held. The keyterm + phrase-index **generator**
-  (`tools/generate_vaicom_keyterms.py`, ADR-0005) auto-discovers a VAICOM install and emits
+  `wrong_match == 0` held. The packaged keyterm + phrase-index **generator**
+  (`vaicom_generator_core`, ADR-0005) auto-discovers a VAICOM install and emits
   both files to `%LOCALAPPDATA%\VAIVOX` (unit-tested on synthetic fixtures; end-to-end
   needs a real install). The `HIGH` / `LOW` / `MARGIN` thresholds are overridable in
   `settings.cfg` (`snap_high` / `snap_low` / `snap_margin`), injected via the snapper

@@ -13,7 +13,7 @@ import threading
 import traceback
 from os import path
 from threading import Event
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from vaivox import composition
 from vaivox.infrastructure.config.identity import VAIVOX
@@ -67,11 +67,13 @@ class VaivoxApp:
         self.config = VaivoxConfiguration(app_path, app_data_dir)
 
         theme = self.get_theme()
-        self.window.style.theme_use("darkly" if theme == THEME_DARK else "flatly")
+        cast(Any, self.window.style).theme_use("darkly" if theme == THEME_DARK else "flatly")
 
         custom_font = font.Font(family="GG Sans", size=11)
-        Style().configure("TButton", font=custom_font)
-        Style().configure("TLabel", font=custom_font)
+        style_factory = cast(Any, Style)
+        style = style_factory()
+        style.configure("TButton", font=custom_font)
+        style.configure("TLabel", font=custom_font)
 
         text_area = ScrolledText(
             self.window,
@@ -156,6 +158,13 @@ class VaivoxApp:
 
         self.writer.write("Loaded fuzzy correction words:", TAG_BLUE)
         self.writer.write(f"{len(fuzzy_words)} words: {', '.join(fuzzy_words)}", TAG_GREY)
+        if self.config.get_bool_setting("telemetry_enabled", True):
+            self.writer.write(
+                "Telemetry enabled: utterances are stored locally in telemetry.jsonl",
+                TAG_GREY,
+            )
+        else:
+            self.writer.write("Telemetry disabled", TAG_GREY)
 
         self.write_stt_keyterm_context()
 
@@ -275,7 +284,8 @@ class VaivoxApp:
 
         modal = Toplevel(title=VAIVOX.name, size=(1000, 300), transient=self.window, topmost=True)
         Label(modal, text=message).pack(pady=20)
-        Style().configure("TButton", font=("GG Sans", 11))
+        style_factory = cast(Any, Style)
+        style_factory().configure("TButton", font=("GG Sans", 11))
         Button(modal, text="Close", command=modal.destroy).pack(pady=10)
         modal.place_window_center()
         modal.grab_set()

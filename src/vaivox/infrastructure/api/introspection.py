@@ -27,6 +27,7 @@ import threading
 from dataclasses import asdict
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from ipaddress import ip_address
 from typing import cast
 from urllib.parse import parse_qs, urlsplit
 
@@ -44,12 +45,25 @@ _LOGGER = logging.getLogger(__name__)
 
 DEFAULT_API_HOST = "127.0.0.1"
 DEFAULT_API_PORT = 8765
+DEFAULT_MAX_POST_BYTES = 16 * 1024
 
 DEFAULT_RECONCILIATIONS_LIMIT = 20
 MAX_RECONCILIATIONS_LIMIT = 500
+_LOCALHOST_NAMES = {"localhost"}
 
 #: POST paths for the gated mutating actions (ADR-0010), 403 unless actions are enabled.
 _ACTION_PATHS = frozenset({"/vocabulary/reload", "/vocabulary/generate", "/reconcile/simulate"})
+
+
+def _is_loopback_host(host: str) -> bool:
+    """Return whether ``host`` names a local loopback bind address."""
+    normalized = host.strip().lower()
+    if normalized in _LOCALHOST_NAMES:
+        return True
+    try:
+        return ip_address(normalized).is_loopback
+    except ValueError:
+        return False
 
 
 class _IntrospectionHTTPServer(ThreadingHTTPServer):
@@ -69,6 +83,7 @@ class _IntrospectionHTTPServer(ThreadingHTTPServer):
         simulate: SimulateUtterance,
         token: str | None,
         actions_enabled: bool,
+        max_post_bytes: int,
     ) -> None:
         super().__init__(server_address, handler)
         self.describe_status = describe_status
@@ -81,6 +96,7 @@ class _IntrospectionHTTPServer(ThreadingHTTPServer):
         self.simulate = simulate
         self.token = token
         self.actions_enabled = actions_enabled
+        self.max_post_bytes = max_post_bytes
 
 
 class _IntrospectionRequestHandler(BaseHTTPRequestHandler):
@@ -194,7 +210,18 @@ class _IntrospectionRequestHandler(BaseHTTPRequestHandler):
         Returns:
             The ``text`` string, or ``None`` after a 400 response (invalid JSON or no text).
         """
-        content_length = int(self.headers.get("Content-Length", 0))
+        content_length_header = self.headers.get("Content-Length", "0")
+        try:
+            content_length = int(content_length_header)
+        except ValueError:
+            self._send_json(HTTPStatus.BAD_REQUEST, {"error": "invalid Content-Length"})
+            return None
+        if content_length < 0:
+            self._send_json(HTTPStatus.BAD_REQUEST, {"error": "invalid Content-Length"})
+            return None
+        if content_length > self._api.max_post_bytes:
+            self._send_json(HTTPStatus.REQUEST_ENTITY_TOO_LARGE, {"error": "payload too large"})
+            return None
         raw_body = self.rfile.read(content_length) if content_length else b""
         try:
             payload = json.loads(raw_body or b"{}")
@@ -228,6 +255,7 @@ class IntrospectionServer:
         port: int = DEFAULT_API_PORT,
         token: str | None = None,
         actions_enabled: bool = False,
+        max_post_bytes: int = DEFAULT_MAX_POST_BYTES,
     ) -> None:
         """Configure (but do not start) the introspection server.
 
@@ -245,6 +273,7 @@ class IntrospectionServer:
             token: Optional bearer token required on every request.
             actions_enabled: Whether the mutating actions are enabled (off by default;
                 ADR-0010 keeps the API non-destructive unless explicitly opted in).
+            max_post_bytes: Maximum accepted POST body size in bytes.
         """
         self._describe_status = describe_status
         self._dry_run = dry_run
@@ -258,6 +287,7 @@ class IntrospectionServer:
         self._port = port
         self._token = token or None
         self._actions_enabled = actions_enabled
+        self._max_post_bytes = max_post_bytes
         self._server: _IntrospectionHTTPServer | None = None
         self._thread: threading.Thread | None = None
 
@@ -267,6 +297,11 @@ class IntrospectionServer:
         Returns:
             The bound ``(host, port)``.
         """
+        if not _is_loopback_host(self._host):
+            raise ValueError(
+                "Introspection API refuses non-local bind host "
+                f"{self._host!r}; use 127.0.0.1/localhost."
+            )
         server = _IntrospectionHTTPServer(
             (self._host, self._port),
             _IntrospectionRequestHandler,
@@ -280,6 +315,7 @@ class IntrospectionServer:
             self._simulate,
             self._token,
             self._actions_enabled,
+            self._max_post_bytes,
         )
         self._server = server
         self._thread = threading.Thread(

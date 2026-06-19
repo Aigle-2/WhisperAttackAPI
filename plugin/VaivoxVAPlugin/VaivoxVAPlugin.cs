@@ -96,13 +96,31 @@ namespace VaivoxServerCommand
         public static void VA_Exit1(dynamic vaProxy)
         {
             _isRunning = false;
-            _listener.Stop();
-
-            using (TcpClient client = new TcpClient(Server, ControlPort))
-            using (NetworkStream stream = client.GetStream())
+            try
             {
-                byte[] data = Encoding.ASCII.GetBytes("shutdown");
-                stream.Write(data, 0, data.Length);
+                if (_listener != null)
+                {
+                    _listener.Stop();
+                    _listener = null;
+                }
+            }
+            catch (ObjectDisposedException)
+            {
+                // Listener is already closed; shutdown is intentionally best-effort.
+            }
+
+            try
+            {
+                using (TcpClient client = new TcpClient(Server, ControlPort))
+                using (NetworkStream stream = client.GetStream())
+                {
+                    byte[] data = Encoding.ASCII.GetBytes("shutdown");
+                    stream.Write(data, 0, data.Length);
+                }
+            }
+            catch (Exception ex)
+            {
+                vaProxy.WriteToLog($"VAIVOX server was not available during shutdown: {ex.Message}", "grey");
             }
         }
 
@@ -119,7 +137,18 @@ namespace VaivoxServerCommand
 
                 while (_isRunning)
                 {
-                    await HandleVaivoxCommand(vaProxy, await _listener.AcceptTcpClientAsync());
+                    try
+                    {
+                        await HandleVaivoxCommand(vaProxy, await _listener.AcceptTcpClientAsync());
+                    }
+                    catch (ObjectDisposedException) when (!_isRunning)
+                    {
+                        break;
+                    }
+                    catch (SocketException) when (!_isRunning)
+                    {
+                        break;
+                    }
                 }
             }
             catch (Exception ex)

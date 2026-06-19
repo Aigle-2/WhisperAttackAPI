@@ -49,29 +49,36 @@ class SoundDeviceRecorder:
         import sounddevice as sd
         import soundfile as sf
 
-        self._wave_file = sf.SoundFile(
-            self._audio_file,
-            mode="w",
-            samplerate=self._sample_rate,
-            channels=1,
-            subtype="FLOAT",
-        )
+        try:
+            self._wave_file = sf.SoundFile(
+                self._audio_file,
+                mode="w",
+                samplerate=self._sample_rate,
+                channels=1,
+                subtype="FLOAT",
+            )
 
-        def audio_callback(
-            indata: object, _frames: int, _time_info: object, status: object
-        ) -> None:
-            if status:
-                _LOGGER.info("Audio Status: %s", status)
-            self._wave_file.write(indata)
+            def audio_callback(
+                indata: object, _frames: int, _time_info: object, status: object
+            ) -> None:
+                if status:
+                    _LOGGER.info("Audio Status: %s", status)
+                if self._wave_file is not None:
+                    self._wave_file.write(indata)
 
-        self._stream = sd.InputStream(
-            samplerate=self._sample_rate,
-            channels=1,
-            dtype="float32",
-            callback=audio_callback,
-        )
-        self._stream.start()
-        self._recording = True
+            self._stream = sd.InputStream(
+                samplerate=self._sample_rate,
+                channels=1,
+                dtype="float32",
+                callback=audio_callback,
+            )
+            self._stream.start()
+            self._recording = True
+        except Exception:
+            self._recording = False
+            self._close_stream()
+            self._close_wave_file()
+            raise
 
     def stop(self) -> str | None:
         """Stop streaming, close the file, and return its path if it was written.
@@ -79,12 +86,15 @@ class SoundDeviceRecorder:
         Returns:
             The recorded WAV path, or ``None`` if the file is missing afterwards.
         """
-        self._stream.stop()
-        self._stream.close()
-        self._stream = None
-        self._wave_file.close()
-        self._wave_file = None
+        had_recording_state = (
+            self._recording or self._stream is not None or self._wave_file is not None
+        )
+        self._close_stream()
+        self._close_wave_file()
         self._recording = False
+        if not had_recording_state:
+            _LOGGER.debug("Recorder stop requested while no recording was active.")
+            return None
         time.sleep(0.01)
         _LOGGER.debug("Checking if file exists: %s", self._audio_file)
         if os.path.exists(self._audio_file):
@@ -93,3 +103,29 @@ class SoundDeviceRecorder:
             return self._audio_file
         _LOGGER.error("Audio file '%s' not found", self._audio_file)
         return None
+
+    def _close_stream(self) -> None:
+        """Best-effort close for the sounddevice stream."""
+        stream = self._stream
+        self._stream = None
+        if stream is None:
+            return
+        try:
+            stream.stop()
+        except Exception as error:
+            _LOGGER.warning("Failed to stop audio stream cleanly: %s", error)
+        try:
+            stream.close()
+        except Exception as error:
+            _LOGGER.warning("Failed to close audio stream cleanly: %s", error)
+
+    def _close_wave_file(self) -> None:
+        """Best-effort close for the wave file."""
+        wave_file = self._wave_file
+        self._wave_file = None
+        if wave_file is None:
+            return
+        try:
+            wave_file.close()
+        except Exception as error:
+            _LOGGER.warning("Failed to close audio file cleanly: %s", error)

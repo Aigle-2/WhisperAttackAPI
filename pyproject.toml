@@ -18,7 +18,7 @@ build-backend = "hatchling.build"
 # ---------------------------------------------------------------------------
 [project]
 name = "vaivox"
-version = "0.1.0"
+version = "1.2.2"
 description = "Turns push-to-talk speech into DCS radio commands via VoiceAttack 2 + VAICOM Community."
 readme = "README.md"
 # Single supported Python: 3.12. Managed and pinned by uv (.python-version + uv.lock).

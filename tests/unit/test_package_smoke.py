@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import importlib
-import importlib.util
 import pkgutil
 import sys
+import tomllib
 from pathlib import Path
 
 import vaivox
@@ -29,22 +29,42 @@ def test_all_vaivox_modules_import() -> None:
         assert expected in imported, f"missing scaffolded module: {expected}"
 
 
-def test_bootstrap_shim_exposes_tools_generator() -> None:
-    """The bootstrap shim must put the repo root on sys.path so ``tools`` imports.
-
-    The VAICOM vocabulary generator (ADR-0005) lives in ``tools/`` at the repo root, which
-    the ``vaivox`` console script does not add to ``sys.path``. A regression here resurfaces
-    as the background ``RefreshVocabulary`` adapter reporting "generator unavailable" from a
-    source run (the ``from tools import ...`` import fails).
-    """
+def test_bootstrap_shim_exposes_src_package_only() -> None:
+    """The direct-source bootstrap shim should expose ``src`` without needing ``tools``."""
     from vaivox import main
 
-    repo_root = str(Path(main.__file__).resolve().parents[2])
+    src_root = str(Path(main.__file__).resolve().parents[1])
     saved = list(sys.path)
     try:
-        sys.path[:] = [path for path in sys.path if path != repo_root]
+        sys.path[:] = [path for path in sys.path if path != src_root]
         main._ensure_src_on_path()
-        assert repo_root in sys.path
-        assert importlib.util.find_spec("tools") is not None
+        assert src_root in sys.path
     finally:
         sys.path[:] = saved
+
+
+def test_vaicom_generator_is_packaged_with_vaivox() -> None:
+    """The runtime generator must import from ``vaivox`` so frozen builds can refresh."""
+    module = importlib.import_module("vaivox.infrastructure.vocabulary.vaicom_generator_core")
+
+    assert module.KEYTERMS_FILE == "vaicom_keyterms.txt"
+
+
+def test_release_build_script_packages_voiceattack_assets() -> None:
+    """The release manifest must include the VoiceAttack profile and plugin DLL."""
+    repo_root = Path(__file__).resolve().parents[2]
+    build_script = (repo_root / "build_exe.ps1").read_text(encoding="utf-8")
+
+    assert (repo_root / "VAIVOX - VA Profile.vap").is_file()
+    assert (repo_root / "plugin" / "VaivoxVAPlugin" / "VaivoxVAPlugin.csproj").is_file()
+    assert "VoiceAttack\\VAIVOX - VA Profile.vap" in build_script
+    assert "VoiceAttack\\Apps\\VAIVOX\\VaivoxVAPlugin.dll" in build_script
+    assert '[string]$Version = "1.2.2"' in build_script
+
+
+def test_project_version_matches_runtime_identity() -> None:
+    """The package metadata and runtime identity share one canonical version."""
+    repo_root = Path(__file__).resolve().parents[2]
+    pyproject = tomllib.loads((repo_root / "pyproject.toml").read_text(encoding="utf-8"))
+
+    assert pyproject["project"]["version"] == vaivox.__version__ == "1.2.2"

@@ -7,15 +7,14 @@ maintainer's manual step (the parse/transform/discovery logic is what is tested 
 
 from __future__ import annotations
 
-import tools.generate_vaicom_keyterms as generator
-from tools.generate_vaicom_keyterms import (
+import vaivox.infrastructure.vocabulary.vaicom_generator_core as generator
+from vaivox.infrastructure.vocabulary.phrase_index import load_phrase_index
+from vaivox.infrastructure.vocabulary.vaicom_generator_core import (
     discover_vaicom_root,
     generate_keyterms,
     generate_phrase_index,
     write_phrase_index,
 )
-
-from vaivox.infrastructure.vocabulary.phrase_index import load_phrase_index
 
 
 def _make_vaicom_root(tmp_path):

@@ -85,12 +85,14 @@ C:\Users\yourname\Desktop\VAIVOX
 1. Double-click `VAIVOX.exe`.
 1. Create a shortcut to `VAIVOX.exe` if desired.
 
-Keep the folder structure intact. Do not move only the `.exe` file elsewhere; it must stay beside `_internal`, `settings.cfg`, `fuzzy_words.txt`, `word_mappings.txt`, and the icon files.
+Keep the folder structure intact. Do not move only the `.exe` file elsewhere; it must stay
+beside `_internal`, `settings.cfg`, `fuzzy_words.txt`, `word_mappings.txt`, the icon files,
+and the `VoiceAttack\` release assets.
 
 The release folder is expected to look like this:
 
 ```console
-VAIVOX v1.2.2-api.1\
+VAIVOX v1.2.2\
   _internal\
   VAIVOX.exe
   settings.cfg
@@ -101,12 +103,19 @@ VAIVOX v1.2.2-api.1\
   Set STT API Key.cmd
   Set ElevenLabs API Key.cmd
   README_FIRST.txt
+  VoiceAttack\
+    VAIVOX - VA Profile.vap
+    Apps\
+      VAIVOX\
+        VaivoxVAPlugin.dll
 ```
 
 The VoiceAttack plugin connects to the VAIVOX server on `127.0.0.1:65432`. Because VAIVOX
 ships a freshly-GUID'd plugin (separate from upstream WhisperAttack), re-point each
 VoiceAttack command's plugin function to the **VAIVOX** plugin — see
 [plugin/VaivoxVAPlugin/README.md](plugin/VaivoxVAPlugin/README.md).
+
+For the local socket/API/telemetry posture, see [docs/SECURITY_MODEL.md](docs/SECURITY_MODEL.md).
 
 ---
 
@@ -212,10 +221,10 @@ Spelled aviation codes are normalized after transcription, so the keyterm list d
 need to include every code. For example, `U L M B`, `U-L-M-B`, or `E.S.N.J` are compacted
 to `ULMB` and `ESNJ` before text is sent to VoiceAttack.
 
-> VAIVOX now runs this generation **automatically in the background** on first launch and
+> VAIVOX runs this generation **automatically in the background** on first launch and
 > whenever it detects your VAICOM install changed, hot-applying the new phrase index
-> without a restart (ADR-0005/0009). The manual command above stays available as a
-> fallback; an in-app "Refresh VAICOM vocabulary" button is still planned.
+> without a restart (ADR-0005/0009). The generator is packaged with the frozen app; the
+> manual command above stays available as a fallback.
 
 ### Optional STT providers
 
@@ -286,18 +295,21 @@ build_api_only.cmd
 The executable is created at:
 
 ```console
-dist\release\VAIVOX v1.2.2-api.1\VAIVOX.exe
+dist\release\VAIVOX v1.2.2\VAIVOX.exe
 ```
 
 The distributable ZIP is created beside it:
 
 ```console
-dist\release\VAIVOX v1.2.2-api.1.zip
+dist\release\VAIVOX v1.2.2.zip
 ```
 
 Any intermediate PyInstaller output is kept under `build`; only `dist\release` is meant to be published.
 
-The release folder follows the same flat layout: the exe, `_internal`, `settings.cfg`, `fuzzy_words.txt`, `word_mappings.txt`, icons, and a small API-key helper are all at the top level.
+The release folder contains the exe, `_internal`, `settings.cfg`, `fuzzy_words.txt`,
+`word_mappings.txt`, icons, API-key helpers, `README_FIRST.txt`, plus the VoiceAttack
+profile and plugin under `VoiceAttack\`. The maintainer checklist is
+[docs/RELEASE.md](docs/RELEASE.md).
 
 To build the larger offline-capable executable that includes the local `faster_whisper` backend, double-click:
 
@@ -365,7 +377,9 @@ The Whisper server will output logs to the `C:\Users\username\AppData\Local\VAIV
 
 ## Configuring VoiceAttack
 
-Pre-configured Voice Attack Profile is added to the release for your convenience. It is recommended to read through the steps below to understand how whisper injections actually work!
+The release includes `VoiceAttack\VAIVOX - VA Profile.vap` and
+`VoiceAttack\Apps\VAIVOX\VaivoxVAPlugin.dll`. It is recommended to read through the steps
+below to understand how the push-to-talk injection works.
 
 ### 1. Disable all speech recognition within VoiceAttack
 
@@ -381,7 +395,9 @@ Go to **Options → General → Enable Plugin Support**.
 
 ### 3. Place Plugin in VoiceAttack Apps folder
 
-Build the VAIVOX plugin (see [plugin/VaivoxVAPlugin/README.md](plugin/VaivoxVAPlugin/README.md)), then locate the `VAIVOX` plugin folder and copy the entire folder
+From the release ZIP, copy the entire `VoiceAttack\Apps\VAIVOX` folder into your
+VoiceAttack `Apps` folder. Maintainers can rebuild the plugin with
+`dotnet build plugin/VaivoxVAPlugin/VaivoxVAPlugin.csproj -c Release`.
 
 ![image](https://github.com/user-attachments/assets/dcd75f43-b957-4551-86bf-650468586834)
 

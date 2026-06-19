@@ -8,7 +8,8 @@ literals so the module imports without Tk installed (the widget is injected).
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+import threading
+from typing import TYPE_CHECKING, Literal
 
 from vaivox.application.ports import StatusLevel
 from vaivox.infrastructure.ui.theme import (
@@ -25,9 +26,9 @@ if TYPE_CHECKING:
     from ttkbootstrap.scrolled import ScrolledText
 
 # Tk widget state/index constants (string-valued; avoids importing tkinter here).
-_STATE_NORMAL = "normal"
-_STATE_DISABLED = "disabled"
-_INDEX_END = "end"
+_STATE_NORMAL: Literal["normal"] = "normal"
+_STATE_DISABLED: Literal["disabled"] = "disabled"
+_INDEX_END: Literal["end"] = "end"
 
 _LEVEL_TAGS: dict[StatusLevel, str] = {
     StatusLevel.INFO: TAG_BLACK,
@@ -50,6 +51,7 @@ class TkStatusWriter:
             text_area: The scrolled text widget to write into.
         """
         self.text_area = text_area
+        self._ui_thread_id = threading.get_ident()
         style = theme_config[theme]
         for tag in (TAG_BLACK, TAG_BLUE, TAG_GREEN, TAG_GREY, TAG_ORANGE, TAG_RED):
             self.text_area.tag_configure(tag, foreground=style[tag])
@@ -60,6 +62,13 @@ class TkStatusWriter:
 
     def write(self, text: str, tag: str = TAG_BLACK) -> None:
         """Append a line to the text area, keeping it read-only outside the write."""
+        if threading.get_ident() != self._ui_thread_id:
+            self.text_area.after(0, self._write_on_ui_thread, text, tag)
+            return
+        self._write_on_ui_thread(text, tag)
+
+    def _write_on_ui_thread(self, text: str, tag: str) -> None:
+        """Append a line to the text area from the Tk thread."""
         self.text_area.text.configure(state=_STATE_NORMAL)
         self.text_area.insert(_INDEX_END, text + "\n", tag)
         self.text_area.see(_INDEX_END)

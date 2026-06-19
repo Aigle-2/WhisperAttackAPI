@@ -1,8 +1,8 @@
 """Load locally-generated VAICOM/DCS command vocabulary from disk.
 
 VAICOM-derived vocabulary is **not** shipped with VAIVOX (ADR-0005): redistributing
-data derived from a VAICOM install is a licensing grey zone. Instead the generator
-(``tools/generate_vaicom_keyterms.py``) writes ``vaicom_keyterms.txt`` into the
+data derived from a VAICOM install is a licensing grey zone. Instead the packaged
+generator writes ``vaicom_keyterms.txt`` into the
 per-user VAIVOX data directory, and this loader reads it from there. Until that file
 exists VAIVOX runs on the generic, non-VAICOM seed
 (:data:`vaivox.domain.vocabulary.keyterms.DEFAULT_DCS_KEYTERMS` + the phonetic

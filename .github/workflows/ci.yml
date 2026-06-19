@@ -42,3 +42,36 @@ jobs:
 
       - name: Pytest (+ coverage)
         run: uv run pytest --cov=vaivox --cov-report=term-missing
+
+  plugin-build:
+    name: Build VoiceAttack plugin
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build plugin
+        run: dotnet build plugin/VaivoxVAPlugin/VaivoxVAPlugin.csproj -c Release
+
+      - name: Audit NuGet packages
+        run: dotnet list plugin/VaivoxVAPlugin/VaivoxVAPlugin.csproj package --vulnerable --include-transitive
+
+  dependency-audit:
+    name: Python dependency audit
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+
+      - name: Export audited dependencies
+        run: >
+          uv export --locked --no-emit-project --extra app --extra mcp --group dev --group build
+          --format requirements-txt --output-file requirements-audit.txt
+
+      - name: Audit Python packages
+        run: uvx pip-audit -r requirements-audit.txt

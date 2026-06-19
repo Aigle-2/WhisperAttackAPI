@@ -219,7 +219,7 @@ class VocabularyGenerator(Protocol):
 
     VAICOM-derived data is never shipped (ADR-0005); it is generated locally from the
     user's own install on first run / when stale. The concrete adapter wraps
-    ``tools/generate_vaicom_keyterms.py`` (auto-discovery + parsing); the
+    ``vaivox.infrastructure.vocabulary.vaicom_generator_core`` (auto-discovery + parsing); the
     :class:`~vaivox.application.refresh_vocabulary.RefreshVocabulary` use case drives it
     on a background thread and hot-applies the regenerated phrase index (ADR-0009).
     """

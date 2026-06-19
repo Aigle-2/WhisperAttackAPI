@@ -10,6 +10,7 @@ from __future__ import annotations
 import logging
 import socket
 from collections.abc import Callable
+from ipaddress import ip_address
 from threading import Event
 
 from vaivox.application.ports import StatusLevel, StatusReporter
@@ -18,6 +19,18 @@ _LOGGER = logging.getLogger(__name__)
 
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 65432
+_LOCALHOST_NAMES = {"localhost"}
+
+
+def _is_loopback_host(host: str) -> bool:
+    """Return whether ``host`` names a local loopback bind address."""
+    normalized = host.strip().lower()
+    if normalized in _LOCALHOST_NAMES:
+        return True
+    try:
+        return ip_address(normalized).is_loopback
+    except ValueError:
+        return False
 
 
 class ControlSocketServer:
@@ -77,6 +90,14 @@ class ControlSocketServer:
     def run(self) -> None:
         """Run the startup hook, then accept and dispatch commands until shutdown."""
         if self._on_startup is not None and not self._on_startup():
+            return
+        if not _is_loopback_host(self._host):
+            message = (
+                "Refusing to bind control socket to non-local host "
+                f"{self._host!r}; use 127.0.0.1/localhost."
+            )
+            _LOGGER.error(message)
+            self._reporter.report(message, StatusLevel.ERROR)
             return
 
         _LOGGER.info("Server started and listening on %s:%s", self._host, self._port)

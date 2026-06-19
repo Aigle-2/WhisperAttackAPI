@@ -30,6 +30,8 @@ def format_for_dcs_kneeboard(text: str, line_length: int) -> str:
     """
     from wcwidth import wcswidth
 
+    line_length = max(1, line_length)
+
     words = re.findall(r"\S+|\n", text)
 
     lines: list[str] = []
@@ -37,15 +39,32 @@ def format_for_dcs_kneeboard(text: str, line_length: int) -> str:
     current_len = 0
 
     for word in words:
-        word_len = wcswidth(word)
-        # If adding the next word exceeds the line length, flush the current line.
-        if current_len + word_len + (len(current_words)) > line_length:
-            lines.append(justify_line(current_words, line_length))
-            current_words = [word]
-            current_len = word_len
-        else:
-            current_words.append(word)
-            current_len += word_len
+        if word == "\n":
+            if current_words:
+                lines.append(" ".join(current_words).ljust(line_length))
+                current_words = []
+                current_len = 0
+            else:
+                lines.append(" " * line_length)
+            continue
+
+        for segment in _split_long_word(word, line_length):
+            word_len = wcswidth(segment)
+            # If adding the next word exceeds the line length, flush the current line.
+            if current_words and current_len + word_len + len(current_words) > line_length:
+                lines.append(justify_line(current_words, line_length))
+                current_words = []
+                current_len = 0
+
+            if word_len >= line_length:
+                if current_words:
+                    lines.append(justify_line(current_words, line_length))
+                    current_words = []
+                    current_len = 0
+                lines.append(segment.ljust(line_length))
+            else:
+                current_words.append(segment)
+                current_len += word_len
 
     # Justify the last line (left-justified).
     if current_words:
@@ -55,6 +74,26 @@ def format_for_dcs_kneeboard(text: str, line_length: int) -> str:
     lines.append(" " * line_length)
 
     return "\n".join(lines)
+
+
+def _split_long_word(word: str, line_length: int) -> list[str]:
+    """Split an over-wide word into chunks that fit the kneeboard line width."""
+    from wcwidth import wcwidth
+
+    chunks: list[str] = []
+    current = ""
+    current_width = 0
+    for character in word:
+        character_width = max(wcwidth(character), 0)
+        if current and current_width + character_width > line_length:
+            chunks.append(current)
+            current = ""
+            current_width = 0
+        current += character
+        current_width += character_width
+    if current:
+        chunks.append(current)
+    return chunks or [word]
 
 
 def justify_line(words: list[str], line_length: int) -> str:
@@ -69,12 +108,17 @@ def justify_line(words: list[str], line_length: int) -> str:
     """
     from wcwidth import wcswidth
 
+    if not words:
+        return " " * line_length
+
     if len(words) == 1:
         # If there's only one word, left-justify it.
         return words[0].ljust(line_length)
 
     total_words_length = sum(wcswidth(word) for word in words)
     total_spaces = line_length - total_words_length
+    if total_spaces < len(words) - 1:
+        return " ".join(words).ljust(line_length)
     gaps = len(words) - 1
     spaces_between_words = [total_spaces // gaps] * gaps
 

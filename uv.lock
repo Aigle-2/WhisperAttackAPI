@@ -2232,7 +2232,7 @@ wheels = [
 
 [[package]]
 name = "vaivox"
-version = "0.1.0"
+version = "1.2.2"
 source = { editable = "." }
 dependencies = [
     { name = "rapidfuzz", marker = "sys_platform == 'linux' or sys_platform == 'win32'" },

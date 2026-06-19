@@ -54,8 +54,8 @@ build_api_only.cmd
 This creates:
 
 ```console
-dist\release\VAIVOX v1.2.2-api.1\VAIVOX.exe
-dist\release\VAIVOX v1.2.2-api.1.zip
+dist\release\VAIVOX v1.2.2\VAIVOX.exe
+dist\release\VAIVOX v1.2.2.zip
 ```
 
 For the larger offline-capable build with local `faster_whisper` support, double-click:
@@ -68,7 +68,8 @@ Both wrappers call [`build_exe.ps1`](build_exe.ps1), which uses uv end to end:
 `uv sync --frozen --extra app|full --group build` to install the locked deps + the
 PyInstaller toolchain, then `uv run pyinstaller … src\vaivox\main.py`. The build
 bundles assets (`settings.cfg`, `fuzzy_words.txt`, `word_mappings.txt`, the icons, the
-API-key `.cmd` helpers, `README_FIRST.txt`) and verifies them, then zips the release.
+API-key `.cmd` helpers, `README_FIRST.txt`), the VoiceAttack profile, and the plugin DLL,
+then verifies and zips the release.
 
 ### Manual PyInstaller flow (debugging the build)
 

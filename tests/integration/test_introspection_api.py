@@ -165,6 +165,10 @@ def _get(host, port, path, token=None):
 
 def _post(host, port, path, body, token=None):
     data = json.dumps(body).encode("utf-8")
+    return _post_bytes(host, port, path, data, token=token)
+
+
+def _post_bytes(host, port, path, data, token=None):
     request = urllib.request.Request(f"http://{host}:{port}{path}", data=data, method="POST")
     if token:
         request.add_header("Authorization", f"Bearer {token}")
@@ -224,6 +228,36 @@ def test_dry_run_without_text_is_bad_request(server):
         _post(host, port, "/reconcile/dry-run", {"not_text": 1})
 
     assert exc_info.value.code == 400
+
+
+def test_dry_run_rejects_invalid_json_body(server):
+    host, port = server
+
+    with pytest.raises(urllib.error.HTTPError) as exc_info:
+        _post_bytes(host, port, "/reconcile/dry-run", b"{not-json")
+
+    assert exc_info.value.code == 400
+
+
+def test_dry_run_rejects_payload_over_limit():
+    instance = _make_server()
+    instance._max_post_bytes = 8
+    host, port = instance.start()
+    try:
+        with pytest.raises(urllib.error.HTTPError) as exc_info:
+            _post_bytes(host, port, "/reconcile/dry-run", b'{"text": "too long"}')
+    finally:
+        instance.stop()
+
+    assert exc_info.value.code == 413
+
+
+def test_introspection_api_refuses_non_local_bind():
+    instance = _make_server()
+    instance._host = "0.0.0.0"
+
+    with pytest.raises(ValueError, match="non-local bind host"):
+        instance.start()
 
 
 def test_unknown_path_is_not_found(server):

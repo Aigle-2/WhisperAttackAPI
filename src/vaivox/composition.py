@@ -42,7 +42,6 @@ from vaivox.domain.reconciliation.snapper import (
 )
 from vaivox.infrastructure.api.introspection import IntrospectionServer
 from vaivox.infrastructure.audio.recorder import SoundDeviceRecorder
-from vaivox.infrastructure.config.identity import VAIVOX
 from vaivox.infrastructure.config.settings import VaivoxConfiguration
 from vaivox.infrastructure.inbound.control_server import ControlSocketServer
 from vaivox.infrastructure.kneeboard.sink import KneeboardSink
@@ -87,8 +86,8 @@ def build(
     reporter: StatusReporter,
     exit_event: Event,
     request_shutdown: Callable[[], None],
-    host: str = VAIVOX.control_host,
-    port: int = VAIVOX.control_port,
+    host: str | None = None,
+    port: int | None = None,
 ) -> WiredApp:
     """Construct the adapters, use cases, and control server.
 
@@ -97,12 +96,14 @@ def build(
         reporter: The user-facing status reporter (the UI writer in production).
         exit_event: Signalled to stop the control loop.
         request_shutdown: Callback that tears the application down.
-        host: Control-socket bind address.
-        port: Control-socket bind port.
+        host: Optional control-socket bind address override.
+        port: Optional control-socket bind port override.
 
     Returns:
         The wired application surface.
     """
+    control_host = host or config.get_control_host()
+    control_port = port or config.get_control_port()
     speech_to_text = create_stt_backend(config)
     recorder = SoundDeviceRecorder()
     command_sink = VoiceAttackCommandSink(
@@ -143,8 +144,8 @@ def build(
         exit_event=exit_event,
         reporter=reporter,
         on_startup=on_startup,
-        host=host,
-        port=port,
+        host=control_host,
+        port=control_port,
     )
 
     generator = VaicomVocabularyGenerator(config.app_data_location)
@@ -177,10 +178,11 @@ def build(
                 vocabulary_repository,
                 clock,
             ),
-            host=config.get_setting("api_host", VAIVOX.api_host),
-            port=config.get_int_setting("api_port", VAIVOX.api_port),
+            host=config.get_api_host(),
+            port=config.get_api_port(),
             token=config.get_setting("api_token", ""),
             actions_enabled=config.get_bool_setting("api_actions_enabled", False),
+            max_post_bytes=config.get_api_max_post_bytes(),
         )
 
     return WiredApp(

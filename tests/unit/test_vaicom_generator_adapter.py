@@ -27,10 +27,18 @@ def _write_outputs(data_dir: Path, mtime: float | None = None) -> None:
 
 def _make_install(root: Path, vap_mtime: float) -> Path:
     profiles = root / "Profiles"
+    export = root / "Export"
     profiles.mkdir(parents=True)
+    export.mkdir()
     vap = profiles / "VAICOMPRO.vap"
-    vap.write_text("<Profile/>", encoding="utf-8")
-    os.utime(vap, (vap_mtime, vap_mtime))
+    vap.write_text(
+        "<Command><CommandString>Texaco request rejoin</CommandString></Command>",
+        encoding="utf-8",
+    )
+    keywords = export / "keywords.txt"
+    keywords.write_text("[Texaco;request rejoin]\n", encoding="utf-8")
+    for source in (vap, keywords):
+        os.utime(source, (vap_mtime, vap_mtime))
     return root
 
 
@@ -78,3 +86,19 @@ def test_generate_reports_no_install_when_discovery_finds_nothing(tmp_path):
 
     assert result.generated is False
     assert result.reason == "no VAICOM install found"
+
+
+def test_generate_writes_keyterms_and_phrase_index_from_packaged_generator(tmp_path):
+    data_dir = tmp_path / "data"
+    install = _make_install(tmp_path / "install", vap_mtime=2000.0)
+    generator = VaicomVocabularyGenerator(
+        str(data_dir), saved_games=tmp_path / "sg", discover=lambda: install
+    )
+
+    result = generator.generate()
+
+    assert result.generated is True
+    assert (data_dir / KEYTERMS_FILE).is_file()
+    assert (data_dir / PHRASE_INDEX_FILE).is_file()
+    assert "Texaco" in (data_dir / KEYTERMS_FILE).read_text(encoding="utf-8")
+    assert "Texaco request rejoin" in (data_dir / PHRASE_INDEX_FILE).read_text(encoding="utf-8")

@@ -10,6 +10,7 @@ from __future__ import annotations
 import logging
 import os
 from collections.abc import Iterable, Mapping, Sequence
+from ipaddress import ip_address
 
 from vaivox.domain.vocabulary.keyterms import (
     DEFAULT_DCS_KEYTERMS,
@@ -23,10 +24,39 @@ from vaivox.infrastructure.config.identity import VAIVOX
 from vaivox.infrastructure.vocabulary.vaicom_keyterms import load_vaicom_keyterms
 
 _DEFAULT_THEME = "default"
+_DEFAULT_API_MAX_POST_BYTES = 16 * 1024
+_REDACTED = "<redacted>"
+_SENSITIVE_KEY_PARTS = ("api_key", "secret", "token", "password")
+_LOCALHOST_NAMES = {"localhost"}
 
 
 class ConfigurationError(Exception):
     """Raised when configuration files cannot be read or written."""
+
+
+def _redact_configuration(config: Mapping[str, str]) -> dict[str, str]:
+    """Return ``config`` with secret-looking values redacted for logs/API output."""
+    safe_config: dict[str, str] = {}
+    for key, value in config.items():
+        lower_key = key.lower()
+        if lower_key.endswith("_env"):
+            safe_config[key] = value
+        elif any(part in lower_key for part in _SENSITIVE_KEY_PARTS):
+            safe_config[key] = _REDACTED if value else ""
+        else:
+            safe_config[key] = value
+    return safe_config
+
+
+def _is_loopback_host(host: str) -> bool:
+    """Return whether ``host`` names a local loopback address."""
+    normalized = host.strip().lower()
+    if normalized in _LOCALHOST_NAMES:
+        return True
+    try:
+        return ip_address(normalized).is_loopback
+    except ValueError:
+        return False
 
 
 class VaivoxConfiguration:
@@ -96,7 +126,7 @@ class VaivoxConfiguration:
             logging.error("File not found: '%s'", settings_file)
             raise ConfigurationError("The configuration settings.cfg file could not be found")
 
-        logging.info("Loaded configuration: %s", config)
+        logging.info("Loaded configuration: %s", _redact_configuration(config))
         return config
 
     def load_word_mappings(self, location: str, default: bool = True) -> dict[str, str]:
@@ -217,21 +247,7 @@ class VaivoxConfiguration:
 
     def get_safe_configuration(self) -> dict[str, str]:
         """Return configuration values with sensitive local settings redacted."""
-        safe_config: dict[str, str] = {}
-        for key, value in self.config.items():
-            lower_key = key.lower()
-            if lower_key.endswith("_env"):
-                safe_config[key] = value
-            elif (
-                "api_key" in lower_key
-                or "secret" in lower_key
-                or "token" in lower_key
-                or "password" in lower_key
-            ):
-                safe_config[key] = "<redacted>"
-            else:
-                safe_config[key] = value
-        return safe_config
+        return _redact_configuration(self.config)
 
     def get_setting(self, key: str, default: str = "") -> str:
         """Return a raw string configuration setting."""
@@ -244,18 +260,43 @@ class VaivoxConfiguration:
             return default
         return value.strip().lower() in ("1", "true", "yes", "y", "on")
 
-    def get_int_setting(self, key: str, default: int) -> int:
-        """Return an integer configuration setting, falling back to ``default``."""
+    def get_int_setting(
+        self,
+        key: str,
+        default: int,
+        min_value: int | None = None,
+        max_value: int | None = None,
+    ) -> int:
+        """Return an integer configuration setting, bounded and fallback-safe."""
         value = self.config.get(key)
         if value is None:
             return default
         try:
-            return int(value)
+            parsed = int(value)
         except ValueError:
             logging.warning(
                 "Invalid integer value for '%s': %s. Using default %s.", key, value, default
             )
             return default
+        if min_value is not None and parsed < min_value:
+            logging.warning(
+                "Integer value for '%s' below minimum (%s < %s). Using default %s.",
+                key,
+                parsed,
+                min_value,
+                default,
+            )
+            return default
+        if max_value is not None and parsed > max_value:
+            logging.warning(
+                "Integer value for '%s' above maximum (%s > %s). Using default %s.",
+                key,
+                parsed,
+                max_value,
+                default,
+            )
+            return default
+        return parsed
 
     def get_float_setting(self, key: str, default: float) -> float:
         """Return a float configuration setting, falling back to ``default``."""
@@ -449,7 +490,7 @@ class VaivoxConfiguration:
 
     def get_stt_timeout_seconds(self) -> int:
         """Return the timeout for API-backed transcription requests."""
-        return self.get_int_setting("stt_timeout_seconds", 30)
+        return self.get_int_setting("stt_timeout_seconds", 30, min_value=1, max_value=600)
 
     def get_whisper_model(self) -> str:
         """Return the Whisper model to use for speech-to-text."""
@@ -482,14 +523,48 @@ class VaivoxConfiguration:
 
     def get_voiceattack_host(self) -> str:
         """Return the IP address of the machine running VoiceAttack (default localhost)."""
-        return self.config.get("voiceattack_host", VAIVOX.voiceattack_host)
+        host = self.config.get("voiceattack_host", VAIVOX.voiceattack_host)
+        if not _is_loopback_host(host):
+            logging.warning(
+                "voiceattack_host is set to a non-local address (%s). VAIVOX commands "
+                "are intended for localhost-only VoiceAttack plugin sockets.",
+                host,
+            )
+        return host
 
     def get_voiceattack_port(self) -> int:
         """Return the port to connect to for VoiceAttack (default from ProductIdentity)."""
-        voiceattack_port = self.config.get("voiceattack_port", VAIVOX.voiceattack_port)
-        return int(voiceattack_port)
+        return self.get_int_setting(
+            "voiceattack_port", VAIVOX.voiceattack_port, min_value=1, max_value=65535
+        )
+
+    def get_control_host(self) -> str:
+        """Return the localhost bind host for the inbound control socket."""
+        return self.config.get("control_host", VAIVOX.control_host)
+
+    def get_control_port(self) -> int:
+        """Return the inbound control socket port."""
+        return self.get_int_setting(
+            "control_port", VAIVOX.control_port, min_value=1, max_value=65535
+        )
+
+    def get_api_host(self) -> str:
+        """Return the localhost bind host for the introspection API."""
+        return self.config.get("api_host", VAIVOX.api_host)
+
+    def get_api_port(self) -> int:
+        """Return the introspection API port."""
+        return self.get_int_setting("api_port", VAIVOX.api_port, min_value=1, max_value=65535)
+
+    def get_api_max_post_bytes(self) -> int:
+        """Return the maximum accepted introspection POST body size."""
+        return self.get_int_setting(
+            "api_max_post_bytes",
+            _DEFAULT_API_MAX_POST_BYTES,
+            min_value=1024,
+            max_value=1024 * 1024,
+        )
 
     def get_text_line_length(self) -> int:
         """Return the line length for wrapping kneeboard note text (default 53)."""
-        line_length = self.config.get("text_line_length", 53)
-        return int(line_length)
+        return self.get_int_setting("text_line_length", 53, min_value=10, max_value=200)
