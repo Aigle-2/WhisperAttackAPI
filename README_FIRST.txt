@@ -6,7 +6,7 @@ Quick start
 
 1. Double-click "Set STT API Key.cmd" once and paste your provider API key.
 2. Double-click "Install VAIVOX VoiceAttack Plugin.exe" to copy the plugin into your
-   VoiceAttack or VoiceAttack 2 Apps folder automatically.
+   VoiceAttack 2 user Apps folder automatically.
 3. Import "VoiceAttack\VAIVOX - VA Profile.vap" in VoiceAttack.
 4. In the imported profile, make sure the "Start VAIVOX Recording" and
    "Stop VAIVOX Recording" plugin actions point to the VAIVOX plugin.
@@ -15,8 +15,13 @@ Quick start
 
 VoiceAttack / VAICOM connects to the VAIVOX server on 127.0.0.1:65432.
 
-If the plugin installer cannot detect your VoiceAttack folder, copy
-"VoiceAttack\Apps\VAIVOX" into "<VoiceAttack>\Apps\VAIVOX" manually.
+If the plugin installer cannot detect your VoiceAttack folder, it still installs to the
+VoiceAttack 2 user plugin folder:
+
+%APPDATA%\VoiceAttack2\Apps\VAIVOX
+
+For a manual install, copy the contents of "VoiceAttack\Apps\VAIVOX" into that folder and
+restart VoiceAttack.
 
 VAIVOX can be installed alongside upstream WhisperAttack because it uses its own
 VoiceAttack plugin GUID, Apps\VAIVOX folder, profile name, and %LOCALAPPDATA%\VAIVOX data

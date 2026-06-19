@@ -42,32 +42,23 @@ never breaks dispatch. The Python side reads it in
 
 ## Building
 
-The project file (`VaivoxVAPlugin.csproj`) targets **.NET Framework 4.8** (the runtime
-VoiceAttack 2 loads — verified against VoiceAttack 2.1.8, runtime `v4.0.30319`) and pins the
-assembly name to `VaivoxVAPlugin.dll` (VoiceAttack loads by file name). The plugin uses only
-the late-bound `dynamic vaProxy` API, so it builds **with or without** a local VoiceAttack
-install — `VoiceAttack.dll` is referenced when present and skipped otherwise (the build also
-stays reproducible in CI via the `Microsoft.NETFramework.ReferenceAssemblies` build-time
-package).
-
-Point the build at your VoiceAttack install with `-p:VoiceAttackDir=...` or the
-`VOICEATTACK_DIR` environment variable (Steam installs live under
-`<library>\steamapps\common\VoiceAttack 2`):
+The project file (`VaivoxVAPlugin.csproj`) targets **.NET 8.0**, matching the VoiceAttack 2
+plugin samples and help docs. The assembly name is pinned to `VaivoxVAPlugin.dll`
+(VoiceAttack loads by file name). The plugin uses only the late-bound `dynamic vaProxy`
+API, so it builds without referencing `VoiceAttack.dll`.
 
 ```powershell
-dotnet build plugin\VaivoxVAPlugin\VaivoxVAPlugin.csproj -c Release -p:VoiceAttackDir="E:\Jeux\steamapps\common\VoiceAttack 2"
-# ...or set it once and just `dotnet build ... -c Release`:
-setx VOICEATTACK_DIR "E:\Jeux\steamapps\common\VoiceAttack 2"
+dotnet build plugin\VaivoxVAPlugin\VaivoxVAPlugin.csproj -c Release
 ```
 
 Release users can run `Install VAIVOX VoiceAttack Plugin.exe` from the extracted VAIVOX
-release folder. It detects common VoiceAttack / VoiceAttack 2 installs and copies the
-bundled DLL into `<VoiceAttack>\Apps\VAIVOX\`.
+release folder. It copies the bundled DLL into `%APPDATA%\VoiceAttack2\Apps\VAIVOX\`,
+the VoiceAttack 2.1.8+ preferred third-party plugin folder, and also updates the detected
+VoiceAttack install's `<VoiceAttack>\Apps\VAIVOX\` folder when available.
 
 For manual development installs, copy
-`plugin\VaivoxVAPlugin\bin\Release\net48\VaivoxVAPlugin.dll` into
-`<VoiceAttack>\Apps\VAIVOX\` (create the folder; one DLL per app, mirroring the other
-`Apps\*` plugins). Restart VoiceAttack to load it.
+`plugin\VaivoxVAPlugin\bin\Release\net8.0\VaivoxVAPlugin.dll` into
+`%APPDATA%\VoiceAttack2\Apps\VAIVOX\` (create the folder). Restart VoiceAttack to load it.
 
 ## VoiceAttack setup
 

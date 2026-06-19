@@ -13,6 +13,7 @@ namespace VaivoxPluginInstaller
     {
         private const string AppFolderName = "VAIVOX";
         private const string PluginDllName = "VaivoxVAPlugin.dll";
+        private const string PluginDepsName = "VaivoxVAPlugin.deps.json";
         private const string VoiceAttackExeName = "VoiceAttack.exe";
         private const string VoiceAttackDllName = "VoiceAttack.dll";
 
@@ -37,14 +38,7 @@ namespace VaivoxPluginInstaller
 
                 List<InstallCandidate> candidates = DiscoverVoiceAttackInstalls(args);
                 string voiceAttackDir = SelectVoiceAttackInstall(candidates);
-                if (voiceAttackDir == null)
-                {
-                    return Fail(
-                        "No VoiceAttack installation was selected.",
-                        "You can also run this installer with the VoiceAttack folder path as an argument.");
-                }
-
-                if (!IsVoiceAttackInstall(voiceAttackDir))
+                if (voiceAttackDir != null && !IsVoiceAttackInstall(voiceAttackDir))
                 {
                     return Fail(
                         "The selected folder does not look like a VoiceAttack installation:",
@@ -53,17 +47,53 @@ namespace VaivoxPluginInstaller
 
                 WaitForVoiceAttackToClose();
 
-                string targetDir = Path.Combine(voiceAttackDir, "Apps", AppFolderName);
-                string targetPlugin = Path.Combine(targetDir, PluginDllName);
+                List<string> targetDirs = new List<string>
+                {
+                    GetAppDataPluginDir()
+                };
 
-                Directory.CreateDirectory(targetDir);
-                File.Copy(sourcePlugin, targetPlugin, overwrite: true);
+                if (voiceAttackDir != null)
+                {
+                    targetDirs.Add(Path.Combine(voiceAttackDir, "Apps", AppFolderName));
+                }
+                else
+                {
+                    Console.ForegroundColor = ConsoleColor.Yellow;
+                    Console.WriteLine("No VoiceAttack installation was selected.");
+                    Console.ResetColor();
+                    Console.WriteLine("Installing to the per-user VoiceAttack 2 Apps folder only.");
+                    Console.WriteLine();
+                }
+
+                CopyResult copyResult = CopyPluginToTargets(sourcePlugin, targetDirs);
+                if (copyResult.InstalledTargets.Count == 0)
+                {
+                    return Fail(
+                        "Could not copy the plugin DLL to any VoiceAttack plugin folder.",
+                        string.Join(Environment.NewLine, copyResult.Failures));
+                }
 
                 Console.ForegroundColor = ConsoleColor.Green;
                 Console.WriteLine("Installed VAIVOX VoiceAttack plugin successfully.");
                 Console.ResetColor();
-                Console.WriteLine("Target:");
-                Console.WriteLine("  " + targetPlugin);
+                Console.WriteLine("Targets:");
+                foreach (string target in copyResult.InstalledTargets)
+                {
+                    Console.WriteLine("  " + target);
+                }
+
+                if (copyResult.Failures.Count > 0)
+                {
+                    Console.WriteLine();
+                    Console.ForegroundColor = ConsoleColor.Yellow;
+                    Console.WriteLine("Some optional targets could not be updated:");
+                    Console.ResetColor();
+                    foreach (string failure in copyResult.Failures)
+                    {
+                        Console.WriteLine("  " + failure);
+                    }
+                }
+
                 Console.WriteLine();
                 Console.WriteLine("Restart VoiceAttack, then enable plugin support if it is not already enabled.");
                 PauseIfInteractive();
@@ -392,7 +422,7 @@ namespace VaivoxPluginInstaller
                 return null;
             }
 
-            Console.Write("Paste the VoiceAttack install folder, or press Enter to abort: ");
+            Console.Write("Paste the VoiceAttack install folder, or press Enter to install to the user plugin folder only: ");
             string input = Console.ReadLine();
             if (string.IsNullOrWhiteSpace(input))
             {
@@ -401,6 +431,72 @@ namespace VaivoxPluginInstaller
 
             string manualPath = NormalizeCandidatePath(input);
             return IsVoiceAttackInstall(manualPath) ? manualPath : null;
+        }
+
+        private static string GetAppDataPluginDir()
+        {
+            return Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+                "VoiceAttack2",
+                "Apps",
+                AppFolderName);
+        }
+
+        private static CopyResult CopyPluginToTargets(string sourcePlugin, IEnumerable<string> targetDirs)
+        {
+            CopyResult result = new CopyResult();
+
+            foreach (string targetDir in UniqueDirectories(targetDirs))
+            {
+                string targetPlugin = Path.Combine(targetDir, PluginDllName);
+                try
+                {
+                    Directory.CreateDirectory(targetDir);
+                    File.Copy(sourcePlugin, targetPlugin, overwrite: true);
+                    CopyOptionalSidecar(sourcePlugin, targetDir, PluginDepsName, result.Failures);
+                    result.InstalledTargets.Add(targetPlugin);
+                }
+                catch (UnauthorizedAccessException ex)
+                {
+                    result.Failures.Add(targetPlugin + " - access denied: " + ex.Message);
+                }
+                catch (IOException ex)
+                {
+                    result.Failures.Add(targetPlugin + " - copy failed: " + ex.Message);
+                }
+            }
+
+            return result;
+        }
+
+        private static void CopyOptionalSidecar(
+            string sourcePlugin, string targetDir, string sidecarName, List<string> failures)
+        {
+            string sourceDir = Path.GetDirectoryName(sourcePlugin);
+            if (sourceDir == null)
+            {
+                return;
+            }
+
+            string sourceSidecar = Path.Combine(sourceDir, sidecarName);
+            if (!File.Exists(sourceSidecar))
+            {
+                return;
+            }
+
+            string targetSidecar = Path.Combine(targetDir, sidecarName);
+            try
+            {
+                File.Copy(sourceSidecar, targetSidecar, overwrite: true);
+            }
+            catch (UnauthorizedAccessException ex)
+            {
+                failures.Add(targetSidecar + " - access denied: " + ex.Message);
+            }
+            catch (IOException ex)
+            {
+                failures.Add(targetSidecar + " - copy failed: " + ex.Message);
+            }
         }
 
         private static void WaitForVoiceAttackToClose()
@@ -509,6 +605,15 @@ namespace VaivoxPluginInstaller
                 .ToArray();
         }
 
+        private static string[] UniqueDirectories(IEnumerable<string> paths)
+        {
+            return paths
+                .Where(path => !string.IsNullOrWhiteSpace(path))
+                .Select(path => Path.GetFullPath(path.Trim().Trim('"')))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToArray();
+        }
+
         private static string NormalizeKey(string path)
         {
             return Path.GetFullPath(path).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
@@ -562,6 +667,19 @@ namespace VaivoxPluginInstaller
             public string Source { get; }
 
             public int Score { get; }
+        }
+
+        private sealed class CopyResult
+        {
+            public CopyResult()
+            {
+                InstalledTargets = new List<string>();
+                Failures = new List<string>();
+            }
+
+            public List<string> InstalledTargets { get; }
+
+            public List<string> Failures { get; }
         }
     }
 }

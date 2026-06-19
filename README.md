@@ -108,10 +108,12 @@ VAIVOX v<version>\
     Apps\
       VAIVOX\
         VaivoxVAPlugin.dll
+        VaivoxVAPlugin.deps.json
 ```
 
-Double-click `Install VAIVOX VoiceAttack Plugin.exe` to detect a local VoiceAttack or
-VoiceAttack 2 install and copy `VaivoxVAPlugin.dll` into `<VoiceAttack>\Apps\VAIVOX`.
+Double-click `Install VAIVOX VoiceAttack Plugin.exe` to copy `VaivoxVAPlugin.dll` into
+`%APPDATA%\VoiceAttack2\Apps\VAIVOX` and, when detected, the local VoiceAttack install's
+`<VoiceAttack>\Apps\VAIVOX` folder.
 
 The VoiceAttack plugin connects to the VAIVOX server on `127.0.0.1:65432`. Because VAIVOX
 ships a freshly-GUID'd plugin (separate from upstream WhisperAttack), re-point each
@@ -397,12 +399,12 @@ Go to **Options → General → Enable Plugin Support**.
 
 ### 3. Place Plugin in VoiceAttack Apps folder
 
-From the release ZIP, double-click `Install VAIVOX VoiceAttack Plugin.exe`. It detects
-common VoiceAttack / VoiceAttack 2 installs, including Program Files and Steam library
-locations, then copies the bundled plugin into `<VoiceAttack>\Apps\VAIVOX`.
+From the release ZIP, double-click `Install VAIVOX VoiceAttack Plugin.exe`. It copies the
+bundled plugin into `%APPDATA%\VoiceAttack2\Apps\VAIVOX` and also updates a detected
+VoiceAttack / VoiceAttack 2 install, including Program Files and Steam library locations.
 
-If automatic detection fails, copy the entire `VoiceAttack\Apps\VAIVOX` folder into your
-VoiceAttack `Apps` folder manually. Maintainers can rebuild the plugin with
+If automatic detection fails, copy the contents of `VoiceAttack\Apps\VAIVOX` into
+`%APPDATA%\VoiceAttack2\Apps\VAIVOX` manually. Maintainers can rebuild the plugin with
 `dotnet build plugin/VaivoxVAPlugin/VaivoxVAPlugin.csproj -c Release`.
 
 ![image](https://github.com/user-attachments/assets/dcd75f43-b957-4551-86bf-650468586834)

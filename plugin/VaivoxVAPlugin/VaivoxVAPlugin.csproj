@@ -3,56 +3,25 @@
   <!--
     VAIVOX VoiceAttack plugin (ADR-0002 / ADR-0006).
 
-    VoiceAttack 2 hosts the plugin as a .NET Framework 4.x class library and loads it by
-    file name, so the assembly name is pinned to VaivoxVAPlugin.dll. The plugin talks to
-    VoiceAttack only through the late-bound `dynamic vaProxy` API, so VoiceAttack.dll is not
-    a hard compile dependency — it is referenced when present (the conventional setup) and
-    skipped otherwise, which also lets the project build standalone for a syntax/CI check.
+    VoiceAttack 2 hosts plugins as .NET 8 class libraries and loads them by file name, so
+    the assembly name is pinned to VaivoxVAPlugin.dll. The plugin talks to VoiceAttack only
+    through the late-bound `dynamic vaProxy` API, so VoiceAttack.dll is not a compile-time
+    dependency.
 
     Build (on a machine with VoiceAttack installed):
         dotnet build -c Release
-        dotnet build -c Release -p:VoiceAttackDir="E:\Jeux\steamapps\common\VoiceAttack 2"  # non-default
-        setx VOICEATTACK_DIR "E:\Jeux\steamapps\common\VoiceAttack 2"   # ...or set it once
-    Then copy bin\Release\net48\VaivoxVAPlugin.dll into <VoiceAttack>\Apps\VAIVOX\.
-    Verified against VoiceAttack 2.1.8 (.NET Framework runtime v4.0.30319).
+    Then copy bin\Release\net8.0\VaivoxVAPlugin.dll into
+    %APPDATA%\VoiceAttack2\Apps\VAIVOX\.
   -->
 
   <PropertyGroup>
-    <TargetFramework>net48</TargetFramework>
+    <TargetFramework>net8.0</TargetFramework>
+    <OutputType>Library</OutputType>
     <AssemblyName>VaivoxVAPlugin</AssemblyName>
     <RootNamespace>VaivoxServerCommand</RootNamespace>
     <LangVersion>latest</LangVersion>
     <Nullable>disable</Nullable>
-    <AutoGenerateBindingRedirects>true</AutoGenerateBindingRedirects>
     <GenerateAssemblyInfo>true</GenerateAssemblyInfo>
-    <!-- VoiceAttack hosts the plugin in its own AppDomain, so the `dynamic` calls bind
-         against the Microsoft.CSharp it loads at runtime; the compile-time version conflict
-         between VoiceAttack.dll's newer Microsoft.CSharp and the net48 reference assemblies
-         is therefore irrelevant. Quiet that one benign resolution warning. -->
-    <MSBuildWarningsAsMessages>MSB3277</MSBuildWarningsAsMessages>
-    <!-- Resolve VoiceAttack's location in priority order: an explicit
-         -p:VoiceAttackDir=..., then the VOICEATTACK_DIR environment variable, then the
-         default install path. (Steam installs land somewhere like
-         <library>\steamapps\common\VoiceAttack 2, so set one of the first two.) -->
-    <VoiceAttackDir Condition="'$(VoiceAttackDir)' == ''">$(VOICEATTACK_DIR)</VoiceAttackDir>
-    <VoiceAttackDir Condition="'$(VoiceAttackDir)' == ''">C:\Program Files\VoiceAttack</VoiceAttackDir>
   </PropertyGroup>
-
-  <ItemGroup>
-    <!-- Build-time .NET Framework 4.8 reference assemblies so `dotnet build` works without a
-         full Visual Studio / targeting-pack install (keeps the build CI-reproducible). -->
-    <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies" Version="1.0.3" PrivateAssets="all" />
-    <!-- Required for the `dynamic vaProxy` calls on .NET Framework. -->
-    <Reference Include="Microsoft.CSharp" />
-  </ItemGroup>
-
-  <!-- The real VoiceAttack.dll, referenced only when the install is present. Not copied to
-       the output (VoiceAttack provides it at load time). -->
-  <ItemGroup Condition="Exists('$(VoiceAttackDir)\VoiceAttack.dll')">
-    <Reference Include="VoiceAttack">
-      <HintPath>$(VoiceAttackDir)\VoiceAttack.dll</HintPath>
-      <Private>false</Private>
-    </Reference>
-  </ItemGroup>
 
 </Project>

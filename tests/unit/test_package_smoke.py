@@ -63,6 +63,7 @@ def test_release_build_script_packages_voiceattack_assets() -> None:
     ).is_file()
     assert "VoiceAttack\\VAIVOX - VA Profile.vap" in build_script
     assert "VoiceAttack\\Apps\\VAIVOX\\VaivoxVAPlugin.dll" in build_script
+    assert "VoiceAttack\\Apps\\VAIVOX\\VaivoxVAPlugin.deps.json" in build_script
     assert "Install VAIVOX VoiceAttack Plugin.exe" in build_script
     assert "plugin\\VaivoxPluginInstaller\\VaivoxPluginInstaller.csproj" in build_script
     assert "function Get-ProjectVersion" in build_script

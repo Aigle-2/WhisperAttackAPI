@@ -93,7 +93,8 @@ $VoiceAttackReleasePath = Join-Path $ReleasePath "VoiceAttack"
 $VoiceAttackAppsPath = Join-Path $VoiceAttackReleasePath "Apps\VAIVOX"
 $VoiceAttackProfilePath = Join-Path $ProjectRoot "VAIVOX - VA Profile.vap"
 $PluginProjectPath = Join-Path $ProjectRoot "plugin\VaivoxVAPlugin\VaivoxVAPlugin.csproj"
-$PluginDllPath = Join-Path $ProjectRoot "plugin\VaivoxVAPlugin\bin\Release\net48\VaivoxVAPlugin.dll"
+$PluginDllPath = Join-Path $ProjectRoot "plugin\VaivoxVAPlugin\bin\Release\net8.0\VaivoxVAPlugin.dll"
+$PluginDepsPath = Join-Path $ProjectRoot "plugin\VaivoxVAPlugin\bin\Release\net8.0\VaivoxVAPlugin.deps.json"
 $PluginInstallerProjectPath = Join-Path $ProjectRoot "plugin\VaivoxPluginInstaller\VaivoxPluginInstaller.csproj"
 $PluginInstallerExeName = "Install VAIVOX VoiceAttack Plugin.exe"
 $PluginInstallerExePath = Join-Path $ProjectRoot "plugin\VaivoxPluginInstaller\bin\Release\net48\$PluginInstallerExeName"
@@ -169,6 +170,9 @@ if (!(Test-Path $VoiceAttackProfilePath)) {
 if (!(Test-Path $PluginDllPath)) {
     throw "Release package is missing built plugin DLL: $PluginDllPath"
 }
+if (!(Test-Path $PluginDepsPath)) {
+    throw "Release package is missing built plugin dependency file: $PluginDepsPath"
+}
 if (!(Test-Path $PluginInstallerExePath)) {
     throw "Release package is missing built plugin installer: $PluginInstallerExePath"
 }
@@ -176,6 +180,7 @@ if (!(Test-Path $PluginInstallerExePath)) {
 New-Item -ItemType Directory -Path $VoiceAttackAppsPath -Force | Out-Null
 Copy-Item -LiteralPath $VoiceAttackProfilePath -Destination $VoiceAttackReleasePath -Force
 Copy-Item -LiteralPath $PluginDllPath -Destination $VoiceAttackAppsPath -Force
+Copy-Item -LiteralPath $PluginDepsPath -Destination $VoiceAttackAppsPath -Force
 Copy-Item -LiteralPath $PluginInstallerExePath -Destination $ReleasePath -Force
 
 $ExpectedReleaseItems = @(
@@ -190,7 +195,8 @@ $ExpectedReleaseItems = @(
     "Set STT API Key.cmd",
     "README_FIRST.txt",
     "VoiceAttack\VAIVOX - VA Profile.vap",
-    "VoiceAttack\Apps\VAIVOX\VaivoxVAPlugin.dll"
+    "VoiceAttack\Apps\VAIVOX\VaivoxVAPlugin.dll",
+    "VoiceAttack\Apps\VAIVOX\VaivoxVAPlugin.deps.json"
 )
 
 foreach ($Item in $ExpectedReleaseItems) {

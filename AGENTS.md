@@ -109,7 +109,7 @@ but never anything that does I/O (sockets, files, mic, network, UI).
     **live usage** via Tier 1 attribution (`mark_used`/recency). Attribution is a surface-form
     Tier 1 proxy today (the pipeline still reads vocab from `config`, not the repository);
     near-miss capture into telemetry (`SnapSummary.near_misses`) already lands on every
-    abstain. The plugin builds from a committed `VaivoxVAPlugin.csproj` (net48).
+    abstain. The plugin builds from a committed `VaivoxVAPlugin.csproj` (net8.0).
     *Hardware-gated remainder (not CI-testable):* deploy the rebuilt DLL + re-point
     `VAIVOX - VA Profile.vap` (ADR-0002) + the DCS smoke; then the follow-ups it unblocks —
     the offline near-miss review report and Tier 2 counterfactual attribution (both want

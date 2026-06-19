@@ -77,8 +77,8 @@ separation from eroding.
    `infrastructure/config/identity.py`).
 2. [x] Generate a new plugin GUID; update the C# plugin + bundled profile. GUID
    `{ED0BA443-726F-4A9F-AF05-DB400F39A501}` is set in `plugin/VaivoxVAPlugin/VaivoxVAPlugin.cs`;
-   `VaivoxVAPlugin.csproj` (net48) builds `VaivoxVAPlugin.dll` and it has been built (0/0)
-   against real VoiceAttack 2.1.8 and deployed to `…\VoiceAttack 2\Apps\VAIVOX\`.
+   `VaivoxVAPlugin.csproj` (net8.0) builds `VaivoxVAPlugin.dll` for VoiceAttack 2 and the
+   installer deploys it to `%APPDATA%\VoiceAttack2\Apps\VAIVOX\`.
    *GUI-only remainder:* re-point the commands in `VAIVOX - VA Profile.vap` to the new plugin
    inside VoiceAttack — the `.vap` is a binary/encrypted export (no text GUID to swap), so it
    cannot be edited by hand (see `plugin/VaivoxVAPlugin/README.md` and `TODO.md` §1).

@@ -2,6 +2,9 @@
 
 Run the automated gates from the repository root:
 
+The VoiceAttack 2 plugin targets `net8.0`, so the `dotnet build
+plugin/VaivoxVAPlugin/...` step requires the .NET 8 SDK on `PATH`.
+
 ```powershell
 uv run ruff check .
 uv run ruff format --check .
@@ -37,6 +40,7 @@ word_mapping.jsonl
 README_FIRST.txt
 VoiceAttack\VAIVOX - VA Profile.vap
 VoiceAttack\Apps\VAIVOX\VaivoxVAPlugin.dll
+VoiceAttack\Apps\VAIVOX\VaivoxVAPlugin.deps.json
 ```
 
 Before publishing, run dependency audits:
@@ -52,6 +56,7 @@ Manual release checks that require the real user stack:
 
 - Import `VoiceAttack\VAIVOX - VA Profile.vap`.
 - Run `Install VAIVOX VoiceAttack Plugin.exe` and confirm it installs
+  `%APPDATA%\VoiceAttack2\Apps\VAIVOX\VaivoxVAPlugin.dll` and, when detected,
   `Apps\VAIVOX\VaivoxVAPlugin.dll` under the real VoiceAttack folder.
 - Confirm `Start VAIVOX Recording` and `Stop VAIVOX Recording` point to the VAIVOX
   plugin.
