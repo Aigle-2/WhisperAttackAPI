@@ -33,7 +33,7 @@ fonctionnel plus large que le durcissement d'audit traite dans ce passage.
 - [ ] Re-pointer et valider le profil VoiceAttack.
   - Importer `VAIVOX - VA Profile.vap`.
   - Re-pointer les actions "Execute an external plugin function" vers le plugin VAIVOX.
-  - Critere d'acceptation: `Start Whisper Recording` et `Stop Whisper Recording` pilotent
+  - Critere d'acceptation: `Start VAIVOX Recording` et `Stop VAIVOX Recording` pilotent
     bien le serveur depuis VoiceAttack.
 
 - [x] Aligner les versions produit.

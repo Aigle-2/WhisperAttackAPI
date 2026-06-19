@@ -6,6 +6,7 @@ import importlib
 import pkgutil
 import sys
 import tomllib
+import zlib
 from pathlib import Path
 
 import vaivox
@@ -60,6 +61,22 @@ def test_release_build_script_packages_voiceattack_assets() -> None:
     assert "VoiceAttack\\VAIVOX - VA Profile.vap" in build_script
     assert "VoiceAttack\\Apps\\VAIVOX\\VaivoxVAPlugin.dll" in build_script
     assert '[string]$Version = "1.2.2"' in build_script
+
+
+def test_voiceattack_profile_template_uses_vaivox_name() -> None:
+    """The bundled profile template must not import under the old product name."""
+    repo_root = Path(__file__).resolve().parents[2]
+    profile = repo_root / "VAIVOX - VA Profile.vap"
+    inflated = zlib.decompress(profile.read_bytes(), -15)
+    profile_name = b"VAIVOX for VAICOM"
+    old_profile_name = b"VAIVOX Radio!"
+
+    assert b"WhisperAttack" not in inflated
+    assert len(profile_name).to_bytes(4, "little") + profile_name in inflated
+    assert len(old_profile_name).to_bytes(4, "little") + old_profile_name not in inflated
+    assert b"Start VAIVOX Recording" in inflated
+    assert b"Stop VAIVOX Recording" in inflated
+    assert b"send_command.py" not in inflated
 
 
 def test_project_version_matches_runtime_identity() -> None:

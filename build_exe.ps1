@@ -115,7 +115,6 @@ $Assets = @(
     "vaivox_icon.png",
     "add_icon.png",
     "Set STT API Key.cmd",
-    "Set ElevenLabs API Key.cmd",
     "README_FIRST.txt"
 )
 
@@ -151,7 +150,6 @@ $ExpectedReleaseItems = @(
     "vaivox_icon.png",
     "add_icon.png",
     "Set STT API Key.cmd",
-    "Set ElevenLabs API Key.cmd",
     "README_FIRST.txt",
     "VoiceAttack\VAIVOX - VA Profile.vap",
     "VoiceAttack\Apps\VAIVOX\VaivoxVAPlugin.dll"

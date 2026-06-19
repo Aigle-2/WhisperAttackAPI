@@ -101,7 +101,6 @@ VAIVOX v1.2.2\
   vaivox_icon.png
   add_icon.png
   Set STT API Key.cmd
-  Set ElevenLabs API Key.cmd
   README_FIRST.txt
   VoiceAttack\
     VAIVOX - VA Profile.vap
@@ -418,7 +417,7 @@ If the plugin is enabled and active and everything is set up correctly, VoiceAtt
 
 In VoiceAttack, go to **Edit Profile**.
 
-#### New Command for "Start Whisper Recording":
+#### New Command for "Start VAIVOX Recording":
 
 - **When this command executes:**
   - Go to **Other → Advancced → Execute an External Plugin Function**.
@@ -426,19 +425,19 @@ In VoiceAttack, go to **Edit Profile**.
   - **Plugin Context:**
 
 ```
-Start Whisper Recording
+Start VAIVOX Recording
 ```
 
 Assign a joystick or key press to this command (e.g., "Joystick Button 14 (pressed)").
 
 ![Whisperattackreadme](https://github.com/user-attachments/assets/ee96bc06-8fe6-45b0-9999-076eb0e0cc00)
 
-#### Another Command for "Stop Whisper Recording":
+#### Another Command for "Stop VAIVOX Recording":
 
 Same steps, except the **Parameters** is:
 
 ```
-Stop Whisper Recording
+Stop VAIVOX Recording
 ```
 
 Assign the same joystick button but check **"Shortcut is invoked only when released."**

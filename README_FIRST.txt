@@ -8,8 +8,8 @@ Quick start
 2. Copy "VoiceAttack\Apps\VAIVOX\VaivoxVAPlugin.dll" into your VoiceAttack Apps folder,
    keeping the VAIVOX folder name.
 3. Import "VoiceAttack\VAIVOX - VA Profile.vap" in VoiceAttack.
-4. In the imported profile, make sure the "Start Whisper Recording" and
-   "Stop Whisper Recording" plugin actions point to the VAIVOX plugin.
+4. In the imported profile, make sure the "Start VAIVOX Recording" and
+   "Stop VAIVOX Recording" plugin actions point to the VAIVOX plugin.
 5. Double-click "VAIVOX.exe".
 6. Keep the "_internal" folder next to the exe.
 

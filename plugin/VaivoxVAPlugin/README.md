@@ -67,10 +67,10 @@ Then copy `plugin\VaivoxVAPlugin\bin\Release\net48\VaivoxVAPlugin.dll` into
    is a binary/encrypted VoiceAttack export — there is no plaintext GUID to swap, so this
    **must be done in the VoiceAttack GUI**, not by editing the file.
 3. Bind your push-to-talk buttons to the two commands the plugin matches on:
-   - `Start Whisper Recording` → sends `start`
-   - `Stop Whisper Recording` → sends `stop`
-   (The command *names* are kept so the bundled profile keeps working; only the plugin
-   reference needs re-pointing.)
+   - `Start VAIVOX Recording` -> sends `start`
+   - `Stop VAIVOX Recording` -> sends `stop`
+   (`Start Whisper Recording` / `Stop Whisper Recording` are still accepted as legacy
+   aliases for already-configured profiles.)
 
 ## End-to-end smoke (manual, needs VoiceAttack + VAICOM + DCS)
 

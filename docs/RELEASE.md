@@ -48,7 +48,7 @@ dotnet list plugin/VaivoxVAPlugin/VaivoxVAPlugin.csproj package --vulnerable --i
 Manual release checks that require the real user stack:
 
 - Import `VoiceAttack\VAIVOX - VA Profile.vap`.
-- Confirm `Start Whisper Recording` and `Stop Whisper Recording` point to the VAIVOX
+- Confirm `Start VAIVOX Recording` and `Stop VAIVOX Recording` point to the VAIVOX
   plugin.
 - Run a known VAICOM command in DCS and confirm in-game action, `matched=true`,
   telemetry, and usage stamping.

@@ -13,6 +13,10 @@ namespace VaivoxServerCommand
         private const string Server = "127.0.0.1";
         private const int ControlPort = 65432;
         private const int ListenerPort = 65433;
+        private const string StartVaivoxRecordingContext = "Start VAIVOX Recording";
+        private const string StopVaivoxRecordingContext = "Stop VAIVOX Recording";
+        private const string StartLegacyRecordingContext = "Start Whisper Recording";
+        private const string StopLegacyRecordingContext = "Stop Whisper Recording";
 
         private static bool _isRunning = true;
         private static TcpListener _listener = null;
@@ -67,21 +71,27 @@ namespace VaivoxServerCommand
                 {
                     switch (contextinput)
                     {
-                        // These VoiceAttack command names match the bundled profile
-                        // ("VAIVOX - VA Profile.vap"); bind your PTT buttons to them.
-                        case "Start Whisper Recording":
+                        // Prefer the VAIVOX context names. The Whisper names remain as
+                        // compatibility aliases for profiles configured before the rebrand.
+                        case StartVaivoxRecordingContext:
+                        case StartLegacyRecordingContext:
                             {
-                                byte[] data = Encoding.ASCII.GetBytes("start");
-                                stream.Write(data, 0, data.Length);
+                                SendControlCommand(stream, "start");
                                 vaProxy.WriteToLog("Start VAIVOX recording", "grey");
                                 break;
                             }
 
-                        case "Stop Whisper Recording":
+                        case StopVaivoxRecordingContext:
+                        case StopLegacyRecordingContext:
                             {
-                                byte[] data = Encoding.ASCII.GetBytes("stop");
-                                stream.Write(data, 0, data.Length);
+                                SendControlCommand(stream, "stop");
                                 vaProxy.WriteToLog("Stop VAIVOX recording", "grey");
+                                break;
+                            }
+
+                        default:
+                            {
+                                vaProxy.WriteToLog($"Unknown VAIVOX plugin context: {contextinput}", "orange");
                                 break;
                             }
                     }
@@ -122,6 +132,12 @@ namespace VaivoxServerCommand
             {
                 vaProxy.WriteToLog($"VAIVOX server was not available during shutdown: {ex.Message}", "grey");
             }
+        }
+
+        private static void SendControlCommand(NetworkStream stream, string command)
+        {
+            byte[] data = Encoding.ASCII.GetBytes(command);
+            stream.Write(data, 0, data.Length);
         }
 
         private static async Task StartCommandListener(dynamic vaProxy)
