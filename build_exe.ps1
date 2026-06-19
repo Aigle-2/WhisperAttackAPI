@@ -2,7 +2,7 @@ param(
     [ValidateSet("api", "full")]
     [string]$Profile = "api",
 
-    [string]$Version = "1.2.2",
+    [string]$Version = "",
 
     [switch]$Clean
 )
@@ -11,6 +11,26 @@ $ErrorActionPreference = "Stop"
 
 $ProjectRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 Set-Location $ProjectRoot
+
+function Get-ProjectVersion {
+    $PyprojectPath = Join-Path $ProjectRoot "pyproject.toml"
+    $InProjectSection = $false
+
+    foreach ($Line in Get-Content -LiteralPath $PyprojectPath) {
+        if ($Line -match '^\s*\[project\]\s*$') {
+            $InProjectSection = $true
+            continue
+        }
+        if ($InProjectSection -and $Line -match '^\s*\[') {
+            break
+        }
+        if ($InProjectSection -and $Line -match '^\s*version\s*=\s*"([^"]+)"\s*$') {
+            return $Matches[1]
+        }
+    }
+
+    throw "Could not read [project].version from $PyprojectPath"
+}
 
 function Compress-ArchiveWithRetry {
     param(
@@ -31,6 +51,14 @@ function Compress-ArchiveWithRetry {
             Start-Sleep -Seconds $Attempt
         }
     }
+}
+
+$ProjectVersion = Get-ProjectVersion
+if ([string]::IsNullOrWhiteSpace($Version)) {
+    $Version = $ProjectVersion
+}
+elseif ($Version -ne $ProjectVersion) {
+    throw "Release version is single-sourced from pyproject.toml ($ProjectVersion); got -Version $Version."
 }
 
 # The "api" profile installs the GUI/audio runtime only (uv extra `app`); "full" adds
@@ -66,6 +94,9 @@ $VoiceAttackAppsPath = Join-Path $VoiceAttackReleasePath "Apps\VAIVOX"
 $VoiceAttackProfilePath = Join-Path $ProjectRoot "VAIVOX - VA Profile.vap"
 $PluginProjectPath = Join-Path $ProjectRoot "plugin\VaivoxVAPlugin\VaivoxVAPlugin.csproj"
 $PluginDllPath = Join-Path $ProjectRoot "plugin\VaivoxVAPlugin\bin\Release\net48\VaivoxVAPlugin.dll"
+$PluginInstallerProjectPath = Join-Path $ProjectRoot "plugin\VaivoxPluginInstaller\VaivoxPluginInstaller.csproj"
+$PluginInstallerExeName = "Install VAIVOX VoiceAttack Plugin.exe"
+$PluginInstallerExePath = Join-Path $ProjectRoot "plugin\VaivoxPluginInstaller\bin\Release\net48\$PluginInstallerExeName"
 
 if ($Clean) {
     if (Test-Path $PackagePath) {
@@ -88,12 +119,13 @@ uv sync --frozen --extra $SyncExtra --group build
 
 if (Get-Command dotnet -ErrorAction SilentlyContinue) {
     dotnet build $PluginProjectPath -c Release
+    dotnet build $PluginInstallerProjectPath -c Release
 }
-elseif (!(Test-Path $PluginDllPath)) {
-    throw "VaivoxVAPlugin.dll is missing and dotnet is not available to build it."
+elseif (!(Test-Path $PluginDllPath) -or !(Test-Path $PluginInstallerExePath)) {
+    throw "VoiceAttack plugin artifacts are missing and dotnet is not available to build them."
 }
 else {
-    Write-Warning "dotnet not found; packaging existing plugin DLL at $PluginDllPath"
+    Write-Warning "dotnet not found; packaging existing VoiceAttack plugin artifacts."
 }
 
 $PyInstallerArgs = @(
@@ -102,6 +134,7 @@ $PyInstallerArgs = @(
     "--clean",
     "--onedir",
     "--noconsole",
+    "--copy-metadata", "vaivox",
     "--distpath", $PackageRoot,
     "--name", $AppName
 ) + $ExcludeModules + $DataFiles + @("--paths", "src", "src\vaivox\main.py")
@@ -136,14 +169,19 @@ if (!(Test-Path $VoiceAttackProfilePath)) {
 if (!(Test-Path $PluginDllPath)) {
     throw "Release package is missing built plugin DLL: $PluginDllPath"
 }
+if (!(Test-Path $PluginInstallerExePath)) {
+    throw "Release package is missing built plugin installer: $PluginInstallerExePath"
+}
 
 New-Item -ItemType Directory -Path $VoiceAttackAppsPath -Force | Out-Null
 Copy-Item -LiteralPath $VoiceAttackProfilePath -Destination $VoiceAttackReleasePath -Force
 Copy-Item -LiteralPath $PluginDllPath -Destination $VoiceAttackAppsPath -Force
+Copy-Item -LiteralPath $PluginInstallerExePath -Destination $ReleasePath -Force
 
 $ExpectedReleaseItems = @(
     "_internal",
     "$AppName.exe",
+    $PluginInstallerExeName,
     "settings.cfg",
     "fuzzy_words.txt",
     "word_mappings.txt",

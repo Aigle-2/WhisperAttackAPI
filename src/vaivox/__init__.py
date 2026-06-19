@@ -2,5 +2,24 @@
 
 from __future__ import annotations
 
-#: Application version (rebranded to VAIVOX in Phase 4).
-__version__ = "1.2.2"
+import tomllib
+from importlib.metadata import PackageNotFoundError, version
+from pathlib import Path
+
+
+def _resolve_version() -> str:
+    """Resolve the package version from pyproject-owned metadata."""
+    pyproject_path = Path(__file__).resolve().parents[2] / "pyproject.toml"
+    if pyproject_path.is_file():
+        pyproject = tomllib.loads(pyproject_path.read_text(encoding="utf-8"))
+        project_version = pyproject.get("project", {}).get("version")
+        if isinstance(project_version, str):
+            return project_version
+
+    try:
+        return version("vaivox")
+    except PackageNotFoundError:
+        return "0+unknown"
+
+
+__version__ = _resolve_version()

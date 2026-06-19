@@ -9,6 +9,9 @@ libraries are imported lazily so the module imports without them installed.
 from __future__ import annotations
 
 import logging
+import os
+import subprocess
+import sys
 import threading
 import traceback
 from os import path
@@ -16,19 +19,26 @@ from threading import Event
 from typing import TYPE_CHECKING, Any, cast
 
 from vaivox import composition
+from vaivox.application.ports import StatusLevel
 from vaivox.infrastructure.config.identity import VAIVOX
 from vaivox.infrastructure.config.settings import ConfigurationError, VaivoxConfiguration
 from vaivox.infrastructure.ui.theme import (
+    TAG_BLACK,
     TAG_BLUE,
     TAG_GREY,
     TAG_RED,
     THEME_DARK,
     THEME_DEFAULT,
+    theme_config,
 )
 from vaivox.infrastructure.ui.word_mappings import VaivoxWordMappings
 from vaivox.infrastructure.ui.writer import TkStatusWriter
 
 if TYPE_CHECKING:
+    from tkinter.font import Font
+
+    from ttkbootstrap import Style
+
     from vaivox.domain.vocabulary.keyterms import KeytermBudget
 
 _LOGGER = logging.getLogger(__name__)
@@ -46,11 +56,11 @@ class VaivoxApp:
             app_path: Directory holding the bundled assets and default config.
             app_data_dir: The per-user data directory for overrides and logs.
         """
-        from tkinter import DISABLED, LEFT, NSEW, WORD, PhotoImage, W, font
+        from tkinter import DISABLED, LEFT, NSEW, WORD, PhotoImage, StringVar, W, font
 
         from PIL import Image
         from pystray import Icon, Menu, MenuItem
-        from ttkbootstrap import Button, Style, Window
+        from ttkbootstrap import Button, Frame, Label, Style, Window
         from ttkbootstrap.widgets.scrolled import ScrolledText
 
         _LOGGER.info("%s version: %s", VAIVOX.name, VAIVOX.version)
@@ -59,6 +69,7 @@ class VaivoxApp:
         self.app_path = app_path
         self.app_data_dir = app_data_dir
         self.exit_event = Event()
+        self._vocabulary_refresh_lock = threading.Lock()
 
         self.window = Window(
             title=VAIVOX.window_title,
@@ -68,39 +79,117 @@ class VaivoxApp:
 
         theme = self.get_theme()
         cast(Any, self.window.style).theme_use("darkly" if theme == THEME_DARK else "flatly")
+        palette = theme_config[theme]
 
         custom_font = font.Font(family="GG Sans", size=11)
-        style_factory = cast(Any, Style)
-        style = style_factory()
-        style.configure("TButton", font=custom_font)
-        style.configure("TLabel", font=custom_font)
+        style = Style()  # type: ignore[no-untyped-call]
+        self._configure_window_styles(style, custom_font, palette)
+        self.window.configure(background=palette["background"])
+        self.window.minsize(940, 620)
 
-        text_area = ScrolledText(
-            self.window,
-            wrap=WORD,
-            width=100,
-            height=50,
-            state=DISABLED,
-            autohide=True,
-            font=custom_font,
-        )
-        text_area.grid(row=0, column=0, sticky=NSEW, padx=10, pady=10)
-
+        self.app_icon: Any = PhotoImage(file=path.join(app_path, "vaivox_icon.png"))
         self.add_icon: Any = PhotoImage(file=path.join(app_path, "add_icon.png"))
+        self.status_text: Any = StringVar(value="Starting services...")
+
+        shell = Frame(self.window, style="App.TFrame")
+        shell.grid(row=0, column=0, sticky=NSEW, padx=14, pady=14)
+        shell.grid_columnconfigure(0, weight=1)
+        shell.grid_rowconfigure(2, weight=1)
+
+        header = Frame(shell, style="Header.TFrame", padding=14)
+        header.grid(row=0, column=0, sticky=NSEW)
+        header.grid_columnconfigure(1, weight=1)
+        Label(header, image=self.app_icon, style="Header.TLabel").grid(
+            row=0,
+            column=0,
+            rowspan=2,
+            sticky=W,
+            padx=(0, 14),
+        )
+        Label(header, text=VAIVOX.name, style="Title.TLabel").grid(row=0, column=1, sticky=W)
+        Label(
+            header,
+            text=f"VoiceAttack bridge | v{VAIVOX.version}",
+            style="MutedHeader.TLabel",
+        ).grid(row=1, column=1, sticky=W)
+        Label(
+            header,
+            textvariable=self.status_text,
+            style="Status.TLabel",
+            anchor="e",
+            justify="right",
+            wraplength=400,
+        ).grid(row=0, column=2, rowspan=2, sticky="e", padx=(16, 0))
+
+        toolbar = Frame(shell, style="Toolbar.TFrame")
+        toolbar.grid(row=1, column=0, sticky=NSEW, pady=(10, 8))
+        toolbar.grid_columnconfigure(4, weight=1)
+
         add_word_mapping_button = Button(
-            self.window,
-            text="Add word mapping",
+            toolbar,
+            text="Add mapping",
             style="secondary.TButton",
             image=self.add_icon,
             compound=LEFT,
             command=self.add_word_mapping,
         )
-        add_word_mapping_button.grid(row=1, column=0, sticky=W, pady=10, padx=10)
+        add_word_mapping_button.grid(row=0, column=0, sticky=W, padx=(0, 8))
+        self.refresh_button: Any = Button(
+            toolbar,
+            text="Refresh VAICOM vocabulary",
+            style="primary.TButton",
+            command=self.refresh_vocabulary_from_ui,
+        )
+        self.refresh_button.grid(row=0, column=1, sticky=W, padx=(0, 8))
+        Button(
+            toolbar,
+            text="Clear log",
+            style="secondary.TButton",
+            command=self.clear_log,
+        ).grid(row=0, column=2, sticky=W, padx=(0, 8))
+        Button(
+            toolbar,
+            text="Open data folder",
+            style="secondary.TButton",
+            command=self.open_data_folder,
+        ).grid(row=0, column=3, sticky=W)
+        api_state = "on" if self.config.get_bool_setting("api_enabled", False) else "off"
+        telemetry_state = "on" if self.config.get_bool_setting("telemetry_enabled", True) else "off"
+        Label(
+            toolbar,
+            text=(
+                f"STT: {self.config.get_stt_backend()}   |   "
+                f"API: {api_state}   |   Telemetry: {telemetry_state}"
+            ),
+            style="ToolbarMeta.TLabel",
+            anchor="e",
+        ).grid(row=0, column=4, sticky="e", padx=(16, 0))
+
+        text_area = ScrolledText(
+            shell,
+            wrap=WORD,
+            width=104,
+            height=34,
+            state=DISABLED,
+            autohide=True,
+            font=custom_font,
+        )
+        text_area.grid(row=2, column=0, sticky=NSEW)
+        text_area.text.configure(
+            background=palette["text_background"],
+            foreground=palette[TAG_BLACK],
+            insertbackground=palette[TAG_BLACK],
+            relief="flat",
+            borderwidth=0,
+            padx=12,
+            pady=10,
+            selectbackground=palette[TAG_BLUE],
+        )
 
         self.window.grid_rowconfigure(0, weight=1)
         self.window.grid_columnconfigure(0, weight=1)
 
-        self.writer = TkStatusWriter(theme, text_area)
+        self.writer = TkStatusWriter(theme, text_area, on_status=self._set_status_from_report)
         self.writer.write("Loaded configuration:", TAG_BLUE)
         self.writer.write_dict(dict(self.config.get_safe_configuration()), TAG_GREY)
         self.write_startup_context()
@@ -140,12 +229,60 @@ class VaivoxApp:
 
     def _refresh_vocabulary_in_background(self) -> None:
         """Run the VAICOM vocabulary refresh use case, guarding the background thread."""
+        if not self._vocabulary_refresh_lock.acquire(blocking=False):
+            return
         try:
             self.refresh_vocabulary.execute()
         except Exception:
             # The use case reports user-facing status itself; this guard only keeps an
             # unexpected failure from killing the daemon thread (ADR-0005 is best-effort).
             _LOGGER.exception("Background vocabulary refresh failed.")
+        finally:
+            self._vocabulary_refresh_lock.release()
+
+    def _configure_window_styles(
+        self,
+        style: Style,
+        custom_font: Font,
+        palette: dict[str, str],
+    ) -> None:
+        """Configure ttk styles used by the VAIVOX window."""
+        family = custom_font.actual("family")
+        style.configure("TButton", font=custom_font)
+        style.configure("TLabel", font=custom_font)
+        style.configure("App.TFrame", background=palette["background"])
+        style.configure("Header.TFrame", background=palette["surface"])
+        style.configure(
+            "Header.TLabel",
+            background=palette["surface"],
+            foreground=palette[TAG_BLACK],
+            font=custom_font,
+        )
+        style.configure(
+            "Title.TLabel",
+            background=palette["surface"],
+            foreground=palette[TAG_BLACK],
+            font=(family, 18, "bold"),
+        )
+        style.configure(
+            "MutedHeader.TLabel",
+            background=palette["surface"],
+            foreground=palette["muted"],
+            font=(family, 10),
+        )
+        style.configure(
+            "Status.TLabel",
+            background=palette["surface"],
+            foreground=palette[TAG_BLUE],
+            font=(family, 10, "bold"),
+        )
+        style.configure("Toolbar.TFrame", background=palette["background"])
+        style.configure(
+            "ToolbarMeta.TLabel",
+            background=palette["background"],
+            foreground=palette["muted"],
+            font=(family, 10),
+        )
 
     def write_startup_context(self) -> None:
         """Write the startup vocabulary summary to the UI."""
@@ -238,6 +375,58 @@ class VaivoxApp:
                 self.writer.write(str(error), TAG_RED)
 
         VaivoxWordMappings(self.window, update_word_mapping)
+
+    def refresh_vocabulary_from_ui(self) -> None:
+        """Start a user-requested VAICOM vocabulary refresh on a background thread."""
+        if not self._vocabulary_refresh_lock.acquire(blocking=False):
+            self._set_status("Vocabulary refresh already running")
+            return
+        self.refresh_button.configure(state="disabled")
+        self._set_status("Refreshing VAICOM vocabulary...")
+        threading.Thread(daemon=True, target=self._refresh_vocabulary_from_ui).start()
+
+    def _refresh_vocabulary_from_ui(self) -> None:
+        """Run the manual vocabulary refresh and re-enable the UI action afterwards."""
+        try:
+            result = self.refresh_vocabulary.execute(force=True)
+        except Exception as error:
+            _LOGGER.exception("Manual VAICOM vocabulary refresh failed.")
+            self.writer.write(f"VAICOM vocabulary refresh failed: {error}", TAG_RED)
+            status = "Vocabulary refresh failed"
+        else:
+            status = "Vocabulary refreshed" if result.generated else f"Vocabulary: {result.reason}"
+        finally:
+            self._vocabulary_refresh_lock.release()
+        self.window.after(0, self._finish_vocabulary_refresh, status)
+
+    def _finish_vocabulary_refresh(self, status: str) -> None:
+        """Restore the refresh button state after a manual refresh."""
+        self.refresh_button.configure(state="normal")
+        self._set_status(status)
+
+    def clear_log(self) -> None:
+        """Clear the status log."""
+        self.writer.clear()
+        self._set_status("Log cleared")
+
+    def open_data_folder(self) -> None:
+        """Open VAIVOX's per-user data folder in the system file browser."""
+        try:
+            if sys.platform == "win32":
+                os.startfile(self.app_data_dir)
+            else:
+                subprocess.Popen(["xdg-open", self.app_data_dir])
+        except Exception as error:
+            _LOGGER.exception("Failed to open data folder.")
+            self.writer.write(f"Failed to open data folder: {error}", TAG_RED)
+
+    def _set_status_from_report(self, message: str, _level: StatusLevel) -> None:
+        """Mirror the latest semantic status in the header."""
+        self._set_status(message)
+
+    def _set_status(self, message: str) -> None:
+        """Set the header status text on the Tk event loop."""
+        self.window.after(0, self.status_text.set, message)
 
     def get_theme(self) -> str:
         """Return the effective theme, resolving ``default`` to the Windows theme."""

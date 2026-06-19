@@ -9,6 +9,7 @@ uv run mypy
 uv run lint-imports --config pyproject.toml --no-cache
 uv run pytest --cov=vaivox
 dotnet build plugin/VaivoxVAPlugin/VaivoxVAPlugin.csproj -c Release
+dotnet build plugin/VaivoxPluginInstaller/VaivoxPluginInstaller.csproj -c Release
 ```
 
 Build the release artifact:
@@ -20,14 +21,15 @@ Build the release artifact:
 The build script creates:
 
 ```text
-dist\release\VAIVOX v1.2.2\
-dist\release\VAIVOX v1.2.2.zip
+dist\release\VAIVOX v<version>\
+dist\release\VAIVOX v<version>.zip
 ```
 
 Verify the ZIP contains:
 
 ```text
 VAIVOX.exe
+Install VAIVOX VoiceAttack Plugin.exe
 _internal\
 settings.cfg
 fuzzy_words.txt
@@ -43,11 +45,14 @@ Before publishing, run dependency audits:
 uv export --locked --no-emit-project --extra app --extra mcp --group dev --group build --format requirements-txt --output-file requirements-audit.txt
 uvx pip-audit -r requirements-audit.txt
 dotnet list plugin/VaivoxVAPlugin/VaivoxVAPlugin.csproj package --vulnerable --include-transitive
+dotnet list plugin/VaivoxPluginInstaller/VaivoxPluginInstaller.csproj package --vulnerable --include-transitive
 ```
 
 Manual release checks that require the real user stack:
 
 - Import `VoiceAttack\VAIVOX - VA Profile.vap`.
+- Run `Install VAIVOX VoiceAttack Plugin.exe` and confirm it installs
+  `Apps\VAIVOX\VaivoxVAPlugin.dll` under the real VoiceAttack folder.
 - Confirm `Start VAIVOX Recording` and `Stop VAIVOX Recording` point to the VAIVOX
   plugin.
 - Run a known VAICOM command in DCS and confirm in-game action, `matched=true`,

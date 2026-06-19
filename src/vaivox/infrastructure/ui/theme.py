@@ -22,6 +22,9 @@ theme_config: dict[str, dict[str, str]] = {
         TAG_ORANGE: "#FF981F",
         TAG_RED: "#F04747",
         "background": "#36393E",
+        "muted": "#B8BCC4",
+        "surface": "#2F3136",
+        "text_background": "#26282D",
     },
     THEME_LIGHT: {
         TAG_BLACK: "black",
@@ -31,5 +34,8 @@ theme_config: dict[str, dict[str, str]] = {
         TAG_ORANGE: "orange",
         TAG_RED: "red",
         "background": "white",
+        "muted": "#5E6878",
+        "surface": "#F4F7FB",
+        "text_background": "#FBFCFE",
     },
 }

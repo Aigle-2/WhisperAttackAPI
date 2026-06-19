@@ -112,8 +112,8 @@ fonctionnel plus large que le durcissement d'audit traite dans ce passage.
 - [x] Ajouter un test packaging minimal.
   - Lancer `build_exe.ps1 -Profile api -Clean` en job Windows, ou au moins verifier la
     presence des artefacts attendus apres packaging.
-  - Critere d'acceptation: CI echoue si le zip release manque l'exe, les assets, le plugin
-    ou le profil.
+  - Critere d'acceptation: CI echoue si le zip release manque l'exe, les assets, le plugin,
+    l'installateur VoiceAttack ou le profil.
 
 - [x] Ajouter un test de build plugin C# en CI Windows.
   - Executer `dotnet build plugin/VaivoxVAPlugin/VaivoxVAPlugin.csproj -c Release`.

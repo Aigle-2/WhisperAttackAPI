@@ -58,9 +58,16 @@ def test_release_build_script_packages_voiceattack_assets() -> None:
 
     assert (repo_root / "VAIVOX - VA Profile.vap").is_file()
     assert (repo_root / "plugin" / "VaivoxVAPlugin" / "VaivoxVAPlugin.csproj").is_file()
+    assert (
+        repo_root / "plugin" / "VaivoxPluginInstaller" / "VaivoxPluginInstaller.csproj"
+    ).is_file()
     assert "VoiceAttack\\VAIVOX - VA Profile.vap" in build_script
     assert "VoiceAttack\\Apps\\VAIVOX\\VaivoxVAPlugin.dll" in build_script
-    assert '[string]$Version = "1.2.2"' in build_script
+    assert "Install VAIVOX VoiceAttack Plugin.exe" in build_script
+    assert "plugin\\VaivoxPluginInstaller\\VaivoxPluginInstaller.csproj" in build_script
+    assert "function Get-ProjectVersion" in build_script
+    assert '[string]$Version = ""' in build_script
+    assert '"--copy-metadata", "vaivox"' in build_script
 
 
 def test_voiceattack_profile_template_uses_vaivox_name() -> None:
@@ -82,9 +89,9 @@ def test_voiceattack_profile_template_uses_vaivox_name() -> None:
 def test_voiceattack_plugin_uses_only_vaivox_context_names() -> None:
     """The VAIVOX plugin must not accept upstream WhisperAttack action names."""
     repo_root = Path(__file__).resolve().parents[2]
-    plugin_source = (
-        repo_root / "plugin" / "VaivoxVAPlugin" / "VaivoxVAPlugin.cs"
-    ).read_text(encoding="utf-8")
+    plugin_source = (repo_root / "plugin" / "VaivoxVAPlugin" / "VaivoxVAPlugin.cs").read_text(
+        encoding="utf-8"
+    )
 
     assert "Start VAIVOX Recording" in plugin_source
     assert "Stop VAIVOX Recording" in plugin_source
@@ -97,4 +104,4 @@ def test_project_version_matches_runtime_identity() -> None:
     repo_root = Path(__file__).resolve().parents[2]
     pyproject = tomllib.loads((repo_root / "pyproject.toml").read_text(encoding="utf-8"))
 
-    assert pyproject["project"]["version"] == vaivox.__version__ == "1.2.2"
+    assert pyproject["project"]["version"] == vaivox.__version__

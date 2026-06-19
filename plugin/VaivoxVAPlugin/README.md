@@ -60,7 +60,12 @@ dotnet build plugin\VaivoxVAPlugin\VaivoxVAPlugin.csproj -c Release -p:VoiceAtta
 setx VOICEATTACK_DIR "E:\Jeux\steamapps\common\VoiceAttack 2"
 ```
 
-Then copy `plugin\VaivoxVAPlugin\bin\Release\net48\VaivoxVAPlugin.dll` into
+Release users can run `Install VAIVOX VoiceAttack Plugin.exe` from the extracted VAIVOX
+release folder. It detects common VoiceAttack / VoiceAttack 2 installs and copies the
+bundled DLL into `<VoiceAttack>\Apps\VAIVOX\`.
+
+For manual development installs, copy
+`plugin\VaivoxVAPlugin\bin\Release\net48\VaivoxVAPlugin.dll` into
 `<VoiceAttack>\Apps\VAIVOX\` (create the folder; one DLL per app, mirroring the other
 `Apps\*` plugins). Restart VoiceAttack to load it.
 

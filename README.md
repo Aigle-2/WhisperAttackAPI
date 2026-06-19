@@ -92,9 +92,10 @@ and the `VoiceAttack\` release assets.
 The release folder is expected to look like this:
 
 ```console
-VAIVOX v1.2.2\
+VAIVOX v<version>\
   _internal\
   VAIVOX.exe
+  Install VAIVOX VoiceAttack Plugin.exe
   settings.cfg
   fuzzy_words.txt
   word_mappings.txt
@@ -108,6 +109,9 @@ VAIVOX v1.2.2\
       VAIVOX\
         VaivoxVAPlugin.dll
 ```
+
+Double-click `Install VAIVOX VoiceAttack Plugin.exe` to detect a local VoiceAttack or
+VoiceAttack 2 install and copy `VaivoxVAPlugin.dll` into `<VoiceAttack>\Apps\VAIVOX`.
 
 The VoiceAttack plugin connects to the VAIVOX server on `127.0.0.1:65432`. Because VAIVOX
 ships a freshly-GUID'd plugin (separate from upstream WhisperAttack), re-point each
@@ -299,20 +303,20 @@ build_api_only.cmd
 The executable is created at:
 
 ```console
-dist\release\VAIVOX v1.2.2\VAIVOX.exe
+dist\release\VAIVOX v<version>\VAIVOX.exe
 ```
 
 The distributable ZIP is created beside it:
 
 ```console
-dist\release\VAIVOX v1.2.2.zip
+dist\release\VAIVOX v<version>.zip
 ```
 
 Any intermediate PyInstaller output is kept under `build`; only `dist\release` is meant to be published.
 
 The release folder contains the exe, `_internal`, `settings.cfg`, `fuzzy_words.txt`,
-`word_mappings.txt`, icons, API-key helpers, `README_FIRST.txt`, plus the VoiceAttack
-profile and plugin under `VoiceAttack\`. The maintainer checklist is
+`word_mappings.txt`, icons, API-key helpers, `README_FIRST.txt`, the VoiceAttack plugin
+installer, plus the VoiceAttack profile and plugin under `VoiceAttack\`. The maintainer checklist is
 [docs/RELEASE.md](docs/RELEASE.md).
 
 To build the larger offline-capable executable that includes the local `faster_whisper` backend, double-click:
@@ -399,8 +403,12 @@ Go to **Options → General → Enable Plugin Support**.
 
 ### 3. Place Plugin in VoiceAttack Apps folder
 
-From the release ZIP, copy the entire `VoiceAttack\Apps\VAIVOX` folder into your
-VoiceAttack `Apps` folder. Maintainers can rebuild the plugin with
+From the release ZIP, double-click `Install VAIVOX VoiceAttack Plugin.exe`. It detects
+common VoiceAttack / VoiceAttack 2 installs, including Program Files and Steam library
+locations, then copies the bundled plugin into `<VoiceAttack>\Apps\VAIVOX`.
+
+If automatic detection fails, copy the entire `VoiceAttack\Apps\VAIVOX` folder into your
+VoiceAttack `Apps` folder manually. Maintainers can rebuild the plugin with
 `dotnet build plugin/VaivoxVAPlugin/VaivoxVAPlugin.csproj -c Release`.
 
 ![image](https://github.com/user-attachments/assets/dcd75f43-b957-4551-86bf-650468586834)

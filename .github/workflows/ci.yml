@@ -44,7 +44,7 @@ jobs:
         run: uv run pytest --cov=vaivox --cov-report=term-missing
 
   plugin-build:
-    name: Build VoiceAttack plugin
+    name: Build VoiceAttack plugin artifacts
     runs-on: windows-latest
     steps:
       - name: Checkout
@@ -53,8 +53,13 @@ jobs:
       - name: Build plugin
         run: dotnet build plugin/VaivoxVAPlugin/VaivoxVAPlugin.csproj -c Release
 
+      - name: Build plugin installer
+        run: dotnet build plugin/VaivoxPluginInstaller/VaivoxPluginInstaller.csproj -c Release
+
       - name: Audit NuGet packages
-        run: dotnet list plugin/VaivoxVAPlugin/VaivoxVAPlugin.csproj package --vulnerable --include-transitive
+        run: |
+          dotnet list plugin/VaivoxVAPlugin/VaivoxVAPlugin.csproj package --vulnerable --include-transitive
+          dotnet list plugin/VaivoxPluginInstaller/VaivoxPluginInstaller.csproj package --vulnerable --include-transitive
 
   dependency-audit:
     name: Python dependency audit

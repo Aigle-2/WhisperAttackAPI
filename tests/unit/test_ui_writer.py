@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import threading
 
+from vaivox.application.ports import StatusLevel
 from vaivox.infrastructure.ui.theme import TAG_BLACK, THEME_LIGHT
 from vaivox.infrastructure.ui.writer import TkStatusWriter
 
@@ -21,6 +22,7 @@ class FakeTextArea:
         self.text = FakeInnerText()
         self.tags = []
         self.inserted = []
+        self.deleted = []
         self.seen = []
         self.after_calls = []
 
@@ -29,6 +31,9 @@ class FakeTextArea:
 
     def insert(self, index, text, tag) -> None:
         self.inserted.append((index, text, tag))
+
+    def delete(self, start, end) -> None:
+        self.deleted.append((start, end))
 
     def see(self, index) -> None:
         self.seen.append(index)
@@ -63,3 +68,26 @@ def test_write_from_background_thread_is_marshaled_with_after() -> None:
     callback(*args)
 
     assert text_area.inserted == [("end", "background\n", TAG_BLACK)]
+
+
+def test_report_notifies_status_callback() -> None:
+    text_area = FakeTextArea()
+    statuses = []
+    writer = TkStatusWriter(
+        THEME_LIGHT,
+        text_area,
+        on_status=lambda message, level: statuses.append((message, level)),
+    )
+
+    writer.report("ready")
+
+    assert statuses == [("ready", StatusLevel.INFO)]
+
+
+def test_clear_empties_text_area() -> None:
+    text_area = FakeTextArea()
+    writer = TkStatusWriter(THEME_LIGHT, text_area)
+
+    writer.clear()
+
+    assert text_area.deleted == [("1.0", "end")]
