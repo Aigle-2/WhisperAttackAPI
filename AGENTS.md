@@ -98,8 +98,27 @@ but never anything that does I/O (sockets, files, mic, network, UI).
     polls its source so a vocabulary refresh or an F10 poll updates it in place. The mission
     F10 poll (`RefreshMissionVocabulary`) reports a **count-only** line on each changed pull
     — `N commands pulled, X new (M total)` — diffing against the previous poll so re-polling
-    the same mission stays quiet; the F10 reader is session-scoped (`mission_f10.py` baselines
-    the log at startup) so a restart purges the overlay instead of re-pulling stale imports.
+    the same mission stays quiet; the overlay is scoped to the latest `Mission title:` block
+    in the log (`mission_f10.py`), with a whole-log fallback when that block holds no F10 so
+    the current mission's commands still surface across a restart. A `mission_f10_verbose_logging`
+    setting (Settings window toggle) makes each poll emit a detailed diagnostic block —
+    resolved log path + size, mission markers, current-mission vs whole-log match counts,
+    fallback used, and the pulled commands — to debug an empty F10 overlay. F10 entries expose
+    **command surfaces**: the human label uses the bare menu name (`MORMON MESA 8`) while
+    VAICOM's internal identifier (`Action MORMON MESA 8`) and dispatch metadata are preserved
+    for typed routing (`VaicomF10Action`), so `mission_f10.py` strips only for labels/aliases. The
+    VoiceAttack sink now surfaces the plugin's return-channel match result (`VoiceAttack
+    matched: …` / `VoiceAttack has no command for: …`), so an unrecognized phrasing is visible
+    rather than silent. The phrase-index
+    generator splits CommandStrings on top-level `;` only (keeping `[Alpha;Bravo]` alternation
+    groups intact) and keeps balanced `[...]` parameter slots, so the Core list shows clean
+    commands like `Radar Focus Target [1..20]`.
+  - **Command surfaces + typed dispatch** (ADR-0012) ✅: `domain/commands/` resolves
+    reconciled text to a `CommandSurface` with a typed target before legacy snap fallback.
+    Static commands dispatch as `VoiceAttackCommand` through the existing sink; live F10
+    surfaces dispatch as `VaicomF10Action` through a disabled-by-default adapter until the
+    VAICOM/DCS smoke test validates real actionsequence execution. Telemetry keeps
+    `match` for static `Command.Exists` only and adds `resolution` + `dispatch`.
   - **Agent API/MCP** (ADR-0010) ✅ read API **+ gated actions + MCP**: introspection
     endpoints `/status`, `/metrics`, `/reconciliations`, `/vocabulary` + `POST
     /reconcile/dry-run` over query use cases (off by default, localhost, optional bearer

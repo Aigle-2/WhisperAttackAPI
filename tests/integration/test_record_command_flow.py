@@ -11,7 +11,7 @@ from datetime import datetime
 
 import pytest
 
-from vaivox.application.ports import SpeechToTextError, StatusLevel
+from vaivox.application.ports import CommandDispatchResult, SpeechToTextError, StatusLevel
 from vaivox.application.queries import ComputeMetrics
 from vaivox.application.record_command import (
     SimulateUtterance,
@@ -19,6 +19,15 @@ from vaivox.application.record_command import (
     StopAndReconcile,
 )
 from vaivox.application.shutdown import Shutdown
+from vaivox.domain.commands.model import (
+    CommandResolution,
+    CommandResolutionDecision,
+    CommandSurface,
+    DispatchOutcome,
+    DispatchTargetKind,
+    VaicomF10Action,
+    VoiceAttackCommand,
+)
 from vaivox.domain.reconciliation.model import Transcription
 from vaivox.domain.reconciliation.snapper import PhraseSnapper
 from vaivox.domain.telemetry.model import MatchOutcome
@@ -75,6 +84,46 @@ class FakeCommandSink:
     def send(self, command):
         self.sent.append(command)
         return self._outcome  # None == unknown (a pre-return-channel plugin)
+
+
+class FakeCommandDispatcher:
+    def __init__(self, voiceattack=None, f10_dispatch=None):
+        self.voiceattack = voiceattack or FakeCommandSink()
+        self.f10_sent = []
+        self._f10_dispatch = f10_dispatch
+
+    def dispatch(self, target):
+        if isinstance(target, VoiceAttackCommand):
+            match = self.voiceattack.send(target.command_name)
+            return CommandDispatchResult(
+                dispatch=DispatchOutcome(
+                    target_kind=DispatchTargetKind.VOICEATTACK.value,
+                    accepted=True if match is None else match.matched,
+                    resolved_target=target.command_name,
+                ),
+                match=match,
+            )
+        if isinstance(target, VaicomF10Action):
+            self.f10_sent.append(target)
+            return CommandDispatchResult(
+                dispatch=self._f10_dispatch
+                or DispatchOutcome(
+                    target_kind=DispatchTargetKind.VAICOM_F10_ACTION.value,
+                    accepted=True,
+                    resolved_target=target.identifier,
+                )
+            )
+        raise AssertionError(f"unexpected dispatch target {target!r}")
+
+
+class FakeSurfaceMatcher:
+    def __init__(self, resolution=None):
+        self._resolution = resolution
+        self.queries = []
+
+    def resolve(self, text):
+        self.queries.append(text)
+        return self._resolution or CommandResolution(CommandResolutionDecision.RAW)
 
 
 class FakeKneeboardSink:
@@ -153,10 +202,28 @@ def _fuzzy_entry(entry_id, term):
     )
 
 
+def _f10_surface(label="FLEX NORTH") -> CommandSurface:
+    return CommandSurface(
+        id="mission_f10:action-flex-north",
+        label=label,
+        aliases=("Action FLEX NORTH", "Request a FLEX NORTH"),
+        source="mission_f10",
+        scope="mission",
+        dispatch_target=VaicomF10Action(
+            identifier="Action FLEX NORTH",
+            label=label,
+            command_id=20042,
+            action_index=3,
+        ),
+    )
+
+
 def _make_stop(
     recorder,
     stt,
     command_sink=None,
+    command_dispatcher=None,
+    surface_matcher=None,
     kneeboard_sink=None,
     config=None,
     snapper=None,
@@ -167,12 +234,13 @@ def _make_stop(
     use_case = StopAndReconcile(
         recorder,
         stt,
-        command_sink or FakeCommandSink(),
+        command_dispatcher or FakeCommandDispatcher(command_sink or FakeCommandSink()),
         kneeboard_sink or FakeKneeboardSink(),
         config or FakeConfig(),
         reporter,
         FakeClock(),
         telemetry,
+        surface_matcher or FakeSurfaceMatcher(),
         # An empty index makes the snapper a no-op, matching production with no generated
         # phrase index (behaviour parity). Tests that exercise snapping pass their own.
         snapper or PhraseSnapper([]),
@@ -277,6 +345,77 @@ def test_empty_index_snapper_is_a_no_op():
     assert command_sink.sent == ["Kobuleti tower"]  # only the per-token fuzzy step ran
     assert telemetry.outcomes[0].snap.decision == "raw"
     assert ("Phrase snap: raw (no phrase index loaded)", StatusLevel.DETAIL) in reporter.lines
+
+
+def test_f10_surface_dispatches_to_vaicom_action_not_voiceattack():
+    command_sink = FakeCommandSink()
+    dispatcher = FakeCommandDispatcher(command_sink)
+    surface = _f10_surface()
+    matcher = FakeSurfaceMatcher(
+        CommandResolution(
+            CommandResolutionDecision.RESOLVED,
+            surface=surface,
+            matched_alias="FLEX NORTH",
+            score=100.0,
+        )
+    )
+    use_case, _reporter, telemetry = _make_stop(
+        FakeRecorder(),
+        FakeSpeechToText(text="FLEX NORTH"),
+        command_sink=command_sink,
+        command_dispatcher=dispatcher,
+        surface_matcher=matcher,
+        config=FakeConfig(fuzzy_words=[]),
+    )
+
+    use_case.execute()
+
+    assert command_sink.sent == []
+    assert dispatcher.f10_sent == [surface.dispatch_target]
+    outcome = telemetry.outcomes[0]
+    assert outcome.destination == "vaicom_f10_action"
+    assert outcome.sent_text == "Action FLEX NORTH"
+    assert outcome.match is None
+    assert outcome.resolution is not None
+    assert outcome.resolution.target_kind == "vaicom_f10_action"
+    assert outcome.dispatch is not None
+    assert outcome.dispatch.target_kind == "vaicom_f10_action"
+
+
+def test_static_surface_dispatches_to_voiceattack_command():
+    command_sink = FakeCommandSink(MatchOutcome(matched=True, resolved_command="Kobuleti tower"))
+    surface = CommandSurface(
+        id="voiceattack:kobuleti-tower",
+        label="Kobuleti tower",
+        aliases=(),
+        source="voiceattack",
+        scope="global",
+        dispatch_target=VoiceAttackCommand("Kobuleti tower"),
+    )
+    matcher = FakeSurfaceMatcher(
+        CommandResolution(
+            CommandResolutionDecision.RESOLVED,
+            surface=surface,
+            matched_alias="Kobuleti tower",
+            score=100.0,
+        )
+    )
+    use_case, _reporter, telemetry = _make_stop(
+        FakeRecorder(),
+        FakeSpeechToText(text="kobuletti tower"),
+        command_sink=command_sink,
+        surface_matcher=matcher,
+    )
+
+    use_case.execute()
+
+    assert command_sink.sent == ["Kobuleti tower"]
+    assert telemetry.outcomes[0].destination == "voiceattack"
+    assert telemetry.outcomes[0].dispatch is not None
+    assert telemetry.outcomes[0].dispatch.target_kind == "voiceattack"
+    assert telemetry.outcomes[0].match == MatchOutcome(
+        matched=True, resolved_command="Kobuleti tower"
+    )
 
 
 def test_kneeboard_note_is_never_snapped():
@@ -511,8 +650,9 @@ def test_simulate_utterance_dispatches_fuzzy_corrected_command_to_voiceattack():
     reporter = FakeReporter()
     use_case = SimulateUtterance(
         FakeConfig(),
+        FakeSurfaceMatcher(),
         PhraseSnapper([]),
-        command_sink,
+        FakeCommandDispatcher(command_sink),
         FakeKneeboardSink(),
         telemetry,
         reporter,
@@ -534,8 +674,9 @@ def test_simulate_utterance_routes_note_to_kneeboard():
     command_sink = FakeCommandSink()
     use_case = SimulateUtterance(
         FakeConfig(fuzzy_words=[]),
+        FakeSurfaceMatcher(),
         PhraseSnapper([]),
-        command_sink,
+        FakeCommandDispatcher(command_sink),
         kneeboard,
         FakeTelemetry(),
         FakeReporter(),

@@ -116,13 +116,31 @@ def test_margin_blocks_an_ambiguous_winner() -> None:
 
 
 def test_margin_allows_an_unambiguous_winner() -> None:
-    # The same low HIGH, but an unambiguous query clears the margin and snaps.
+    # The same low HIGH, but an unambiguous (non-exact) query clears the margin and snaps
+    # through the scored band — a leading filler keeps it off the exact-match short-circuit.
     snapper = PhraseSnapper(INDEX, high=50.0, low=10.0, margin=40.0)
 
-    result = snapper.snap("overlord bogey dope")
+    result = snapper.snap("uh overlord bogey dope")
 
     assert result.decision is SnapDecision.SNAPPED
     assert result.text == "Overlord bogey dope"
+
+
+def test_exact_match_snaps_despite_a_runner_up_within_the_margin() -> None:
+    # Operator evidence (transcript log): "Action Lion" reconciled to an exact command, but
+    # the callsign "Action Cylon" (87.0) sat within DEFAULT_MARGIN of "Action Lion" (100.0),
+    # so the margin guard alone abstained on a *perfect* hit and logged it as a near-miss
+    # ("Near misses: Action Lion 100.0; Action Cylon 87.0; Action Stalin 83.3"). An exact
+    # (verbatim) match must short-circuit the margin and snap cleanly with no near-miss.
+    snapper = PhraseSnapper(["Action Lion", "Action Cylon", "Action Stalin"])
+
+    result = snapper.snap("Action Lion")
+
+    assert result.decision is SnapDecision.SNAPPED
+    assert result.text == "Action Lion"
+    assert result.candidate == "Action Lion"
+    assert result.score == 100.0
+    assert result.near_misses == ()
 
 
 def test_empty_index_is_a_no_op() -> None:

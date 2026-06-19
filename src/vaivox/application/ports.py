@@ -18,6 +18,13 @@ from datetime import datetime
 from enum import Enum
 from typing import Protocol, runtime_checkable
 
+from vaivox.domain.commands.model import (
+    CommandResolution,
+    CommandSurface,
+    DispatchOutcome,
+    DispatchTarget,
+    VaicomF10Action,
+)
 from vaivox.domain.reconciliation.model import Transcription
 from vaivox.domain.reconciliation.snapper import SnapResult
 from vaivox.domain.telemetry.model import MatchOutcome, ReconciliationOutcome
@@ -60,7 +67,12 @@ class AudioRecorder(Protocol):
 
 @runtime_checkable
 class CommandSink(Protocol):
-    """Driven port: dispatch a recognized command to VoiceAttack."""
+    """Driven port: dispatch a static command to VoiceAttack.
+
+    This is the legacy/static VoiceAttack path. New routing code should prefer
+    :class:`CommandDispatcher`, which accepts typed dispatch targets and delegates this
+    exact-name path only for :class:`~vaivox.domain.commands.model.VoiceAttackCommand`.
+    """
 
     def send(self, command: str) -> MatchOutcome | None:
         """Send ``command`` to VoiceAttack and return its match outcome (ADR-0006).
@@ -75,6 +87,44 @@ class CommandSink(Protocol):
             ``None`` outcome is recorded as unknown telemetry and never stamps vocabulary
             usage, so the routing flow degrades cleanly against an un-rebuilt plugin.
         """
+
+
+@dataclass(frozen=True)
+class CommandDispatchResult:
+    """The result of dispatching a typed command target.
+
+    Attributes:
+        dispatch: Adapter-level dispatch result for telemetry and diagnostics.
+        match: VoiceAttack's exact-name match result when the target was a static
+            VoiceAttack command; ``None`` for non-VoiceAttack targets or unknown results.
+    """
+
+    dispatch: DispatchOutcome
+    match: MatchOutcome | None = None
+
+
+@runtime_checkable
+class CommandDispatcher(Protocol):
+    """Driven port: dispatch a typed command target."""
+
+    def dispatch(self, target: DispatchTarget) -> CommandDispatchResult:
+        """Dispatch ``target`` through the adapter matching its target kind."""
+
+
+@runtime_checkable
+class VaicomF10ActionSink(Protocol):
+    """Driven port: dispatch a live VAICOM F10 action target."""
+
+    def dispatch(self, action: VaicomF10Action) -> DispatchOutcome:
+        """Dispatch a VAICOM-imported F10 action, or report why it was not accepted."""
+
+
+@runtime_checkable
+class CommandSurfaceMatcher(Protocol):
+    """Driven port: resolve reconciled text to a typed command surface."""
+
+    def resolve(self, text: str) -> CommandResolution:
+        """Resolve ``text`` to a command surface, or abstain/raw."""
 
 
 @runtime_checkable
@@ -230,6 +280,31 @@ class VocabularyGenerationResult:
 
 
 @dataclass(frozen=True)
+class MissionVocabularyDiagnostics:
+    """Verbose detail of one mission F10 pull (surfaced when verbose logging is enabled).
+
+    Attributes:
+        log_path: The log path the adapter resolved and tried to read, if any.
+        file_bytes: Size of the read log in bytes (0 when missing/unreadable).
+        mission_markers: Number of ``Mission title:`` markers found in the log.
+        latest_mission: The latest mission title the overlay scoped to, if any.
+        scoped_matches: F10 command matches within the latest-mission scope.
+        whole_log_matches: F10 command matches across the entire log.
+        fallback_used: Whether the whole-log fallback was used (scoping found none).
+        deduped_phrases: Final command count after de-duplication and the safety cap.
+    """
+
+    log_path: str | None = None
+    file_bytes: int = 0
+    mission_markers: int = 0
+    latest_mission: str | None = None
+    scoped_matches: int = 0
+    whole_log_matches: int = 0
+    fallback_used: bool = False
+    deduped_phrases: int = 0
+
+
+@dataclass(frozen=True)
 class MissionVocabularySnapshot:
     """Ephemeral mission-scoped vocabulary discovered from the live simulator session.
 
@@ -237,13 +312,18 @@ class MissionVocabularySnapshot:
         phrases: The current mission-only command phrases. They are intentionally not
             persisted in the structured vocabulary source because they expire with the
             mission/server context.
+        surfaces: The current mission-only command surfaces, preserving VAICOM's
+            internal F10 identifier and dispatch metadata for typed routing.
         source: Human-readable source location used to discover the phrases, if any.
         reason: Short status suitable for logs and diagnostics.
+        diagnostics: Optional verbose pull detail for the diagnostic log, if computed.
     """
 
     phrases: tuple[str, ...]
+    surfaces: tuple[CommandSurface, ...] = ()
     source: str | None = None
     reason: str = "loaded"
+    diagnostics: MissionVocabularyDiagnostics | None = None
 
 
 @runtime_checkable

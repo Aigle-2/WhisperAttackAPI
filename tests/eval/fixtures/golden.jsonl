@@ -11,3 +11,7 @@
 {"raw_stt": "texako request rejoin", "expected_command": "Texaco request rejoin", "tags": ["misheard_callsign"]}
 {"raw_stt": "colt request start up", "expected_command": "Colt request startup", "tags": ["word_split"]}
 {"raw_stt": "TACAN Air-to-Air", "expected_command": "TACAN Air to Air", "tags": ["punctuation", "hyphen", "phrase_snap"]}
+{"raw_stt": "Clearance delivery Uzi61 Clearance on Request VFR FLEX NORTH", "expected_command": "FLEX NORTH", "tags": ["mission_f10", "ai_atc", "long_prompt"]}
+{"raw_stt": "FLEX NORTH", "expected_command": "FLEX NORTH", "tags": ["mission_f10", "clean"]}
+{"raw_stt": "Action FLEX NORTH", "expected_command": "FLEX NORTH", "tags": ["mission_f10", "vaicom_identifier"]}
+{"raw_stt": "Request a FLEX NORTH", "expected_command": "FLEX NORTH", "tags": ["mission_f10", "request_alias"]}

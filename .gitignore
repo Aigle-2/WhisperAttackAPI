@@ -12,6 +12,10 @@ desktop.ini
 *.p12
 *.pfx
 
+# Local, machine-specific helper/deploy scripts (personal, untracked)
+*.local.cmd
+*.local.ps1
+
 # Python caches and local environments
 __pycache__/
 *.py[cod]

@@ -14,6 +14,7 @@ from threading import Event, Lock
 
 from vaivox.application.ports import (
     AudioRecorder,
+    MissionVocabularySnapshot,
     SpeechToText,
     SpeechToTextError,
     StatusLevel,
@@ -39,6 +40,8 @@ from vaivox.application.refresh_vocabulary import (
 )
 from vaivox.application.shutdown import Shutdown
 from vaivox.application.vocabulary_commands import AddWordMapping
+from vaivox.domain.commands.model import CommandSurface, VoiceAttackCommand
+from vaivox.domain.commands.resolver import CommandSurfaceResolver
 from vaivox.domain.reconciliation.snapper import (
     DEFAULT_HIGH,
     DEFAULT_LOW,
@@ -50,6 +53,9 @@ from vaivox.infrastructure.audio.recorder import SoundDeviceRecorder
 from vaivox.infrastructure.config.settings import VaivoxConfiguration
 from vaivox.infrastructure.inbound.control_server import ControlSocketServer
 from vaivox.infrastructure.kneeboard.sink import KneeboardSink
+from vaivox.infrastructure.reload.command_surface_resolver import (
+    ReloadableCommandSurfaceResolver,
+)
 from vaivox.infrastructure.reload.phrase_snapper import ReloadablePhraseSnapper
 from vaivox.infrastructure.stt.factory import create_stt_backend
 from vaivox.infrastructure.stt.keyterms import SttKeyterms
@@ -69,6 +75,10 @@ from vaivox.infrastructure.vocabulary.reconciliation_vocabulary import (
     RepositoryReconciliationVocabulary,
 )
 from vaivox.infrastructure.vocabulary.vaicom_generator import VaicomVocabularyGenerator
+from vaivox.infrastructure.voiceattack.dispatcher import (
+    DisabledVaicomF10ActionSink,
+    TypedCommandDispatcher,
+)
 from vaivox.infrastructure.voiceattack.sink import VoiceAttackCommandSink
 
 _LOGGER = logging.getLogger(__name__)
@@ -157,10 +167,15 @@ def build(
     reconciliation_vocabulary = RepositoryReconciliationVocabulary(vocabulary_repository)
     mission_phrase_lock = Lock()
     mission_phrases: tuple[str, ...] = ()
+    mission_surfaces: tuple[CommandSurface, ...] = ()
 
     def get_mission_phrases() -> tuple[str, ...]:
         with mission_phrase_lock:
             return mission_phrases
+
+    def get_mission_surfaces() -> tuple[CommandSurface, ...]:
+        with mission_phrase_lock:
+            return mission_surfaces
 
     def get_mission_keyterms() -> list[str]:
         return _mission_keyterms_from_phrases(get_mission_phrases())
@@ -170,21 +185,24 @@ def build(
     command_sink = VoiceAttackCommandSink(
         config.get_voiceattack_host(), config.get_voiceattack_port(), reporter
     )
+    command_dispatcher = TypedCommandDispatcher(command_sink, DisabledVaicomF10ActionSink())
     kneeboard_sink = KneeboardSink(config.get_text_line_length, reporter)
     telemetry = build_telemetry_sink(config)
     snapper = build_phrase_snapper(config, recorder, reporter)
+    surface_resolver = build_command_surface_resolver(config)
     add_word_mapping = AddWordMapping(vocabulary_repository, clock)
 
     start_recording = StartRecording(recorder, reporter)
     stop_and_reconcile = StopAndReconcile(
         recorder,
         speech_to_text,
-        command_sink,
+        command_dispatcher,
         kneeboard_sink,
         reconciliation_vocabulary,
         reporter,
         clock,
         telemetry,
+        surface_resolver,
         snapper,
         vocabulary_repository,
     )
@@ -208,17 +226,22 @@ def build(
     generator = VaicomVocabularyGenerator(config.app_data_location)
 
     def apply_phrase_index() -> int:
-        phrases = _merge_phrase_indexes(
-            load_phrase_index(config.app_data_location),
-            get_mission_phrases(),
-        )
+        base_phrases = load_phrase_index(config.app_data_location)
+        phrases = _merge_phrase_indexes(base_phrases, get_mission_phrases())
         snapper.reload(phrases)
+        surface_resolver.reload(
+            _merge_command_surfaces(
+                _voiceattack_surfaces(base_phrases),
+                get_mission_surfaces(),
+            )
+        )
         return len(phrases)
 
-    def apply_mission_phrase_index(phrases: Sequence[str]) -> int:
-        nonlocal mission_phrases
+    def apply_mission_phrase_index(snapshot: MissionVocabularySnapshot) -> int:
+        nonlocal mission_phrases, mission_surfaces
         with mission_phrase_lock:
-            mission_phrases = tuple(phrases)
+            mission_phrases = snapshot.phrases
+            mission_surfaces = snapshot.surfaces
         return apply_phrase_index()
 
     def get_core_phrases() -> tuple[str, ...]:
@@ -241,6 +264,7 @@ def build(
         VaicomF10MissionVocabulary(mission_log_path, max_phrases=mission_max_phrases),
         reporter,
         apply_mission_phrase_index,
+        verbose=lambda: config.get_bool_setting("mission_f10_verbose_logging", False),
     )
 
     api_server: IntrospectionServer | None = None
@@ -256,8 +280,9 @@ def build(
             ReloadVocabulary(apply_phrase_index, reporter),
             SimulateUtterance(
                 reconciliation_vocabulary,
+                surface_resolver,
                 snapper,
-                command_sink,
+                command_dispatcher,
                 kneeboard_sink,
                 telemetry,
                 reporter,
@@ -299,6 +324,51 @@ def _merge_phrase_indexes(base: Sequence[str], mission: Sequence[str]) -> list[s
         seen.add(key)
         merged.append(normalized)
     return merged
+
+
+def _voiceattack_surfaces(phrases: Sequence[str]) -> list[CommandSurface]:
+    """Build static VoiceAttack command surfaces from the permanent phrase index."""
+    surfaces: list[CommandSurface] = []
+    seen: set[str] = set()
+    for phrase in phrases:
+        label = phrase.strip()
+        if not label:
+            continue
+        key = label.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        surfaces.append(
+            CommandSurface(
+                id=f"voiceattack:{_surface_key(label)}",
+                label=label,
+                aliases=(),
+                source="voiceattack",
+                scope="global",
+                dispatch_target=VoiceAttackCommand(label),
+            )
+        )
+    return surfaces
+
+
+def _merge_command_surfaces(
+    base: Sequence[CommandSurface],
+    mission: Sequence[CommandSurface],
+) -> list[CommandSurface]:
+    """Merge permanent and mission command surfaces without duplicating ids."""
+    merged: list[CommandSurface] = []
+    seen: set[str] = set()
+    for surface in (*base, *mission):
+        if surface.id in seen:
+            continue
+        seen.add(surface.id)
+        merged.append(surface)
+    return merged
+
+
+def _surface_key(value: str) -> str:
+    key = "".join(character if character.isalnum() else "-" for character in value.casefold())
+    return "-".join(part for part in key.split("-") if part) or "unnamed"
 
 
 def _mission_keyterms_from_phrases(phrases: Sequence[str]) -> list[str]:
@@ -391,6 +461,21 @@ ReloadablePhraseSnapper` so a regenerated index can be swapped in at idle withou
         on_reload=announce_reload,
         build=build,
     )
+
+
+def build_command_surface_resolver(config: VaivoxConfiguration) -> ReloadableCommandSurfaceResolver:
+    """Build the hot-reloadable command-surface resolver from the generated index."""
+    phrases = load_phrase_index(config.app_data_location)
+
+    def build(index: Sequence[CommandSurface]) -> CommandSurfaceResolver:
+        high = config.get_float_setting("snap_high", DEFAULT_HIGH, min_value=0.0, max_value=100.0)
+        low = config.get_float_setting("snap_low", DEFAULT_LOW, min_value=0.0, max_value=100.0)
+        margin = config.get_float_setting(
+            "snap_margin", DEFAULT_MARGIN, min_value=0.0, max_value=100.0
+        )
+        return CommandSurfaceResolver(index, high=high, low=low, margin=margin)
+
+    return ReloadableCommandSurfaceResolver(_voiceattack_surfaces(phrases), build=build)
 
 
 def load_speech_to_text(

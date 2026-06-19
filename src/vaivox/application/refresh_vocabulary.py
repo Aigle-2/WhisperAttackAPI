@@ -20,6 +20,7 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 
 from vaivox.application.ports import (
+    MissionVocabularySnapshot,
     MissionVocabularySource,
     StatusLevel,
     StatusReporter,
@@ -163,25 +164,33 @@ class RefreshMissionVocabulary:
         self,
         source: MissionVocabularySource,
         reporter: StatusReporter,
-        apply_mission_phrases: Callable[[Sequence[str]], int],
+        apply_mission_snapshot: Callable[[MissionVocabularySnapshot], int],
+        verbose: Callable[[], bool] | None = None,
     ) -> None:
-        """Wire the source, reporter, and live overlay apply hook.
+        """Wire the source, reporter, live overlay apply hook, and verbose-logging gate.
 
         Args:
             source: Adapter that reads the current mission-only command phrases.
             reporter: User-facing status reporter.
-            apply_mission_phrases: Replaces the mission overlay in the live phrase index
-                and returns the total phrase count now active.
+            apply_mission_snapshot: Replaces the mission overlay in the live phrase and
+                command-surface indexes, and returns the total phrase count now active.
+            verbose: Optional predicate read each poll; when it returns ``True`` the use
+                case emits a detailed F10 pull block (source, markers, match counts, the
+                commands) to the reporter for debugging. ``None`` disables verbose logging.
         """
         self._source = source
         self._reporter = reporter
-        self._apply_mission_phrases = apply_mission_phrases
+        self._apply_mission_snapshot = apply_mission_snapshot
+        self._verbose = verbose
         self._phrases: tuple[str, ...] = ()
+        self._verbose_logged = False
 
     def execute(self) -> MissionVocabularyRefreshResult:
         """Refresh the mission overlay if the discovered F10 phrases changed."""
         snapshot = self._source.load()
-        if snapshot.phrases == self._phrases:
+        changed = snapshot.phrases != self._phrases
+        self._log_verbose_if_enabled(snapshot, changed)
+        if not changed:
             return MissionVocabularyRefreshResult(
                 changed=False,
                 mission_phrases=len(snapshot.phrases),
@@ -193,7 +202,7 @@ class RefreshMissionVocabulary:
         previous_keys = {phrase.lower() for phrase in self._phrases}
         new_count = sum(1 for phrase in snapshot.phrases if phrase.lower() not in previous_keys)
         self._phrases = snapshot.phrases
-        live_phrases = self._apply_mission_phrases(snapshot.phrases)
+        live_phrases = self._apply_mission_snapshot(snapshot)
         mission_count = len(snapshot.phrases)
 
         if mission_count:
@@ -214,3 +223,61 @@ class RefreshMissionVocabulary:
             source=snapshot.source,
             reason=snapshot.reason,
         )
+
+    def _log_verbose_if_enabled(self, snapshot: MissionVocabularySnapshot, changed: bool) -> None:
+        """Emit the verbose F10 pull log when enabled (full block on change/first, else one line).
+
+        The full block is logged the first time verbose logging is seen (so toggling it on
+        always yields detail) and on every change; otherwise an unchanged poll logs a single
+        line so the operator can confirm the poll runs without flooding the log every cycle.
+        """
+        if self._verbose is None or not self._verbose():
+            self._verbose_logged = False
+            return
+        if changed or not self._verbose_logged:
+            self._verbose_logged = True
+            self._report_verbose_detail(snapshot)
+        else:
+            self._reporter.report(
+                f"Mission F10 poll: unchanged ({len(snapshot.phrases)} commands "
+                f"from {snapshot.source or 'no log'})",
+                StatusLevel.DETAIL,
+            )
+
+    def _report_verbose_detail(self, snapshot: MissionVocabularySnapshot) -> None:
+        """Report the detailed F10 pull block: resolved source, match counts, and commands."""
+        self._reporter.report("Mission F10 pull:", StatusLevel.DETAIL)
+        diagnostics = snapshot.diagnostics
+        if diagnostics is not None:
+            latest = (
+                f", latest mission: {diagnostics.latest_mission}"
+                if (diagnostics.latest_mission)
+                else ""
+            )
+            self._reporter.report(
+                f"  log: {diagnostics.log_path or 'not found'} ({diagnostics.file_bytes} bytes)",
+                StatusLevel.DETAIL,
+            )
+            self._reporter.report(
+                f"  mission markers: {diagnostics.mission_markers}{latest}", StatusLevel.DETAIL
+            )
+            self._reporter.report(
+                f"  F10 matches: current-mission={diagnostics.scoped_matches}, "
+                f"whole-log={diagnostics.whole_log_matches}, "
+                f"fallback={'yes' if diagnostics.fallback_used else 'no'}",
+                StatusLevel.DETAIL,
+            )
+        self._reporter.report(
+            f"  result: {len(snapshot.phrases)} commands ({snapshot.reason})", StatusLevel.DETAIL
+        )
+        self._report_phrase_listing(snapshot.phrases)
+
+    def _report_phrase_listing(self, phrases: Sequence[str]) -> None:
+        """List the pulled commands (capped) so an empty/partial pull is fully visible."""
+        listing_cap = 50
+        for index, phrase in enumerate(phrases[:listing_cap], start=1):
+            self._reporter.report(f"    {index}. {phrase}", StatusLevel.DETAIL)
+        if len(phrases) > listing_cap:
+            self._reporter.report(
+                f"    ... and {len(phrases) - listing_cap} more", StatusLevel.DETAIL
+            )

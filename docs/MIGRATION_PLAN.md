@@ -146,9 +146,18 @@ generator, and ADR-0005 **background** generation on first run / on stale all no
   `settings.cfg` (`snap_high` / `snap_low` / `snap_margin`), injected via the snapper
   builder so a hot-reload keeps the calibration. Dynamic VAICOM-imported F10 menu
   commands are kept out of the permanent files: VAIVOX polls `VAICOMPRO.log` for the
-  current mission's `Action ...` commands, hot-applies them as an in-memory mission
-  overlay, and feeds them into API STT keyterms per transcription. *Deferred:* recipient
-  segmentation.
+  current mission's F10 entries and exposes **command surfaces** with a human label
+  (`FLEX NORTH`) plus the preserved VAICOM identifier/metadata (`Action FLEX NORTH`,
+  `ActionIndex`, `Command ID`). The labels feed the UI/STT keyterms, while the typed
+  `VaicomF10Action` target feeds ADR-0012 routing. *Deferred:* recipient segmentation
+  and real F10 action execution after the DCS/VAICOM smoke test.
+- **Command surfaces + typed dispatch** (ADR-0012) ✅: `domain/commands/` defines
+  `CommandSurface`, `VoiceAttackCommand`, `VaicomF10Action`, `CommandResolution`, and
+  `DispatchOutcome`; `CommandSurfaceResolver` resolves reconciled text before legacy
+  snap fallback. `route_command` dispatches typed targets through `CommandDispatcher`,
+  preserving `VoiceAttackCommandSink` for static commands and using a disabled-by-default
+  `VaicomF10Action` sink until smoke-tested. Telemetry keeps `match` for static
+  `Command.Exists` only and adds `resolution` + `dispatch` for typed routing.
 - **Agent API + skills** (ADR-0010) ✅ read API **+ gated actions**: the localhost
   introspection API serves `/status`, `/metrics`, `/reconciliations`, `/vocabulary` +
   `POST /reconcile/dry-run` over read-only query use cases, plus the **mutating actions**

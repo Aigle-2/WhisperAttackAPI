@@ -80,12 +80,32 @@ class VoiceAttackCommandSink:
                 # the `with` closes it. Self-contained error handling -> never raises here.
                 outcome = self._read_match_outcome(client_socket)
             _LOGGER.info("Sent text to VoiceAttack: %s", command)
-            self._reporter.report(f"Sent text to VoiceAttack: {command}", StatusLevel.SUCCESS)
+            self._report_outcome(command, outcome)
             return outcome
         except Exception as error:
             _LOGGER.error("Error calling VoiceAttack (%s:%s): %s", self._host, self._port, error)
             self._reporter.report(f"Error calling VoiceAttack: {error}", StatusLevel.ERROR)
             return None
+
+    def _report_outcome(self, command: str, outcome: MatchOutcome | None) -> None:
+        """Report what was sent and whether VoiceAttack actually had a command for it.
+
+        ``matched`` comes from the plugin return channel (ADR-0006). Surfacing it makes an
+        unrecognized command (e.g. a wrong F10 phrasing) obvious instead of silent — the
+        rebuilt plugin replies, while an un-rebuilt one yields ``None`` and the original
+        "Sent text" message, preserving parity.
+        """
+        if outcome is None:
+            self._reporter.report(f"Sent text to VoiceAttack: {command}", StatusLevel.SUCCESS)
+        elif not outcome.matched:
+            self._reporter.report(f"VoiceAttack has no command for: {command}", StatusLevel.WARNING)
+        elif outcome.resolved_command and outcome.resolved_command != command:
+            self._reporter.report(
+                f"VoiceAttack matched: {command} → {outcome.resolved_command}",
+                StatusLevel.SUCCESS,
+            )
+        else:
+            self._reporter.report(f"VoiceAttack matched: {command}", StatusLevel.SUCCESS)
 
     def _read_match_outcome(self, client_socket: socket.socket) -> MatchOutcome | None:
         """Read and parse the plugin's reply, degrading to ``None`` on any shortfall.

@@ -23,7 +23,13 @@ import logging
 from collections import deque
 from pathlib import Path
 
-from vaivox.domain.telemetry.model import MatchOutcome, ReconciliationOutcome, SnapSummary
+from vaivox.domain.commands.model import DispatchOutcome
+from vaivox.domain.telemetry.model import (
+    CommandResolutionSummary,
+    MatchOutcome,
+    ReconciliationOutcome,
+    SnapSummary,
+)
 from vaivox.infrastructure.telemetry.jsonl_sink import TELEMETRY_FILE
 
 _LOGGER = logging.getLogger(__name__)
@@ -112,6 +118,8 @@ def _outcome_from_line(line: str) -> ReconciliationOutcome | None:
         destination=destination,
         match=_match_from_record(record.get("match")),
         snap=_snap_from_record(record.get("snap")),
+        resolution=_resolution_from_record(record.get("resolution")),
+        dispatch=_dispatch_from_record(record.get("dispatch")),
     )
 
 
@@ -145,6 +153,46 @@ def _snap_from_record(record: object) -> SnapSummary | None:
         score=score,
         near_misses=_near_misses_from_record(record.get("near_misses")),
     )
+
+
+def _resolution_from_record(record: object) -> CommandResolutionSummary | None:
+    """Reconstruct the nested command-surface resolution summary, if present."""
+    if not isinstance(record, dict):
+        return None
+    decision = record.get("decision")
+    if not isinstance(decision, str):
+        return None
+    raw_score = record.get("score", 0.0)
+    score = float(raw_score) if isinstance(raw_score, (int, float)) else 0.0
+    return CommandResolutionSummary(
+        decision=decision,
+        surface_id=_optional_str(record.get("surface_id")),
+        label=_optional_str(record.get("label")),
+        source=_optional_str(record.get("source")),
+        target_kind=_optional_str(record.get("target_kind")),
+        matched_alias=_optional_str(record.get("matched_alias")),
+        score=score,
+    )
+
+
+def _dispatch_from_record(record: object) -> DispatchOutcome | None:
+    """Reconstruct the nested typed dispatch outcome, if present."""
+    if not isinstance(record, dict):
+        return None
+    target_kind = record.get("target_kind")
+    accepted = record.get("accepted")
+    if not isinstance(target_kind, str) or not isinstance(accepted, bool):
+        return None
+    return DispatchOutcome(
+        target_kind=target_kind,
+        accepted=accepted,
+        resolved_target=_optional_str(record.get("resolved_target")),
+        detail=_optional_str(record.get("detail")),
+    )
+
+
+def _optional_str(value: object) -> str | None:
+    return value if isinstance(value, str) else None
 
 
 def _near_misses_from_record(record: object) -> tuple[tuple[str, float], ...]:

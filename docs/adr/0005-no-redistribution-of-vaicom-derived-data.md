@@ -40,6 +40,11 @@ VAIVOX treats those as a non-persistent mission overlay that is polled and hot-a
 at runtime (ADR-0009), not as part of the permanent generated keyterm/phrase-index
 files.
 
+After ADR-0012, the mission overlay is a catalog of ephemeral command surfaces rather
+than permanent vocabulary. The UI and STT keyterms use the human label (for example
+`FLEX NORTH`), while routing preserves VAICOM's identifier (`Action FLEX NORTH`),
+`ActionIndex`, and `Command ID` as a typed `VaicomF10Action` target.
+
 ## Options Considered
 
 ### Option A: Generator-only + auto-discovery (chosen)

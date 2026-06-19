@@ -8,7 +8,13 @@ file, malformed lines) against a tmp data dir so nothing touches the real per-us
 from __future__ import annotations
 
 from vaivox.application.ports import TelemetryReader
-from vaivox.domain.telemetry.model import MatchOutcome, ReconciliationOutcome, SnapSummary
+from vaivox.domain.commands.model import DispatchOutcome
+from vaivox.domain.telemetry.model import (
+    CommandResolutionSummary,
+    MatchOutcome,
+    ReconciliationOutcome,
+    SnapSummary,
+)
 from vaivox.infrastructure.telemetry.jsonl_reader import JsonlTelemetryReader
 from vaivox.infrastructure.telemetry.jsonl_sink import TELEMETRY_FILE, JsonlTelemetrySink
 
@@ -56,6 +62,20 @@ def test_recent_round_trips_sink_records(tmp_path) -> None:
                 score=95.0,
                 near_misses=(("Texaco request fuel", 71.0),),
             ),
+            resolution=CommandResolutionSummary(
+                decision="resolved",
+                surface_id="voiceattack:texaco-request-rejoin",
+                label="Texaco request rejoin",
+                source="voiceattack",
+                target_kind="voiceattack",
+                matched_alias="Texaco request rejoin",
+                score=100.0,
+            ),
+            dispatch=DispatchOutcome(
+                target_kind="voiceattack",
+                accepted=True,
+                resolved_target="Texaco request rejoin",
+            ),
         )
     )
 
@@ -67,6 +87,20 @@ def test_recent_round_trips_sink_records(tmp_path) -> None:
     assert outcome.snap is not None
     assert outcome.snap.decision == "snapped"
     assert outcome.snap.near_misses == (("Texaco request fuel", 71.0),)
+    assert outcome.resolution == CommandResolutionSummary(
+        decision="resolved",
+        surface_id="voiceattack:texaco-request-rejoin",
+        label="Texaco request rejoin",
+        source="voiceattack",
+        target_kind="voiceattack",
+        matched_alias="Texaco request rejoin",
+        score=100.0,
+    )
+    assert outcome.dispatch == DispatchOutcome(
+        target_kind="voiceattack",
+        accepted=True,
+        resolved_target="Texaco request rejoin",
+    )
 
 
 def test_recent_returns_last_n_oldest_first(tmp_path) -> None:

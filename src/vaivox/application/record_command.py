@@ -13,7 +13,8 @@ from dataclasses import dataclass
 from vaivox.application.ports import (
     AudioRecorder,
     Clock,
-    CommandSink,
+    CommandDispatcher,
+    CommandSurfaceMatcher,
     KneeboardSink,
     PhraseMatcher,
     ReconciliationVocabulary,
@@ -23,10 +24,22 @@ from vaivox.application.ports import (
     TelemetrySink,
     VocabularyRepository,
 )
+from vaivox.domain.commands.model import (
+    CommandResolution,
+    CommandResolutionDecision,
+    DispatchOutcome,
+    DispatchTargetKind,
+    VoiceAttackCommand,
+)
 from vaivox.domain.reconciliation.model import ReconciliationResult
 from vaivox.domain.reconciliation.pipeline import reconcile
 from vaivox.domain.reconciliation.snapper import NearMiss, SnapDecision, SnapResult
-from vaivox.domain.telemetry.model import MatchOutcome, ReconciliationOutcome, SnapSummary
+from vaivox.domain.telemetry.model import (
+    CommandResolutionSummary,
+    MatchOutcome,
+    ReconciliationOutcome,
+    SnapSummary,
+)
 from vaivox.domain.vocabulary.governor import VocabularyGovernor
 from vaivox.domain.vocabulary.keyterms import PHONETIC_ALPHABET
 from vaivox.domain.vocabulary.model import VocabularyKind
@@ -76,12 +89,13 @@ class StopAndReconcile:
         self,
         recorder: AudioRecorder,
         speech_to_text: SpeechToText,
-        command_sink: CommandSink,
+        command_dispatcher: CommandDispatcher,
         kneeboard_sink: KneeboardSink,
         vocabulary: ReconciliationVocabulary,
         reporter: StatusReporter,
         clock: Clock,
         telemetry: TelemetrySink,
+        surface_matcher: CommandSurfaceMatcher,
         snapper: PhraseMatcher,
         repository: VocabularyRepository,
     ) -> None:
@@ -90,12 +104,13 @@ class StopAndReconcile:
         Args:
             recorder: The audio recorder port.
             speech_to_text: The speech-to-text provider port.
-            command_sink: The VoiceAttack command sink port.
+            command_dispatcher: The typed command dispatcher port.
             kneeboard_sink: The DCS kneeboard sink port.
             vocabulary: The reconciliation vocabulary port (read live each utterance).
             reporter: The user-facing status reporter port.
             clock: The clock port (transcription timing and the usage-stamp time).
             telemetry: The telemetry sink port.
+            surface_matcher: The command-surface resolver applied before legacy fallback.
             snapper: The phrase matcher (ADR-0011) applied after reconciliation —
                 a frozen :class:`~vaivox.domain.reconciliation.snapper.PhraseSnapper` or
                 the idle-hot-reloadable adapter (ADR-0009), behind the same port. With an
@@ -106,12 +121,13 @@ class StopAndReconcile:
         """
         self._recorder = recorder
         self._stt = speech_to_text
-        self._command_sink = command_sink
+        self._command_dispatcher = command_dispatcher
         self._kneeboard_sink = kneeboard_sink
         self._vocabulary = vocabulary
         self._reporter = reporter
         self._clock = clock
         self._telemetry = telemetry
+        self._surface_matcher = surface_matcher
         self._snapper = snapper
         self._repository = repository
 
@@ -176,8 +192,9 @@ class StopAndReconcile:
         """Route the reconciled command to the kneeboard or VoiceAttack (shared logic)."""
         route_command(
             result,
+            surface_matcher=self._surface_matcher,
             snapper=self._snapper,
-            command_sink=self._command_sink,
+            command_dispatcher=self._command_dispatcher,
             kneeboard_sink=self._kneeboard_sink,
             telemetry=self._telemetry,
             repository=self._repository,
@@ -203,13 +220,16 @@ class RouteOutcome:
     sent_text: str
     snap: SnapResult | None
     match: MatchOutcome | None = None
+    resolution: CommandResolution | None = None
+    dispatch: DispatchOutcome | None = None
 
 
 def route_command(
     result: ReconciliationResult,
     *,
+    surface_matcher: CommandSurfaceMatcher,
     snapper: PhraseMatcher,
-    command_sink: CommandSink,
+    command_dispatcher: CommandDispatcher,
     kneeboard_sink: KneeboardSink,
     telemetry: TelemetrySink,
     repository: VocabularyRepository,
@@ -231,8 +251,9 @@ def route_command(
 
     Args:
         result: The staged reconciliation result to route.
+        surface_matcher: The command-surface resolver applied before legacy fallback.
         snapper: The phrase matcher applied on the VoiceAttack path.
-        command_sink: The VoiceAttack command sink (returns the match outcome).
+        command_dispatcher: The typed command dispatcher.
         kneeboard_sink: The DCS kneeboard sink.
         telemetry: The telemetry sink the outcome is recorded to.
         repository: The vocabulary repository stamped with usage on a match.
@@ -246,17 +267,44 @@ def route_command(
     command = result.command_text
     snap: SnapResult | None = None
     match: MatchOutcome | None = None
+    resolution: CommandResolution | None = None
+    dispatch: DispatchOutcome | None = None
     if command.lower().startswith(_KNEEBOARD_TRIGGER):
         note_text = command[len(_KNEEBOARD_TRIGGER) :].strip()
         kneeboard_sink.send(note_text)
+        dispatch = DispatchOutcome(
+            target_kind="kneeboard",
+            accepted=True,
+            resolved_target=note_text,
+            detail="kneeboard note",
+        )
         destination, sent_text = "kneeboard", note_text
     else:
-        snap = snapper.snap(command)
-        _report_snap_diagnostics(command, snap, reporter)
-        if snap.text != command:
-            _LOGGER.info("Phrase snap: '%s' -> '%s' (%.1f)", command, snap.text, snap.score)
-        match = command_sink.send(snap.text)
-        destination, sent_text = "voiceattack", snap.text
+        resolution = surface_matcher.resolve(command)
+        _report_resolution_diagnostics(command, resolution, reporter)
+        if (
+            resolution.decision is CommandResolutionDecision.RESOLVED
+            and resolution.surface is not None
+        ):
+            surface = resolution.surface
+            target = surface.dispatch_target
+            dispatch_result = command_dispatcher.dispatch(target)
+            dispatch = dispatch_result.dispatch
+            match = dispatch_result.match
+            destination = dispatch.target_kind
+            sent_text = dispatch.resolved_target or surface.label
+            if not dispatch.accepted:
+                _report_dispatch_rejection(dispatch, reporter)
+        else:
+            snap = snapper.snap(command)
+            _report_snap_diagnostics(command, snap, reporter)
+            if snap.text != command:
+                _LOGGER.info("Phrase snap: '%s' -> '%s' (%.1f)", command, snap.text, snap.score)
+            dispatch_result = command_dispatcher.dispatch(VoiceAttackCommand(snap.text))
+            dispatch = dispatch_result.dispatch
+            match = dispatch_result.match
+            destination = DispatchTargetKind.VOICEATTACK.value
+            sent_text = dispatch.resolved_target or snap.text
         if match is not None and match.matched:
             # Only a positive match stamps usage; the matched command (resolved_command,
             # which equals sent_text for VA's exact-name check) carries the surviving tokens.
@@ -271,9 +319,18 @@ def route_command(
             destination=destination,
             match=match,
             snap=_snap_summary(snap),
+            resolution=_resolution_summary(resolution),
+            dispatch=dispatch,
         )
     )
-    return RouteOutcome(destination=destination, sent_text=sent_text, snap=snap, match=match)
+    return RouteOutcome(
+        destination=destination,
+        sent_text=sent_text,
+        snap=snap,
+        match=match,
+        resolution=resolution,
+        dispatch=dispatch,
+    )
 
 
 class SimulateUtterance:
@@ -289,8 +346,9 @@ class SimulateUtterance:
     def __init__(
         self,
         vocabulary: ReconciliationVocabulary,
+        surface_matcher: CommandSurfaceMatcher,
         snapper: PhraseMatcher,
-        command_sink: CommandSink,
+        command_dispatcher: CommandDispatcher,
         kneeboard_sink: KneeboardSink,
         telemetry: TelemetrySink,
         reporter: StatusReporter,
@@ -301,8 +359,9 @@ class SimulateUtterance:
 
         Args:
             vocabulary: The reconciliation vocabulary port (read live).
+            surface_matcher: The command-surface resolver applied before legacy fallback.
             snapper: The phrase matcher applied on the VoiceAttack path.
-            command_sink: The VoiceAttack command sink.
+            command_dispatcher: The typed command dispatcher.
             kneeboard_sink: The DCS kneeboard sink.
             telemetry: The telemetry sink the outcome is recorded to.
             reporter: The status reporter (surfaces the agent-triggered dispatch).
@@ -310,8 +369,9 @@ class SimulateUtterance:
             clock: The clock supplying the usage-stamp time.
         """
         self._vocabulary = vocabulary
+        self._surface_matcher = surface_matcher
         self._snapper = snapper
-        self._command_sink = command_sink
+        self._command_dispatcher = command_dispatcher
         self._kneeboard_sink = kneeboard_sink
         self._telemetry = telemetry
         self._reporter = reporter
@@ -337,8 +397,9 @@ class SimulateUtterance:
         )
         outcome = route_command(
             result,
+            surface_matcher=self._surface_matcher,
             snapper=self._snapper,
-            command_sink=self._command_sink,
+            command_dispatcher=self._command_dispatcher,
             kneeboard_sink=self._kneeboard_sink,
             telemetry=self._telemetry,
             repository=self._repository,
@@ -387,6 +448,24 @@ def _stamp_matched_usage(matched_text: str, repository: VocabularyRepository, cl
         credited.extend(_GOVERNOR.attribute_tier1(matched_tokens, edit_output_tokens))
     if credited:
         repository.mark_used(credited, clock.now())
+
+
+def _resolution_summary(
+    resolution: CommandResolution | None,
+) -> CommandResolutionSummary | None:
+    """Flatten command-surface resolution into the telemetry record."""
+    if resolution is None:
+        return None
+    surface = resolution.surface
+    return CommandResolutionSummary(
+        decision=str(resolution.decision),
+        surface_id=None if surface is None else surface.id,
+        label=None if surface is None else surface.label,
+        source=None if surface is None else surface.source,
+        target_kind=None if surface is None else surface.dispatch_target.target_kind.value,
+        matched_alias=resolution.matched_alias,
+        score=resolution.score,
+    )
 
 
 def _snap_summary(snap: SnapResult | None) -> SnapSummary | None:
@@ -451,6 +530,55 @@ def _report_snap_diagnostics(
     reporter.report(
         f"Phrase snap: raw; best '{snap.candidate}' (score {score})",
         StatusLevel.DETAIL,
+    )
+
+
+def _report_resolution_diagnostics(
+    command: str,
+    resolution: CommandResolution,
+    reporter: StatusReporter | None,
+) -> None:
+    """Surface the command-surface resolver decision in the UI."""
+    if reporter is None:
+        return
+
+    surface = resolution.surface
+    if resolution.decision is CommandResolutionDecision.RESOLVED and surface is not None:
+        score = _format_score(resolution.score)
+        if resolution.matched_alias == command:
+            reporter.report(
+                f"Command surface: exact '{surface.label}' ({surface.source}, score {score})",
+                StatusLevel.DETAIL,
+            )
+        else:
+            reporter.report(
+                f"Command surface: resolved '{surface.label}' ({surface.source}, score {score})",
+                StatusLevel.SUCCESS,
+            )
+        return
+
+    if resolution.decision is CommandResolutionDecision.ABSTAINED and surface is not None:
+        reporter.report(
+            f"Command surface: abstained; best '{surface.label}' "
+            f"({_format_score(resolution.score)})",
+            StatusLevel.WARNING,
+        )
+        return
+
+    reporter.report("Command surface: raw fallback", StatusLevel.DETAIL)
+
+
+def _report_dispatch_rejection(
+    dispatch: DispatchOutcome,
+    reporter: StatusReporter | None,
+) -> None:
+    """Surface an adapter refusing to execute a typed dispatch target."""
+    if reporter is None:
+        return
+    detail = f": {dispatch.detail}" if dispatch.detail else ""
+    reporter.report(
+        f"Dispatch not accepted for {dispatch.target_kind}{detail}",
+        StatusLevel.WARNING,
     )
 
 

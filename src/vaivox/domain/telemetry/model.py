@@ -10,6 +10,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from vaivox.domain.commands.model import DispatchOutcome
+
 
 @dataclass(frozen=True)
 class MatchOutcome:
@@ -58,6 +60,33 @@ class SnapSummary:
 
 
 @dataclass(frozen=True)
+class CommandResolutionSummary:
+    """The command-surface resolver's decision for one utterance.
+
+    This is a telemetry-facing projection of a
+    :class:`~vaivox.domain.commands.model.CommandResolution`: it records the resolved
+    surface and target kind without embedding the whole command catalog entry.
+
+    Attributes:
+        decision: ``"resolved"``, ``"abstained"``, or ``"raw"``.
+        surface_id: The selected/best surface id, when any candidate was useful.
+        label: The selected/best human-facing label.
+        source: The surface catalog source (``"voiceattack"`` / ``"mission_f10"``).
+        target_kind: The dispatch target kind associated with the surface.
+        matched_alias: The alias/label that scored best.
+        score: The resolver score (0-100).
+    """
+
+    decision: str
+    surface_id: str | None = None
+    label: str | None = None
+    source: str | None = None
+    target_kind: str | None = None
+    matched_alias: str | None = None
+    score: float = 0.0
+
+
+@dataclass(frozen=True)
 class ReconciliationOutcome:
     """The full provenance of one utterance, from raw transcript to dispatch.
 
@@ -71,6 +100,8 @@ class ReconciliationOutcome:
         match: The downstream match outcome, or ``None`` when unknown.
         snap: The phrase-snapper's decision (ADR-0011), or ``None`` when the snapper is
             not wired (preserving the prior record shape).
+        resolution: The typed command-surface resolution, when the resolver was wired.
+        dispatch: The typed dispatch adapter outcome, when routing dispatched a target.
     """
 
     raw_text: str
@@ -80,3 +111,5 @@ class ReconciliationOutcome:
     destination: str
     match: MatchOutcome | None = None
     snap: SnapSummary | None = None
+    resolution: CommandResolutionSummary | None = None
+    dispatch: DispatchOutcome | None = None

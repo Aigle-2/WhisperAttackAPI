@@ -8,6 +8,7 @@ real VAICOM install (the adapter's own discovery/staleness lives in its test).
 from __future__ import annotations
 
 from vaivox.application.ports import (
+    MissionVocabularyDiagnostics,
     MissionVocabularySnapshot,
     StatusLevel,
     VocabularyGenerationResult,
@@ -142,9 +143,9 @@ def test_mission_vocabulary_applies_only_when_the_overlay_changes():
     )
     applied: list[tuple[str, ...]] = []
 
-    def apply(phrases):
-        applied.append(tuple(phrases))
-        return 12 + len(phrases)
+    def apply(snapshot):
+        applied.append(snapshot.phrases)
+        return 12 + len(snapshot.phrases)
 
     use_case = RefreshMissionVocabulary(source, reporter, apply)
 
@@ -165,6 +166,50 @@ def test_mission_vocabulary_applies_only_when_the_overlay_changes():
     assert any("Mission F10 vocabulary cleared" in message for message in reporter.messages())
 
 
+def test_mission_vocabulary_verbose_logging_reports_pull_detail():
+    reporter = FakeReporter()
+    snapshot = MissionVocabularySnapshot(
+        ("Action CHECK IN", "Action FENCE OUT"),
+        source="VAICOMPRO.log",
+        diagnostics=MissionVocabularyDiagnostics(
+            log_path="VAICOMPRO.log",
+            file_bytes=1234,
+            mission_markers=2,
+            latest_mission="Foothold",
+            scoped_matches=2,
+            whole_log_matches=5,
+            fallback_used=False,
+            deduped_phrases=2,
+        ),
+    )
+    source = FakeMissionSource([snapshot, snapshot])
+    use_case = RefreshMissionVocabulary(
+        source, reporter, lambda snapshot: len(snapshot.phrases), verbose=lambda: True
+    )
+
+    use_case.execute()  # first poll: full detail block (overlay changed () -> 2)
+    messages = reporter.messages()
+    assert any("Mission F10 pull:" in message for message in messages)
+    assert any("VAICOMPRO.log" in message and "1234 bytes" in message for message in messages)
+    assert any("current-mission=2" in message and "whole-log=5" in message for message in messages)
+    assert any("Action CHECK IN" in message for message in messages)
+
+    reporter.lines.clear()
+    use_case.execute()  # unchanged poll: a single line, not the full block
+    follow_up = reporter.messages()
+    assert any("unchanged" in message for message in follow_up)
+    assert not any("Mission F10 pull:" in message for message in follow_up)
+
+
+def test_mission_vocabulary_verbose_logging_off_is_silent_about_pull_detail():
+    reporter = FakeReporter()
+    source = FakeMissionSource([MissionVocabularySnapshot(("Action CHECK IN",), source="log")])
+
+    RefreshMissionVocabulary(source, reporter, lambda snapshot: len(snapshot.phrases)).execute()
+
+    assert not any("Mission F10 pull:" in message for message in reporter.messages())
+
+
 def test_mission_vocabulary_reports_only_the_newly_pulled_command_count():
     reporter = FakeReporter()
     source = FakeMissionSource(
@@ -176,7 +221,9 @@ def test_mission_vocabulary_reports_only_the_newly_pulled_command_count():
         ]
     )
 
-    use_case = RefreshMissionVocabulary(source, reporter, lambda phrases: 100 + len(phrases))
+    use_case = RefreshMissionVocabulary(
+        source, reporter, lambda snapshot: 100 + len(snapshot.phrases)
+    )
 
     first = use_case.execute()
     second = use_case.execute()

@@ -922,12 +922,37 @@ def discover_vaicom_root() -> Path | None:
     return None
 
 
+def _split_alternates(command_string: str) -> list[str]:
+    """Split a CommandString on top-level ``;`` only — not inside ``[...]`` groups.
+
+    VAICOM groups spoken alternatives inside brackets (``[Alpha;Bravo;Zulu]``); splitting the
+    whole string on ``;`` would shatter those groups into dangling-bracket fragments
+    (``[Alpha``, ``Zulu] [0..1]``). Splitting only at bracket depth zero keeps each grammar
+    slot intact so :func:`_strip_placeholders` can drop it cleanly.
+    """
+    parts: list[str] = []
+    depth = 0
+    start = 0
+    for index, char in enumerate(command_string):
+        if char == "[":
+            depth += 1
+        elif char == "]":
+            depth = max(0, depth - 1)
+        elif char == ";" and depth == 0:
+            parts.append(command_string[start:index])
+            start = index + 1
+    parts.append(command_string[start:])
+    return parts
+
+
 def collect_phrases(vaicom_root: Path, saved_games: Path) -> list[str]:
     """Collect candidate command phrases (whole, not word-split) for the snap index.
 
     The authoritative spoken commands are the VoiceAttack ``<CommandString>`` entries
     (``;`` separates alternate spoken forms of one command); the ``keywords.txt`` bracket
-    chunks add recipient/command vocabulary. Each part is cleaned but kept whole.
+    chunks add recipient/command vocabulary. Each form is split on top-level ``;`` only (not
+    inside ``[...]`` alternation groups, which would shatter them) and cleaned, but kept
+    whole — including its ``[...]`` parameter slots, which show the command's arguments.
     """
     phrases: list[str] = []
 
@@ -940,7 +965,7 @@ def collect_phrases(vaicom_root: Path, saved_games: Path) -> list[str]:
         for command_string in re.findall(
             r"<CommandString>(.*?)</CommandString>", text, flags=re.IGNORECASE | re.DOTALL
         ):
-            for part in html.unescape(command_string).split(";"):
+            for part in _split_alternates(html.unescape(command_string)):
                 phrases.append(clean_term(part))
 
     keywords_path = vaicom_root / "Export" / "keywords.txt"
@@ -957,7 +982,8 @@ def _is_command_phrase(phrase: str) -> bool:
     """Whether a cleaned phrase belongs in the snap index.
 
     Keep multi-word phrases of a sane length; single words are handled by the keyterms +
-    per-token fuzzy step and would over-trigger the snapper.
+    per-token fuzzy step and would over-trigger the snapper. ``[...]`` parameter slots are
+    kept (they document the command's arguments) and count toward the word/length budget.
     """
     words = phrase.split()
     return 2 <= len(words) <= 8 and len(phrase) <= 60

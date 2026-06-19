@@ -10,7 +10,13 @@ from __future__ import annotations
 import json
 
 from vaivox.application.ports import TelemetrySink
-from vaivox.domain.telemetry.model import MatchOutcome, ReconciliationOutcome, SnapSummary
+from vaivox.domain.commands.model import DispatchOutcome
+from vaivox.domain.telemetry.model import (
+    CommandResolutionSummary,
+    MatchOutcome,
+    ReconciliationOutcome,
+    SnapSummary,
+)
 from vaivox.infrastructure.telemetry.jsonl_sink import TELEMETRY_FILE, JsonlTelemetrySink
 
 
@@ -82,6 +88,43 @@ def test_record_serializes_nested_snap_summary(tmp_path) -> None:
         "candidate": "Texaco request rejoin",
         "score": 95.0,
         "near_misses": [],
+    }
+
+
+def test_record_serializes_resolution_and_dispatch(tmp_path) -> None:
+    sink = JsonlTelemetrySink(str(tmp_path))
+    outcome = ReconciliationOutcome(
+        raw_text="FLEX NORTH",
+        cleaned_text="FLEX NORTH",
+        command_text="FLEX NORTH",
+        sent_text="Action FLEX NORTH",
+        destination="vaicom_f10_action",
+        resolution=CommandResolutionSummary(
+            decision="resolved",
+            surface_id="mission_f10:action-flex-north",
+            label="FLEX NORTH",
+            source="mission_f10",
+            target_kind="vaicom_f10_action",
+            matched_alias="FLEX NORTH",
+            score=100.0,
+        ),
+        dispatch=DispatchOutcome(
+            target_kind="vaicom_f10_action",
+            accepted=False,
+            resolved_target="Action FLEX NORTH",
+            detail="disabled",
+        ),
+    )
+
+    sink.record(outcome)
+
+    record = json.loads((tmp_path / TELEMETRY_FILE).read_text(encoding="utf-8").strip())
+    assert record["resolution"]["surface_id"] == "mission_f10:action-flex-north"
+    assert record["dispatch"] == {
+        "target_kind": "vaicom_f10_action",
+        "accepted": False,
+        "resolved_target": "Action FLEX NORTH",
+        "detail": "disabled",
     }
 
 

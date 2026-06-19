@@ -32,6 +32,10 @@ scores the candidate command against a **phrase index** of valid VAICOM command 
 (`rapidfuzz`) and snaps to the best match **only when confidence is high**; otherwise it
 abstains (sends the reconciled text unchanged) and emits a near-miss.
 
+ADR-0012 extends this policy from "snap to a command phrase" to "resolve to a command
+surface". Static VoiceAttack fallback still uses `PhraseSnapper`, while typed routing
+uses the same conservative high/low/margin thresholds in `CommandSurfaceResolver`.
+
 - **Three bands (one scorer, ADR-0006):**
   `score ≥ HIGH` **and** `(best − runner_up) ≥ MARGIN` → **snap** to the best phrase;
   `LOW ≤ score < HIGH` → **abstain** + record a near-miss (top-N + scores);
@@ -47,10 +51,11 @@ abstains (sends the reconciled text unchanged) and emits a near-miss.
 - **Same scorer as near-miss.** Snapping and near-miss reporting are one function at
   different cut-offs (ADR-0006): near-miss is just the abstain-band output. No duplicate
   scoring logic.
-- **Wiring.** `StopAndReconcile` calls the snapper after `reconcile(...)` and before
-  routing; the snap decision (snapped / abstained / raw + candidate + scores) is recorded
-  in the `ReconciliationOutcome` telemetry (ADR-0006), and the eval's `abstain` metric
-  starts being populated.
+- **Wiring.** `StopAndReconcile` now resolves command surfaces after `reconcile(...)`.
+  When no typed surface is safe to dispatch, it falls back to the snapper before sending
+  a static `VoiceAttackCommand`. The snap decision (snapped / abstained / raw +
+  candidate + scores) is recorded in the `ReconciliationOutcome` telemetry (ADR-0006),
+  and the eval's `abstain` metric starts being populated.
 - **Calibration, not guesswork.** `HIGH` / `LOW` / `MARGIN` are tuned against the eval
   (ADR-0008) and real telemetry (ADR-0006) — start strict, loosen only with evidence,
   and the eval gate keeps `wrong_match == 0` as they move.
@@ -106,8 +111,8 @@ unacceptable one.
    whole-phrase index; **recipient segmentation** is still deferred.*
 2. [x] Implement the `PhraseSnapper` domain service (snap / abstain / near-miss; runner-up
    margin; one scorer shared with near-miss) — `domain/reconciliation/snapper.py`.
-3. [x] Wire it into `StopAndReconcile` after `reconcile(...)`; record the snap decision in
-   the `ReconciliationOutcome` (ADR-0006).
+3. [x] Wire it into `StopAndReconcile` as the static VoiceAttack fallback; record the
+   snap decision in the `ReconciliationOutcome` (ADR-0006).
 4. [x] Add eval items + tags for snap cases; keep the `wrong_match == 0` gate; calibrate
    `HIGH` / `LOW` / `MARGIN` against the eval and telemetry.
 5. [x] Expose the thresholds in settings with documented, conservative defaults

@@ -14,8 +14,13 @@ or leaves the text untouched. The decisive constraint is the eval's ``wrong_matc
 guard (ADR-0008): in a combat sim, firing the *wrong* command is far worse than missing
 one the user simply repeats — so the snapper biases hard toward abstaining.
 
-Three bands share **one scorer** (ADR-0006), so near-miss reporting is just the
-abstain-band output of the same function at a different cut-off:
+An **exact match short-circuits the bands**: when the normalized utterance equals a known
+command verbatim, it snaps to that command's stored form regardless of the runner-up
+margin. A different command scoring close by is irrelevant when the input *is* one of them
+— without this, a perfect hit whose runner-up merely falls within ``MARGIN`` would be
+misreported as an abstain near-miss. Otherwise three bands share **one scorer** (ADR-0006),
+so near-miss reporting is just the abstain-band output of the same function at a different
+cut-off:
 
 - ``best >= HIGH`` **and** ``(best - runner_up) >= MARGIN`` -> **snapped** to the best
   phrase. The runner-up margin is mandatory: never snap when two phrases are similarly
@@ -118,7 +123,8 @@ class PhraseSnapper:
     phrase with a conservative composite scorer: ``token_sort_ratio`` for word-order
     variation, plus a compact no-space ratio for phrases where VoiceAttack stores a
     spoken compound as one token. Whatever the scoring, the runner-up margin guard is
-    mandatory.
+    mandatory for fuzzy matches — an exact (verbatim) match short-circuits it, since an
+    utterance that *is* a known command is unambiguous (see :meth:`snap`).
 
     Args:
         phrase_index: The valid command phrases to snap to. An empty index makes
@@ -149,6 +155,12 @@ class PhraseSnapper:
                 index.append(stripped)
         self._index: tuple[str, ...] = tuple(index)
         self._normalized: tuple[str, ...] = tuple(_normalize(phrase) for phrase in self._index)
+        # Exact-match lookup: normalized phrase -> its position. The dedup above guarantees
+        # each normalized key maps to exactly one phrase, so an utterance that *is* a known
+        # command resolves to a single, unambiguous phrase (see :meth:`snap`).
+        self._exact: dict[str, int] = {
+            normalized: position for position, normalized in enumerate(self._normalized)
+        }
         self._high = high
         self._low = low
         self._margin = margin
@@ -161,6 +173,10 @@ class PhraseSnapper:
     def snap(self, text: str) -> SnapResult:
         """Score ``text`` against the phrase index and apply the three bands.
 
+        An exact (verbatim, after normalization) match short-circuits the bands and snaps
+        regardless of the runner-up margin: when the utterance *is* a known command, a
+        different command scoring close by is not a real ambiguity.
+
         Args:
             text: The reconciled command text to consider snapping.
 
@@ -171,6 +187,23 @@ class PhraseSnapper:
         query = _normalize(text)
         if not self._index or not query:
             return SnapResult(decision=SnapDecision.RAW, text=text)
+
+        # Exact-match short-circuit (ADR-0011): the normalized utterance *is* a known
+        # command, so the user said exactly that phrase. The runner-up margin guards
+        # against ambiguity between two close phrases, but there is none here — a different
+        # command scoring nearby is irrelevant when the input matches one verbatim. Snap
+        # regardless of margin (and emit the canonical stored form, which also fixes the
+        # input back to canonical casing/punctuation). The dedup in __init__ guarantees at
+        # most one phrase matches exactly; an exact normalized match always scores 100.
+        exact_position = self._exact.get(query)
+        if exact_position is not None:
+            exact_phrase = self._index[exact_position]
+            return SnapResult(
+                decision=SnapDecision.SNAPPED,
+                text=exact_phrase,
+                candidate=exact_phrase,
+                score=100.0,
+            )
 
         scored = _top_scores(query, self._normalized, limit=_NEAR_MISS_LIMIT)
         best_phrase = self._index[scored[0][1]]

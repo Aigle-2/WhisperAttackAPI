@@ -42,6 +42,7 @@ if TYPE_CHECKING:
 
     from ttkbootstrap import Style
 
+    from vaivox.application.refresh_vocabulary import MissionVocabularyRefreshResult
     from vaivox.domain.vocabulary.keyterms import KeytermBudget
 
 _LOGGER = logging.getLogger(__name__)
@@ -277,13 +278,25 @@ class VaivoxApp:
             min_value=5,
             max_value=3600,
         )
+        first = True
         while not self.exit_event.is_set():
             try:
-                self.refresh_mission_vocabulary.execute()
+                result = self.refresh_mission_vocabulary.execute()
+                if first:
+                    first = False
+                    self._report_mission_f10_source(result)
             except Exception:
                 _LOGGER.exception("Mission F10 vocabulary refresh failed.")
             if self.exit_event.wait(interval):
                 break
+
+    def _report_mission_f10_source(self, result: MissionVocabularyRefreshResult) -> None:
+        """Write a one-time diagnostic of where the F10 overlay is read from and what it found."""
+        source = result.source or "no VAICOM log found"
+        self.writer.write(
+            f"Mission F10 source: {source} — {result.mission_phrases} commands ({result.reason})",
+            TAG_GREY,
+        )
 
     def _configure_window_styles(
         self,
@@ -453,25 +466,33 @@ class VaivoxApp:
         required_score = self.config.get_float_setting(
             "snap_high", DEFAULT_HIGH, min_value=0.0, max_value=100.0
         )
-        VaivoxSettings(self.window, required_score, self.save_required_snap_score)
+        verbose_f10 = self.config.get_bool_setting("mission_f10_verbose_logging", False)
+        VaivoxSettings(self.window, required_score, verbose_f10, self.save_settings)
 
-    def save_required_snap_score(self, required_score: float) -> bool:
-        """Persist and apply the phrase-snap required score from the settings modal."""
+    def save_settings(self, required_score: float, verbose_f10_logging: bool) -> bool:
+        """Persist and apply the settings modal (snap score + verbose F10 pull logging).
+
+        The verbose flag is read live by the mission F10 poll, so it takes effect on the
+        next poll without a restart; the snap score is hot-applied through the snapper.
+        """
         value = f"{required_score:.1f}"
         try:
-            self.config.set_custom_settings({"snap_high": value})
+            self.config.set_custom_settings(
+                {
+                    "snap_high": value,
+                    "mission_f10_verbose_logging": "true" if verbose_f10_logging else "false",
+                }
+            )
             applied = self.phrase_snapper.rebuild_current()
         except Exception as error:
-            _LOGGER.exception("Failed to save phrase snap settings.")
+            _LOGGER.exception("Failed to save settings.")
             self.writer.report(f"Failed to save settings: {error}", StatusLevel.ERROR)
             return False
 
-        if applied:
-            status = f"Phrase snap required score: {value}"
-            level = StatusLevel.SUCCESS
-        else:
-            status = f"Phrase snap required score saved: {value} (pending)"
-            level = StatusLevel.WARNING
+        verbose_state = "on" if verbose_f10_logging else "off"
+        pending = "" if applied else " (snap score pending)"
+        status = f"Settings saved: snap score {value}, F10 verbose {verbose_state}{pending}"
+        level = StatusLevel.SUCCESS if applied else StatusLevel.WARNING
         self.writer.report(status, level)
         self._set_status(status)
         return True

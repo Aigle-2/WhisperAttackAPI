@@ -17,3 +17,6 @@ button 5
 TACAN Air to Air
 TACAN Air refuel
 TACAN Oscar Alfa Lima
+
+# Mission F10 overlay surface examples (ephemeral; not permanent shipped vocabulary).
+FLEX NORTH

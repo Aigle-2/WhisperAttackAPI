@@ -14,29 +14,32 @@ if TYPE_CHECKING:
 
 
 class VaivoxSettings:
-    """Show a modal that edits phrase-snap calibration settings."""
+    """Show a modal that edits phrase-snap calibration and diagnostic settings."""
 
     def __init__(
         self,
         root: Window,
         required_score: float,
-        save_required_score: Callable[[float], bool],
+        verbose_f10_logging: bool,
+        save_settings: Callable[[float, bool], bool],
     ) -> None:
         """Build and display the settings modal.
 
         Args:
             root: The parent application window.
             required_score: The current ``snap_high`` threshold.
-            save_required_score: Callback invoked with the parsed score on OK.
+            verbose_f10_logging: The current ``mission_f10_verbose_logging`` flag.
+            save_settings: Callback invoked with ``(score, verbose_f10_logging)`` on OK;
+                returns ``True`` when the settings were saved (closing the modal).
         """
-        from tkinter import LEFT, StringVar, font
+        from tkinter import LEFT, BooleanVar, StringVar, font
 
-        from ttkbootstrap import Button, Entry, Frame, Label, Toplevel
+        from ttkbootstrap import Button, Checkbutton, Entry, Frame, Label, Toplevel
 
-        self.save_required_score = save_required_score
+        self.save_settings = save_settings
 
-        modal_width = 520
-        modal_height = 220
+        modal_width = 540
+        modal_height = 280
         parent_x = root.winfo_x()
         parent_y = root.winfo_y()
         parent_width = root.winfo_width()
@@ -53,6 +56,7 @@ class VaivoxSettings:
         modal.grab_set()
 
         score = StringVar(value=f"{required_score:.1f}")
+        verbose = BooleanVar(value=verbose_f10_logging)
         error = StringVar(value="")
         custom_font = font.Font(family="GG Sans", size=11)
 
@@ -60,6 +64,15 @@ class VaivoxSettings:
         score_frame.pack(pady=(22, 8), padx=16, fill="x")
         Label(score_frame, text="Phrase snap required score").pack(side=LEFT, padx=5)
         Entry(score_frame, textvariable=score, font=custom_font, width=8).pack(side=LEFT, padx=5)
+
+        verbose_frame = Frame(modal)
+        verbose_frame.pack(pady=(4, 8), padx=16, fill="x")
+        Checkbutton(
+            verbose_frame,
+            text="Verbose F10 command-pull logging",
+            variable=verbose,
+            bootstyle="round-toggle",
+        ).pack(side=LEFT, padx=5)
 
         Label(modal, textvariable=error, bootstyle="danger").pack(pady=(0, 4), padx=20, anchor="w")
 
@@ -73,11 +86,11 @@ class VaivoxSettings:
             if not 0.0 <= parsed <= 100.0:
                 error.set("Enter a score from 0 to 100.")
                 return
-            if self.save_required_score(parsed):
+            if self.save_settings(parsed, bool(verbose.get())):
                 modal.destroy()
 
         button_frame = Frame(modal)
-        button_frame.pack(pady=32, padx=16, fill="x")
+        button_frame.pack(pady=28, padx=16, fill="x")
         Button(
             button_frame,
             text="Ok",

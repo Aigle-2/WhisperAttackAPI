@@ -143,6 +143,23 @@ def test_send_against_plugin_that_closes_without_replying_is_unknown():
     assert StatusLevel.ERROR not in reporter.levels()  # EOF is not an error
 
 
+def test_send_reports_a_warning_when_voiceattack_has_no_matching_command():
+    def handler(conn, _received):
+        conn.sendall(b'{"text":"Action Lion","matched":false,"resolved_command":null}\n')
+
+    server = _OneShotServer(handler)
+    reporter = FakeReporter()
+    sink = VoiceAttackCommandSink(server.host, server.port, reporter)
+    try:
+        outcome = sink.send("Action Lion")
+    finally:
+        server.close()
+
+    assert outcome == MatchOutcome(matched=False, resolved_command=None)
+    # The unrecognized command is surfaced (was silent before), so a wrong phrasing is obvious.
+    assert StatusLevel.WARNING in reporter.levels()
+
+
 def test_send_with_malformed_reply_is_unknown():
     server = _OneShotServer(lambda conn, received: conn.sendall(b"garbage\n"))
     reporter = FakeReporter()
