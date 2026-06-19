@@ -26,13 +26,18 @@ fonctionnel plus large que le durcissement d'audit traite dans ce passage.
     plus `generator unavailable` quand une installation VAICOM valide existe.
 
 - [ ] Faire le smoke end-to-end VoiceAttack + VAICOM + DCS.
+  - Progression: le bridge VoiceAttack sans DCS est valide sur le poste dev:
+    plugin VAIVOX initialise, listener `65433`, serveur VAIVOX `65432`, TX5 press/release
+    declenchent start/stop, transcription `Radio Check`, puis envoi vers VoiceAttack.
   - Tester une commande connue: declenchement in-game, `matched=true`, telemetry, usage hit.
   - Tester une commande inconnue: `matched=false`, near-miss en telemetry, pas de stamp usage.
   - Critere d'acceptation: recette documentee avec captures/logs ou notes de resultat.
 
-- [ ] Re-pointer et valider le profil VoiceAttack.
+- [x] Re-pointer et valider le profil VoiceAttack.
   - Importer `VAIVOX - VA Profile.vap`.
   - Re-pointer les actions "Execute an external plugin function" vers le plugin VAIVOX.
+  - Validation dev rig: TX5 press/release pointent vers VAIVOX avec les contextes
+    `Start VAIVOX Recording` / `Stop VAIVOX Recording`.
   - Critere d'acceptation: `Start VAIVOX Recording` et `Stop VAIVOX Recording` pilotent
     bien le serveur depuis VoiceAttack.
 
@@ -131,6 +136,8 @@ fonctionnel plus large que le durcissement d'audit traite dans ce passage.
 ## P2 - Fonctionnel reconciliation/vocabulaire
 
 - [ ] Faire le test end-to-end du generateur VAICOM sur une vraie installation.
+  - Progression: generation live depuis l'app sur une installation VAICOM reelle:
+    `1437` phrases, `850` keyterms, puis hot-apply de `1437` phrases.
   - Verifier `vaicom_keyterms.txt` et `phrase_index.txt`.
   - Comparer les phrases generees aux commandes VoiceAttack reelles.
   - Critere d'acceptation: le snapper ameliore les matchs sans casser `wrong_match == 0`.
@@ -193,5 +200,6 @@ fonctionnel plus large que le durcissement d'audit traite dans ce passage.
 - [x] `dotnet build plugin/VaivoxVAPlugin/VaivoxVAPlugin.csproj -c Release`
 - [x] `build_exe.ps1 -Profile api -Clean`
 - [x] Audit dependances Python + NuGet sans vulnerabilites connues.
+- [x] Smoke VoiceAttack bridge sans DCS documente.
 - [ ] Smoke VoiceAttack + VAICOM + DCS documente.
 - [ ] Zip release complet verifie sur une machine propre.

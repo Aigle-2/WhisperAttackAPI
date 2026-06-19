@@ -203,7 +203,7 @@ def test_phrase_snapper_snaps_near_miss_before_routing():
     # the snap decision is recorded in telemetry.
     command_sink = FakeCommandSink()
     snapper = PhraseSnapper(["Texaco request rejoin", "Texaco request fuel"])
-    use_case, _reporter, telemetry = _make_stop(
+    use_case, reporter, telemetry = _make_stop(
         FakeRecorder(),
         FakeSpeechToText(text="texaco request rejon"),  # near-miss, no fuzzy word fires
         command_sink=command_sink,
@@ -220,12 +220,55 @@ def test_phrase_snapper_snaps_near_miss_before_routing():
     assert outcome.snap is not None
     assert outcome.snap.decision == "snapped"
     assert outcome.snap.candidate == "Texaco request rejoin"
+    assert any(
+        message.startswith("Phrase snap: snapped to 'Texaco request rejoin' (score ")
+        and level is StatusLevel.SUCCESS
+        for message, level in reporter.lines
+    )
+
+
+def test_phrase_snapper_reports_abstained_near_misses_to_user():
+    # When the snapper will not rewrite the command, the GUI still shows the best
+    # candidates so the operator can see why VoiceAttack may not match the phrase.
+    command_sink = FakeCommandSink()
+    snapper = PhraseSnapper(
+        ["Texaco request rejoin", "Texaco request fuel"],
+        high=99.0,
+        low=50.0,
+        margin=1.0,
+    )
+    use_case, reporter, telemetry = _make_stop(
+        FakeRecorder(),
+        FakeSpeechToText(text="texaco request rejon"),
+        command_sink=command_sink,
+        config=FakeConfig(fuzzy_words=[]),
+        snapper=snapper,
+    )
+
+    use_case.execute()
+
+    assert command_sink.sent == ["texaco request rejon"]
+    outcome = telemetry.outcomes[0]
+    assert outcome.snap is not None
+    assert outcome.snap.decision == "abstained"
+    assert outcome.snap.candidate == "Texaco request rejoin"
+    assert any(
+        message.startswith("Phrase snap: abstained; best 'Texaco request rejoin' (score ")
+        and level is StatusLevel.WARNING
+        for message, level in reporter.lines
+    )
+    assert any(
+        message.startswith("Near misses: Texaco request rejoin ")
+        and "Texaco request fuel" in message
+        and level is StatusLevel.WARNING
+        for message, level in reporter.lines
+    )
 
 
 def test_empty_index_snapper_is_a_no_op():
     # With no phrase index (production default) the snapper passes the command through.
     command_sink = FakeCommandSink()
-    use_case, _reporter, telemetry = _make_stop(
+    use_case, reporter, telemetry = _make_stop(
         FakeRecorder(), FakeSpeechToText(text="kobuletti tower"), command_sink=command_sink
     )
 
@@ -233,6 +276,7 @@ def test_empty_index_snapper_is_a_no_op():
 
     assert command_sink.sent == ["Kobuleti tower"]  # only the per-token fuzzy step ran
     assert telemetry.outcomes[0].snap.decision == "raw"
+    assert ("Phrase snap: raw (no phrase index loaded)", StatusLevel.DETAIL) in reporter.lines
 
 
 def test_kneeboard_note_is_never_snapped():

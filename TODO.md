@@ -17,38 +17,45 @@ adapter** (`vaivox-mcp`) + `vaivox-debug` skill (ADR-0010).
 ## 1. Blocked — needs a Windows + VoiceAttack + DCS machine (not CI-testable)
 
 The reconciliation return loop (ADR-0006) is now **implemented on both sides** and the
-plugin build is reproducible. What is left here is the hardware **deploy + `.vap` re-point +
-DCS smoke** that *activates* it live. Until the rebuilt plugin is deployed the server
-degrades cleanly to "unknown" against the old (pre-return-channel) plugin (behaviour parity).
+VoiceAttack 2 plugin is deployed on the dev rig. The live bridge has been smoke-tested
+through VoiceAttack: the VAIVOX plugin initializes, listens on `65433`, press/release
+actions drive the VAIVOX app on `65432`, recording starts/stops, STT returns text, and
+VAIVOX sends the command back to VoiceAttack. What remains here is the actual
+**DCS/VAICOM in-game smoke** that proves `matched=true` / `matched=false` telemetry and
+usage stamping against a live mission.
 
 - [x] **C# plugin return channel (ADR-0006) — code done.**
   `plugin/VaivoxVAPlugin/VaivoxVAPlugin.cs` replies `{ text, matched, resolved_command }` on
   the same socket (before `Command.Execute`); `VoiceAttackCommandSink.send` reads it (short
   timeout, EOF/timeout/malformed → unknown) and `route_command` populates
   `ReconciliationOutcome.match`. Tested with in-memory fakes + a real-socket round-trip.
-  *Hardware-gated:* the deploy + smoke below to see it live.
+  *Hardware-gated:* the DCS smoke below still needs to see match outcomes live.
 - [x] **Live usage stamping / recency (ADR-0004) — code done.** On a matched outcome
   `route_command` runs Tier 1 attribution and calls
   `VocabularyRepository.mark_used(credited_ids, clock.now())`. *Reachable scope:* attribution
   is a surface-form Tier 1 proxy today — the live pipeline reads vocab from `config` (not the
   repository) and emits no per-edit provenance, so an entry is credited when its canonical
   term survives into the matched command; precise per-edit provenance waits on the pipeline
-  reading vocab from `VocabularyRepository`. Activated by the deploy below.
+  reading vocab from `VocabularyRepository`. Activated by the DCS smoke below.
 - [ ] **Near-miss capture (ADR-0006 §3).** The snapper already records near-misses into
   telemetry (`SnapSummary.near_misses`) on every abstain. *Remaining:* the offline
   review/report that proposes new mappings/aliases from frequent not-founds — needs
-  accumulated live match data (so it follows the deploy below).
+  accumulated live match data (so it follows the DCS smoke below).
 - [ ] **Tier 2 counterfactual attribution (ADR-0004).** Pipeline-replay + phrase-index
   oracle on ambiguous matches. Larger; needs the match signal **and** the pipeline reading
   vocab from `VocabularyRepository` (so attribution can credit by exact edit, not surface form).
-- [x] **C# `dotnet` build + deploy — done on the dev rig.** `VaivoxVAPlugin.csproj` (net48,
-  pinned `VaivoxVAPlugin.dll`, `VoiceAttack.dll` via `-p:VoiceAttackDir` / `VOICEATTACK_DIR`,
-  CI-buildable via `Microsoft.NETFramework.ReferenceAssemblies`) built **0 warnings / 0
-  errors** against real VoiceAttack **2.1.8** (runtime `v4.0.30319`); the DLL was copied into
-  `…\VoiceAttack 2\Apps\VAIVOX\` and its entry points (`VA_Id` / `VA_Init1` / `VA_Invoke1` /
-  `VA_Exit1` / …) verified by reflection. *GUI-only remainder:* re-point the commands in
-  `VAIVOX - VA Profile.vap` to the VAIVOX plugin inside VoiceAttack — the `.vap` is a
-  binary/encrypted export, so there is no text GUID to script.
+- [x] **C# `dotnet` build + deploy — done on the dev rig.** `VaivoxVAPlugin.csproj`
+  targets `net8.0`, matching the VoiceAttack 2 plugin contract; it built **0 warnings / 0
+  errors** with a .NET 8 SDK. `VaivoxVAPlugin.dll` + `VaivoxVAPlugin.deps.json` were
+  deployed to both `%APPDATA%\VoiceAttack2\Apps\VAIVOX\` (VA 2.1.8+ preferred third-party
+  plugin location) and `...\VoiceAttack 2\Apps\VAIVOX\`. VoiceAttack logs confirm
+  `Plugin 'VAIVOX' initialized` and `VAIVOX listener started`.
+- [x] **VoiceAttack profile/action re-point smoke — done on the dev rig.** TX5
+  press/release actions were corrected to invoke the **VAIVOX** plugin with contexts
+  `Start VAIVOX Recording` / `Stop VAIVOX Recording`. Live result: VAIVOX starts/stops
+  recording, transcribes `Radio Check`, and logs `Sent text to VoiceAttack: Radio Check`.
+  Note: because `.vap` exports are binary/encrypted, fresh imports still need this GUI
+  validation step.
 - [ ] **DCS end-to-end smoke (ADR-0006/0002).** With VoiceAttack + VAICOM + DCS: PTT a known
   command → fires in-game + `matched=true` + a usage hit in `%LOCALAPPDATA%\VAIVOX\
   <kind>.usage.json` + `GET /metrics` shows a real `match`; PTT an unknown command →
@@ -58,9 +65,15 @@ degrades cleanly to "unknown" against the old (pre-return-channel) plugin (behav
   against a real VAICOM install; verify the emitted `%LOCALAPPDATA%\VAIVOX\vaicom_keyterms.txt`
   + `phrase_index.txt` shape (the phrase index must line up with VoiceAttack's actual
   command strings) and that the snapper improves matches with `wrong_match == 0` held.
+  *Progress:* the packaged app generated live VAICOM vocabulary on the dev rig
+  (`1437` phrases, `850` keyterms) and hot-applied `1437` phrases; the remaining check is
+  comparing the generated phrases against active VoiceAttack commands / snapper behavior.
 - [ ] **Phase 3/4 runtime validation.** The GUI window/tray, the real socket/audio/keyboard
   adapters, the PyInstaller build (`build_exe.ps1`), and the uv-based CI were verified *by
-  construction* but never executed. Smoke-test a real run + a built exe.
+  construction* but never executed. *Progress:* the built app has now run on the dev rig:
+  GUI, vocabulary refresh, control socket, VoiceAttack socket, audio recording lifecycle,
+  STT, and command send-back all worked. Remaining: tray behavior, a clean-machine zip
+  install, and the DCS smoke above.
 
 ## 2. Buildable in CI — no hardware required
 
@@ -135,6 +148,6 @@ degrades cleanly to "unknown" against the old (pre-return-channel) plugin (behav
 ---
 
 _Update this file as items land (and prefer adding a new ADR over editing decisions). The
-C# return channel has now shipped (code, both sides); section 1's remaining work is the
-hardware deploy + `.vap` re-point + DCS smoke that activates it, then the follow-ups it
+C# return channel has now shipped and the VoiceAttack bridge is live on the dev rig;
+section 1's remaining work is the DCS/VAICOM in-game smoke, then the follow-ups it
 unblocks (the near-miss review report, Tier 2 attribution)._

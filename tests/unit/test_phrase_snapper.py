@@ -49,6 +49,23 @@ def test_high_confidence_near_miss_snaps_to_correct_phrase() -> None:
         assert snapper.snap(raw).decision is SnapDecision.SNAPPED
 
 
+def test_spoken_compound_snaps_to_stored_single_token_phrase() -> None:
+    snapper = PhraseSnapper(
+        [
+            "Place the Wheelblocks",
+            "Pull the Blocks",
+            "Ground Blocks Place",
+            "Remove the Wheelblocks",
+        ]
+    )
+
+    result = snapper.snap("place wheel blocks")
+
+    assert result.decision is SnapDecision.SNAPPED
+    assert result.text == "Place the Wheelblocks"
+    assert result.score >= DEFAULT_HIGH
+
+
 def test_mid_confidence_abstains_and_reports_near_miss() -> None:
     # A score in [LOW, HIGH): the snapper holds the text and emits a near-miss instead.
     snapper = PhraseSnapper(INDEX, high=99.0, low=50.0, margin=1.0)

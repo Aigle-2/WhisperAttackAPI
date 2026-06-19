@@ -25,7 +25,7 @@ from vaivox.application.ports import (
 )
 from vaivox.domain.reconciliation.model import ReconciliationResult
 from vaivox.domain.reconciliation.pipeline import reconcile
-from vaivox.domain.reconciliation.snapper import SnapResult
+from vaivox.domain.reconciliation.snapper import NearMiss, SnapDecision, SnapResult
 from vaivox.domain.telemetry.model import MatchOutcome, ReconciliationOutcome, SnapSummary
 from vaivox.domain.vocabulary.governor import VocabularyGovernor
 from vaivox.domain.vocabulary.keyterms import PHONETIC_ALPHABET
@@ -182,6 +182,7 @@ class StopAndReconcile:
             telemetry=self._telemetry,
             repository=self._repository,
             clock=self._clock,
+            reporter=self._reporter,
         )
 
 
@@ -213,6 +214,7 @@ def route_command(
     telemetry: TelemetrySink,
     repository: VocabularyRepository,
     clock: Clock,
+    reporter: StatusReporter | None = None,
 ) -> RouteOutcome:
     """Route a reconciled command, record telemetry, and stamp usage (PTT + simulate).
 
@@ -235,6 +237,7 @@ def route_command(
         telemetry: The telemetry sink the outcome is recorded to.
         repository: The vocabulary repository stamped with usage on a match.
         clock: The clock supplying the usage-stamp time.
+        reporter: Optional user-facing reporter for phrase-snap diagnostics.
 
     Returns:
         The :class:`RouteOutcome` describing where the command went, the snap result, and
@@ -249,6 +252,7 @@ def route_command(
         destination, sent_text = "kneeboard", note_text
     else:
         snap = snapper.snap(command)
+        _report_snap_diagnostics(command, snap, reporter)
         if snap.text != command:
             _LOGGER.info("Phrase snap: '%s' -> '%s' (%.1f)", command, snap.text, snap.score)
         match = command_sink.send(snap.text)
@@ -339,6 +343,7 @@ class SimulateUtterance:
             telemetry=self._telemetry,
             repository=self._repository,
             clock=self._clock,
+            reporter=self._reporter,
         )
         self._reporter.report(
             f"Simulated utterance: '{text}' -> sent '{outcome.sent_text}' to {outcome.destination}",
@@ -402,3 +407,60 @@ def _snap_summary(snap: SnapResult | None) -> SnapSummary | None:
         score=snap.score,
         near_misses=tuple((nm.phrase, nm.score) for nm in snap.near_misses),
     )
+
+
+def _report_snap_diagnostics(
+    command: str,
+    snap: SnapResult,
+    reporter: StatusReporter | None,
+) -> None:
+    """Surface the phrase snapper's decision in the UI alongside telemetry."""
+    if reporter is None:
+        return
+
+    if snap.candidate is None:
+        reporter.report("Phrase snap: raw (no phrase index loaded)", StatusLevel.DETAIL)
+        return
+
+    score = _format_score(snap.score)
+    if snap.decision is SnapDecision.SNAPPED:
+        if snap.text == command:
+            reporter.report(
+                f"Phrase snap: exact match '{snap.text}' (score {score})",
+                StatusLevel.DETAIL,
+            )
+        else:
+            reporter.report(
+                f"Phrase snap: snapped to '{snap.text}' (score {score})",
+                StatusLevel.SUCCESS,
+            )
+        return
+
+    if snap.decision is SnapDecision.ABSTAINED:
+        reporter.report(
+            f"Phrase snap: abstained; best '{snap.candidate}' (score {score})",
+            StatusLevel.WARNING,
+        )
+        if snap.near_misses:
+            reporter.report(
+                f"Near misses: {_format_near_misses(snap.near_misses)}",
+                StatusLevel.WARNING,
+            )
+        return
+
+    reporter.report(
+        f"Phrase snap: raw; best '{snap.candidate}' (score {score})",
+        StatusLevel.DETAIL,
+    )
+
+
+def _format_near_misses(near_misses: tuple[NearMiss, ...]) -> str:
+    """Format near-miss candidates for one compact status line."""
+    return "; ".join(
+        f"{near_miss.phrase} {_format_score(near_miss.score)}" for near_miss in near_misses
+    )
+
+
+def _format_score(score: float) -> str:
+    """Format a snap score for human-readable status output."""
+    return f"{score:.1f}"

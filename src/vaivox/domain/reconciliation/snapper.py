@@ -36,7 +36,7 @@ from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
 from enum import StrEnum
 
-from rapidfuzz import fuzz, process
+from rapidfuzz import fuzz
 
 #: Minimum best score (0-100) to consider snapping to the best phrase.
 DEFAULT_HIGH = 90.0
@@ -110,9 +110,10 @@ class PhraseSnapper:
     loosen only with evidence, and the eval gate keeps ``wrong_match == 0`` as they move.
 
     Recipient segmentation (ADR-0011) is a documented follow-up: v1 scores the whole
-    phrase with ``token_sort_ratio`` (the same scorer the eval's near-miss helper uses,
-    ADR-0006), which is order-insensitive and already recovers the eval's recoverable
-    misses. Whatever the scoring, the runner-up margin guard is mandatory.
+    phrase with a conservative composite scorer: ``token_sort_ratio`` for word-order
+    variation, plus a compact no-space ratio for phrases where VoiceAttack stores a
+    spoken compound as one token. Whatever the scoring, the runner-up margin guard is
+    mandatory.
 
     Args:
         phrase_index: The valid command phrases to snap to. An empty index makes
@@ -166,17 +167,10 @@ class PhraseSnapper:
         if not self._index or not query:
             return SnapResult(decision=SnapDecision.RAW, text=text)
 
-        scored = process.extract(
-            query,
-            self._normalized,
-            scorer=fuzz.token_sort_ratio,
-            limit=_NEAR_MISS_LIMIT,
-        )
-        # ``process.extract`` returns ``(choice, score, position)`` triples sorted best
-        # first; ``position`` indexes back into the original-casing phrase list.
-        best_phrase = self._index[scored[0][2]]
-        best_score = scored[0][1]
-        runner_up = scored[1][1] if len(scored) > 1 else 0.0
+        scored = _top_scores(query, self._normalized, limit=_NEAR_MISS_LIMIT)
+        best_phrase = self._index[scored[0][1]]
+        best_score = scored[0][0]
+        runner_up = scored[1][0] if len(scored) > 1 else 0.0
 
         if best_score >= self._high and (best_score - runner_up) >= self._margin:
             return SnapResult(
@@ -188,8 +182,7 @@ class PhraseSnapper:
 
         if best_score >= self._low:
             near_misses = tuple(
-                NearMiss(phrase=self._index[position], score=score)
-                for _choice, score, position in scored
+                NearMiss(phrase=self._index[position], score=score) for score, position in scored
             )
             return SnapResult(
                 decision=SnapDecision.ABSTAINED,
@@ -220,6 +213,52 @@ def _normalize(text: str) -> str:
         The lowercased, whitespace-collapsed phrase.
     """
     return " ".join(text.lower().split())
+
+
+def _score(query: str, choice: str) -> float:
+    """Score two normalized phrases with the snapper's shared scorer.
+
+    ``token_sort_ratio`` handles word order, while the compact ratio handles spoken
+    compounds that VoiceAttack stores as a single token, such as "wheel chocks" vs.
+    "wheelchocks".
+    """
+    score = fuzz.token_sort_ratio(query, choice)
+    if _has_compound_split(query, choice):
+        score = max(score, fuzz.ratio(query.replace(" ", ""), choice.replace(" ", "")))
+    return score
+
+
+def _has_compound_split(left: str, right: str) -> bool:
+    """Whether one phrase joins adjacent tokens that the other phrase splits."""
+    left_tokens = left.split()
+    right_tokens = right.split()
+    return _has_joined_token(left_tokens, right_tokens) or _has_joined_token(
+        right_tokens, left_tokens
+    )
+
+
+def _has_joined_token(tokens: Sequence[str], other_tokens: Sequence[str]) -> bool:
+    """Return true when any token equals two or more adjacent tokens joined."""
+    for token in tokens:
+        if len(token) < 4:
+            continue
+        for start in range(len(other_tokens)):
+            combined = ""
+            for end in range(start, len(other_tokens)):
+                combined += other_tokens[end]
+                if len(combined) > len(token):
+                    break
+                if not token.startswith(combined):
+                    break
+                if end > start and combined == token:
+                    return True
+    return False
+
+
+def _top_scores(query: str, choices: Sequence[str], limit: int) -> tuple[tuple[float, int], ...]:
+    """Return ``(score, index)`` pairs sorted by score descending."""
+    scored = ((_score(query, choice), index) for index, choice in enumerate(choices))
+    return tuple(sorted(scored, key=lambda item: item[0], reverse=True)[:limit])
 
 
 def build_snapper(phrase_index: Sequence[str]) -> PhraseSnapper:
