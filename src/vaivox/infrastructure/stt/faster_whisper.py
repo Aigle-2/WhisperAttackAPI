@@ -11,6 +11,7 @@ from vaivox.infrastructure.stt.prompts import DEFAULT_DCS_PROMPT
 
 if TYPE_CHECKING:
     from vaivox.infrastructure.config.settings import VaivoxConfiguration
+    from vaivox.infrastructure.stt.keyterms import SttKeyterms
 
 
 class FasterWhisperBackend:
@@ -18,11 +19,12 @@ class FasterWhisperBackend:
 
     provider_name = "faster_whisper"
 
-    def __init__(self, config: VaivoxConfiguration) -> None:
+    def __init__(self, config: VaivoxConfiguration, _keyterms: SttKeyterms) -> None:
         """Store configuration; the model is loaded lazily in :meth:`load`.
 
         Args:
             config: The effective application configuration.
+            _keyterms: Unused; local faster-whisper gets its context from ``stt_prompt``.
         """
         self.config = config
         self.model: Any = None

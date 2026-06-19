@@ -27,8 +27,8 @@ Configuration files
 -------------------
 
 - settings.cfg: backend and app settings.
-- fuzzy_words.txt: DCS vocabulary used for fuzzy correction and STT keyterms.
-- word_mappings.txt: transcription replacements used after STT.
+- fuzzy_word.jsonl: default fuzzy-correction vocabulary.
+- word_mapping.jsonl: default transcription replacement aliases.
 
 Do not paste API keys into settings.cfg. Use "Set STT API Key.cmd" so keys are stored in
 your Windows user environment instead.

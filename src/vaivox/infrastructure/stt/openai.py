@@ -15,6 +15,7 @@ from vaivox.infrastructure.stt.prompts import DEFAULT_DCS_PROMPT
 
 if TYPE_CHECKING:
     from vaivox.infrastructure.config.settings import VaivoxConfiguration
+    from vaivox.infrastructure.stt.keyterms import SttKeyterms
 
 
 class OpenAIBackend:
@@ -23,11 +24,12 @@ class OpenAIBackend:
     provider_name = "openai"
     DEFAULT_API_URL = "https://api.openai.com/v1/audio/transcriptions"
 
-    def __init__(self, config: VaivoxConfiguration) -> None:
+    def __init__(self, config: VaivoxConfiguration, keyterms: SttKeyterms) -> None:
         """Read the OpenAI provider settings from ``config``.
 
         Args:
             config: The effective application configuration.
+            keyterms: The STT keyterm builder over structured vocabulary.
         """
         self.config = config
         self.model = config.get_provider_setting("openai", "model", "gpt-4o-transcribe")
@@ -48,7 +50,7 @@ class OpenAIBackend:
         self.prompt_keyterm_char_budget = config.get_provider_int(
             "openai", "prompt_keyterm_char_budget", 6000
         )
-        self.keyterms = config.get_budgeted_stt_keyterms(
+        self.keyterms = keyterms.get_budgeted_stt_keyterms(
             self.provider_name,
             max_terms=self.max_prompt_keyterms,
             max_total_chars=self.prompt_keyterm_char_budget,

@@ -1,9 +1,9 @@
 """One-shot CLI: migrate the legacy flat vocabulary into the JSONL source (ADR-0004).
 
-Reads the effective merged ``fuzzy_words.txt`` / ``word_mappings.txt`` (shipped defaults +
-per-user overrides) via the app configuration and seeds the structured
-``%LOCALAPPDATA%\\VAIVOX\\<kind>.jsonl`` source through the repository. Idempotent: re-running
-skips entries whose id is already present.
+Reads any legacy ``fuzzy_words.txt`` / ``word_mappings.txt`` files (application directory +
+per-user overrides) through the legacy-file adapter and seeds the structured
+``%LOCALAPPDATA%\\VAIVOX\\<kind>.jsonl`` source through the repository. Idempotent:
+re-running skips entries whose id is already present.
 
     python tools/migrate_vocabulary.py
 """
@@ -24,7 +24,7 @@ def main() -> None:
     _ensure_src_on_path()
 
     from vaivox.infrastructure.config.identity import VAIVOX
-    from vaivox.infrastructure.config.settings import VaivoxConfiguration
+    from vaivox.infrastructure.vocabulary.legacy_files import load_legacy_vocabulary
     from vaivox.infrastructure.vocabulary.jsonl_repository import JsonlVocabularyRepository
     from vaivox.infrastructure.vocabulary.migration import migrate_legacy_vocabulary
 
@@ -33,11 +33,11 @@ def main() -> None:
     app_data_dir = os.path.join(local_appdata, VAIVOX.data_dir_name)
     os.makedirs(app_data_dir, exist_ok=True)
 
-    config = VaivoxConfiguration(app_path, app_data_dir)
+    word_mappings, fuzzy_words = load_legacy_vocabulary([app_path, app_data_dir])
     repository = JsonlVocabularyRepository(app_data_dir)
     report = migrate_legacy_vocabulary(
-        config.get_word_mappings(),
-        config.get_fuzzy_words(),
+        word_mappings,
+        fuzzy_words,
         repository,
         datetime.now(),
     )

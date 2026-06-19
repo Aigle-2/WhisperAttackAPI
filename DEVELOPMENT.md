@@ -67,7 +67,7 @@ build_full.cmd
 Both wrappers call [`build_exe.ps1`](build_exe.ps1), which uses uv end to end:
 `uv sync --frozen --extra app|full --group build` to install the locked deps + the
 PyInstaller toolchain, then `uv run pyinstaller … src\vaivox\main.py`. The build
-bundles assets (`settings.cfg`, `fuzzy_words.txt`, `word_mappings.txt`, the icons, the
+bundles assets (`settings.cfg`, `fuzzy_word.jsonl`, `word_mapping.jsonl`, the icons, the
 API-key `.cmd` helpers, `README_FIRST.txt`), the VoiceAttack profile, and the plugin DLL,
 then verifies and zips the release.
 

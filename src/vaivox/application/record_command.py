@@ -14,9 +14,9 @@ from vaivox.application.ports import (
     AudioRecorder,
     Clock,
     CommandSink,
-    ConfigProvider,
     KneeboardSink,
     PhraseMatcher,
+    ReconciliationVocabulary,
     SpeechToText,
     StatusLevel,
     StatusReporter,
@@ -78,7 +78,7 @@ class StopAndReconcile:
         speech_to_text: SpeechToText,
         command_sink: CommandSink,
         kneeboard_sink: KneeboardSink,
-        config: ConfigProvider,
+        vocabulary: ReconciliationVocabulary,
         reporter: StatusReporter,
         clock: Clock,
         telemetry: TelemetrySink,
@@ -92,7 +92,7 @@ class StopAndReconcile:
             speech_to_text: The speech-to-text provider port.
             command_sink: The VoiceAttack command sink port.
             kneeboard_sink: The DCS kneeboard sink port.
-            config: The configuration provider port (read live each utterance).
+            vocabulary: The reconciliation vocabulary port (read live each utterance).
             reporter: The user-facing status reporter port.
             clock: The clock port (transcription timing and the usage-stamp time).
             telemetry: The telemetry sink port.
@@ -108,7 +108,7 @@ class StopAndReconcile:
         self._stt = speech_to_text
         self._command_sink = command_sink
         self._kneeboard_sink = kneeboard_sink
-        self._config = config
+        self._vocabulary = vocabulary
         self._reporter = reporter
         self._clock = clock
         self._telemetry = telemetry
@@ -156,8 +156,8 @@ class StopAndReconcile:
 
             result = reconcile(
                 raw_text,
-                self._config.get_word_mappings(),
-                self._config.get_fuzzy_words(),
+                self._vocabulary.get_word_mappings(),
+                self._vocabulary.get_fuzzy_words(),
                 PHONETIC_ALPHABET,
                 _FUZZY_THRESHOLD,
                 _FUZZY_THRESHOLD,
@@ -284,7 +284,7 @@ class SimulateUtterance:
 
     def __init__(
         self,
-        config: ConfigProvider,
+        vocabulary: ReconciliationVocabulary,
         snapper: PhraseMatcher,
         command_sink: CommandSink,
         kneeboard_sink: KneeboardSink,
@@ -296,7 +296,7 @@ class SimulateUtterance:
         """Wire the ports the simulate action routes through (mirrors the PTT flow).
 
         Args:
-            config: The configuration provider (word mappings / fuzzy words, read live).
+            vocabulary: The reconciliation vocabulary port (read live).
             snapper: The phrase matcher applied on the VoiceAttack path.
             command_sink: The VoiceAttack command sink.
             kneeboard_sink: The DCS kneeboard sink.
@@ -305,7 +305,7 @@ class SimulateUtterance:
             repository: The vocabulary repository stamped with usage on a match (ADR-0006).
             clock: The clock supplying the usage-stamp time.
         """
-        self._config = config
+        self._vocabulary = vocabulary
         self._snapper = snapper
         self._command_sink = command_sink
         self._kneeboard_sink = kneeboard_sink
@@ -325,8 +325,8 @@ class SimulateUtterance:
         """
         result = reconcile(
             text,
-            self._config.get_word_mappings(),
-            self._config.get_fuzzy_words(),
+            self._vocabulary.get_word_mappings(),
+            self._vocabulary.get_fuzzy_words(),
             PHONETIC_ALPHABET,
             _FUZZY_THRESHOLD,
             _FUZZY_THRESHOLD,
@@ -354,15 +354,14 @@ def _stamp_matched_usage(matched_text: str, repository: VocabularyRepository, cl
     recency/hits on the credited entries through the repository.
 
     **Reachable scope today:** the live reconciliation pipeline reads word-mappings/fuzzy
-    from ``config`` (not the repository) and emits no per-edit provenance, so attribution is
+    from the structured vocabulary projection and emits no per-edit provenance, so attribution is
     approximated by *surface form* — a repository entry (seeded by
-    ``tools/migrate_vocabulary.py`` from the same vocabulary) is credited when one of its
+    same vocabulary source) is credited when one of its
     canonical ``term`` tokens appears in the matched command. This can over-credit a term the
     speaker simply uttered, but for an LRU recency signal that is the safe error direction (a
     useful term is kept, not decayed); a positive match never *under*-credits a term that did
-    fire. Precise per-edit provenance (Tier 1 by exact edit, Tier 2 counterfactual) waits on
-    the pipeline reading vocab from the :class:`~vaivox.application.ports.VocabularyRepository`
-    (an ADR-0009 follow-up). A repository with no seeded entries is a clean no-op.
+    fire. Precise per-edit provenance (Tier 1 by exact edit, Tier 2 counterfactual) remains
+    a later pipeline enhancement. A repository with no seeded entries is a clean no-op.
 
     Args:
         matched_text: The command VoiceAttack matched (its tokens are the survivors).

@@ -86,8 +86,8 @@ C:\Users\yourname\Desktop\VAIVOX
 1. Create a shortcut to `VAIVOX.exe` if desired.
 
 Keep the folder structure intact. Do not move only the `.exe` file elsewhere; it must stay
-beside `_internal`, `settings.cfg`, `fuzzy_words.txt`, `word_mappings.txt`, the icon files,
-and the `VoiceAttack\` release assets.
+beside `_internal`, `settings.cfg`, `fuzzy_word.jsonl`, `word_mapping.jsonl`, the icon
+files, and the `VoiceAttack\` release assets.
 
 The release folder is expected to look like this:
 
@@ -97,8 +97,8 @@ VAIVOX v<version>\
   VAIVOX.exe
   Install VAIVOX VoiceAttack Plugin.exe
   settings.cfg
-  fuzzy_words.txt
-  word_mappings.txt
+  fuzzy_word.jsonl
+  word_mapping.jsonl
   vaivox_icon.png
   add_icon.png
   Set STT API Key.cmd
@@ -149,7 +149,7 @@ The default values should cover most cases but can be changed:
 - `stt_timeout_seconds` - API request timeout in seconds.
 - `stt_keyterm_sources` - Comma-separated sources used to build provider keyterms without duplicating vocabulary in `settings.cfg`.
   - Supported values: `custom`, `phonetic_alphabet`, `fuzzy_words`, `word_mapping_replacements`, `word_mapping_aliases`, `dcs_default`, `vaicom`
-- `stt_keyterms_extra` - Optional comma-separated extra provider keyterms. Prefer `fuzzy_words.txt` for domain vocabulary.
+- `stt_keyterms_extra` - Optional comma-separated extra provider keyterms. Prefer structured vocabulary for domain terms.
 - `elevenlabs_api_key_env` - Environment variable containing the ElevenLabs API key. Defaults to `ELEVENLABS_API_KEY`.
 - `elevenlabs_model` - ElevenLabs model ID, `scribe_v2` by default.
 - `elevenlabs_no_verbatim` - Removes filler words and false starts when supported. Defaults to `true`.
@@ -314,8 +314,8 @@ dist\release\VAIVOX v<version>.zip
 
 Any intermediate PyInstaller output is kept under `build`; only `dist\release` is meant to be published.
 
-The release folder contains the exe, `_internal`, `settings.cfg`, `fuzzy_words.txt`,
-`word_mappings.txt`, icons, API-key helpers, `README_FIRST.txt`, the VoiceAttack plugin
+The release folder contains the exe, `_internal`, `settings.cfg`, `fuzzy_word.jsonl`,
+`word_mapping.jsonl`, icons, API-key helpers, `README_FIRST.txt`, the VoiceAttack plugin
 installer, plus the VoiceAttack profile and plugin under `VoiceAttack\`. The maintainer checklist is
 [docs/RELEASE.md](docs/RELEASE.md).
 
@@ -336,18 +336,12 @@ whisper_model=small.en
 
 This requires the full executable built with `build_full.cmd` or a Python environment set up with `uv sync --extra full`.
 
-### word_mappings.txt
+### Structured vocabulary
 
-The `word_mappings.txt` file contains keys and values that can be used to replace a spoken word with another word. For example, if the transcription often outputs "Inter" when you are saying "Enter" then this can be added as a word placement.
-
-The word replacement configuration also supports specifying multiple words to be replaced with a single word, these are separated by a semicolon `;`. In the example below saying either "gulf" or "gold" would be replaced with "Golf".
-
-```
-gulf;gold=Golf
-inter=Inter
-```
-
-VAIVOX needs to be restarted after making changes to this file. New word mappings can be added via the configuration screen and do not require a restart. When adding new word mappings they will be created in your custom configuration file, `C:\Users\username\AppData\Local\VAIVOX\word_mappings.txt`
+VAIVOX ships default reconciliation vocabulary as JSONL source files:
+`fuzzy_word.jsonl` for fuzzy correction terms and `word_mapping.jsonl` for transcription
+replacement aliases. New word mappings added from the configuration screen are written to
+the per-user structured vocabulary under `%LOCALAPPDATA%\VAIVOX` and apply immediately.
 
 ---
 

@@ -18,8 +18,6 @@ def _config(tmp_path, settings: str) -> VaivoxConfiguration:
     app_dir.mkdir()
     data_dir.mkdir()
     (app_dir / "settings.cfg").write_text(settings, encoding="utf-8")
-    (app_dir / "word_mappings.txt").write_text("inter=Enter\n", encoding="utf-8")
-    (app_dir / "fuzzy_words.txt").write_text("Kobuleti\n", encoding="utf-8")
     return VaivoxConfiguration(str(app_dir), str(data_dir))
 
 

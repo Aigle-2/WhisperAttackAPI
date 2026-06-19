@@ -191,6 +191,22 @@ class VocabularyRepository(Protocol):
         """
 
 
+@runtime_checkable
+class ReconciliationVocabulary(Protocol):
+    """Driven port: read the effective vocabulary used by reconciliation.
+
+    This keeps the runtime command pipeline on structured vocabulary while preserving the
+    domain pipeline's compact legacy-shaped inputs: alias-to-replacement word mappings and
+    fuzzy-correction terms.
+    """
+
+    def get_word_mappings(self) -> Mapping[str, str]:
+        """Return the effective alias-to-replacement word mappings."""
+
+    def get_fuzzy_words(self) -> Sequence[str]:
+        """Return the candidate words for fuzzy correction."""
+
+
 @dataclass(frozen=True)
 class VocabularyGenerationResult:
     """The outcome of a VAICOM vocabulary generation attempt (ADR-0005).
@@ -252,17 +268,7 @@ class Clock(Protocol):
 
 @runtime_checkable
 class ConfigProvider(Protocol):
-    """Driven port: read effective configuration the use cases need at runtime.
-
-    Read live (not snapshotted) because word mappings can be added while the app
-    runs, mirroring the legacy behaviour.
-    """
-
-    def get_word_mappings(self) -> Mapping[str, str]:
-        """Return the effective alias-to-replacement word mappings."""
-
-    def get_fuzzy_words(self) -> Sequence[str]:
-        """Return the candidate words for fuzzy correction."""
+    """Driven port: read effective configuration the use cases need at runtime."""
 
     def get_safe_configuration(self) -> Mapping[str, str]:
         """Return the effective configuration with secrets redacted."""

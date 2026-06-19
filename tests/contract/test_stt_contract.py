@@ -41,11 +41,14 @@ def make_config(tmp_path, settings):
     app_dir = tmp_path / "app"
     app_dir.mkdir()
     (app_dir / "settings.cfg").write_text(settings, encoding="utf-8")
-    (app_dir / "word_mappings.txt").write_text("", encoding="utf-8")
-    (app_dir / "fuzzy_words.txt").write_text("", encoding="utf-8")
     data_dir = tmp_path / "data"
     data_dir.mkdir()
     return VaivoxConfiguration(str(app_dir), str(data_dir))
+
+
+class FakeKeyterms:
+    def get_budgeted_stt_keyterms(self, *_args, **_kwargs):
+        return []
 
 
 class FakeHTTPResponse:
@@ -86,7 +89,7 @@ class FakeWhisperModel:
 def test_adapter_satisfies_speech_to_text_port(backend_cls, tmp_path):
     config = make_config(tmp_path, f"stt_backend={backend_cls.provider_name}\n")
 
-    backend = backend_cls(config)
+    backend = backend_cls(config, FakeKeyterms())
 
     assert isinstance(backend, SpeechToText)
     assert isinstance(backend.provider_name, str) and backend.provider_name
@@ -96,7 +99,7 @@ def test_adapter_satisfies_speech_to_text_port(backend_cls, tmp_path):
 def test_factory_builds_each_backend(backend_cls, tmp_path):
     config = make_config(tmp_path, f"stt_backend={backend_cls.provider_name}\n")
 
-    backend = create_stt_backend(config)
+    backend = create_stt_backend(config, FakeKeyterms())
 
     assert isinstance(backend, backend_cls)
     assert isinstance(backend, SpeechToText)
@@ -106,7 +109,7 @@ def test_factory_rejects_unknown_backend(tmp_path):
     config = make_config(tmp_path, "stt_backend=does-not-exist\n")
 
     with pytest.raises(SpeechToTextError):
-        create_stt_backend(config)
+        create_stt_backend(config, FakeKeyterms())
 
 
 @pytest.mark.parametrize("backend_cls", API_BACKENDS)
@@ -118,7 +121,7 @@ def test_api_adapter_load_without_key_raises_typed_error(backend_cls, tmp_path, 
         f"stt_backend={provider}\n{provider}_api_key_env=VAIVOX_CONTRACT_MISSING_KEY\n",
     )
 
-    backend = backend_cls(config)
+    backend = backend_cls(config, FakeKeyterms())
 
     with pytest.raises(SpeechToTextError):
         backend.load()
@@ -129,7 +132,7 @@ def test_faster_whisper_load_without_torch_raises_typed_error(tmp_path):
         pytest.skip("torch is installed; the missing-dependency path is not exercised here")
     config = make_config(tmp_path, "stt_backend=faster_whisper\n")
 
-    backend = FasterWhisperBackend(config)
+    backend = FasterWhisperBackend(config, FakeKeyterms())
 
     with pytest.raises(SpeechToTextError):
         backend.load()
@@ -137,7 +140,7 @@ def test_faster_whisper_load_without_torch_raises_typed_error(tmp_path):
 
 def test_faster_whisper_transcribe_returns_normalized_transcription(tmp_path):
     config = make_config(tmp_path, "stt_backend=faster_whisper\n")
-    backend = FasterWhisperBackend(config)
+    backend = FasterWhisperBackend(config, FakeKeyterms())
     backend.model = FakeWhisperModel([FakeSegment("hello "), FakeSegment("world")])
 
     result = backend.transcribe("ignored.wav")
@@ -156,7 +159,7 @@ def test_api_adapter_transcribe_returns_normalized_transcription(
         tmp_path,
         f"stt_backend={provider}\n{provider}_api_key_env=VAIVOX_CONTRACT_KEY\n",
     )
-    backend = backend_cls(config)
+    backend = backend_cls(config, FakeKeyterms())
     backend.load()
 
     audio = tmp_path / "audio.wav"

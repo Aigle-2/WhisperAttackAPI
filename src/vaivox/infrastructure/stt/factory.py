@@ -12,15 +12,17 @@ from vaivox.infrastructure.stt.openai import OpenAIBackend
 
 if TYPE_CHECKING:
     from vaivox.infrastructure.config.settings import VaivoxConfiguration
+    from vaivox.infrastructure.stt.keyterms import SttKeyterms
 
 _BackendClass = type[FasterWhisperBackend | DeepgramBackend | ElevenLabsBackend | OpenAIBackend]
 
 
-def create_stt_backend(config: VaivoxConfiguration) -> SpeechToText:
+def create_stt_backend(config: VaivoxConfiguration, keyterms: SttKeyterms) -> SpeechToText:
     """Create the speech-to-text adapter named by ``stt_backend`` in the config.
 
     Args:
         config: The effective application configuration.
+        keyterms: The STT keyterm builder over structured vocabulary.
 
     Returns:
         The constructed STT adapter (satisfying the
@@ -42,4 +44,4 @@ def create_stt_backend(config: VaivoxConfiguration) -> SpeechToText:
         raise SpeechToTextError(
             f"Unsupported stt_backend '{backend_name}'. Supported backends: {supported}."
         )
-    return backend_class(config)
+    return backend_class(config, keyterms)

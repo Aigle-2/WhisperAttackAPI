@@ -1,0 +1,48 @@
+{"id": "golf", "term": "Golf", "aliases": ["gold", "gulf"], "origin": "default"}
+{"id": "hotel", "term": "Hotel", "aliases": ["atel"], "origin": "default"}
+{"id": "lima", "term": "Lima", "aliases": ["leema"], "origin": "default"}
+{"id": "mike", "term": "Mike", "aliases": ["mic"], "origin": "default"}
+{"id": "quebec", "term": "Quebec", "aliases": ["Cubac"], "origin": "default"}
+{"id": "whiskey", "term": "Whiskey", "aliases": ["weske", "wosky"], "origin": "default"}
+{"id": "tower", "term": "Tower", "aliases": ["tawa"], "origin": "default"}
+{"id": "enter", "term": "Enter", "aliases": ["inter"], "origin": "default"}
+{"id": "takeoff", "term": "takeoff", "aliases": ["take-off"], "origin": "default"}
+{"id": "precontact", "term": "precontact", "aliases": ["pre-contact"], "origin": "default"}
+{"id": "wso", "term": "WSO", "aliases": ["we so", "wezo", "with so", "wizo", "wizzo"], "origin": "default"}
+{"id": "boots", "term": "Boots", "aliases": ["boats", "boot", "bootes", "booth", "booths"], "origin": "default"}
+{"id": "jester", "term": "Jester", "aliases": ["chester", "gesture", "jester"], "origin": "default"}
+{"id": "phantom", "term": "Phantom", "aliases": ["fantom", "fenton", "phantom"], "origin": "default"}
+{"id": "pave-spike", "term": "Pave Spike", "aliases": ["pave bike", "pave spike", "pave's bike", "pavespike", "pay spike"], "origin": "default"}
+{"id": "lantirn", "term": "LANTIRN", "aliases": ["lantern", "lantirn", "lanturn"], "origin": "default"}
+{"id": "tacan", "term": "TACAN", "aliases": ["tac an", "tacade", "tack and", "tackan", "takade", "takan", "Takan", "Take a look", "Take a look at", "Take and", "take care", "Take care", "Take care and", "taken", "tekken", "that can", "Tyrkken"], "origin": "default"}
+{"id": "x-ray", "term": "X-ray", "aliases": ["x ray", "x-ray", "xray"], "origin": "default"}
+{"id": "yankee", "term": "Yankee", "aliases": ["yankee", "yanki"], "origin": "default"}
+{"id": "comm", "term": "Comm", "aliases": ["com", "come", "comm"], "origin": "default"}
+{"id": "aux", "term": "Aux", "aliases": ["acks", "axe", "ox"], "origin": "default"}
+{"id": "channel", "term": "Channel", "aliases": ["channe", "shannel"], "origin": "default"}
+{"id": "radar", "term": "Radar", "aliases": ["radar", "rader"], "origin": "default"}
+{"id": "radar-standby", "term": "Radar Standby", "aliases": ["radah stombei", "radah stombey", "radar stand by", "radar stand by you", "radar standby", "radarstandby", "radda akh stambei", "radda akhstambei", "rader stand by", "rader standby", "raider stand by", "raider standby", "rather stand by", "rather standby", "stand by radar", "standby radar"], "origin": "default"}
+{"id": "radar-active", "term": "Radar Active", "aliases": ["radar active", "rader active", "raider active", "rather active"], "origin": "default"}
+{"id": "go-radar-active", "term": "Go Radar Active", "aliases": ["go radar active", "go rader active", "go raider active"], "origin": "default"}
+{"id": "go-radar-silent", "term": "Go Radar Silent", "aliases": ["go radar silent", "go rader silent", "go raider silent", "radar silent", "rader silent"], "origin": "default"}
+{"id": "boresight", "term": "Boresight", "aliases": ["Board sight", "bor sight", "bore sight", "boresight"], "origin": "default"}
+{"id": "standby", "term": "Standby", "aliases": ["stand by", "standby"], "origin": "default"}
+{"id": "lock-target", "term": "Lock Target", "aliases": ["lock target", "locked target"], "origin": "default"}
+{"id": "unlock-target", "term": "Unlock Target", "aliases": ["unlock target", "unlocked target"], "origin": "default"}
+{"id": "focus-target", "term": "Focus Target", "aliases": ["focus target"], "origin": "default"}
+{"id": "waypoint", "term": "Waypoint", "aliases": ["way point", "waypoint"], "origin": "default"}
+{"id": "turnpoint", "term": "Turnpoint", "aliases": ["turn point", "turnpoint"], "origin": "default"}
+{"id": "nav-fix", "term": "Nav Fix", "aliases": ["nav fix", "navfix"], "origin": "default"}
+{"id": "homebase", "term": "Homebase", "aliases": ["home base", "homebase"], "origin": "default"}
+{"id": "fence-in", "term": "Fence In", "aliases": ["fence in", "fencein"], "origin": "default"}
+{"id": "fence-out", "term": "Fence Out", "aliases": ["fence out", "fenceout"], "origin": "default"}
+{"id": "countermeasures", "term": "Countermeasures", "aliases": ["counter measures", "countermeasures"], "origin": "default"}
+{"id": "chaff", "term": "Chaff", "aliases": ["chef", "chefs", "shaf", "shaft"], "origin": "default"}
+{"id": "flare", "term": "Flare", "aliases": ["flair", "flare"], "origin": "default"}
+{"id": "jammer", "term": "Jammer", "aliases": ["jamer", "jammer"], "origin": "default"}
+{"id": "precontact-2", "term": "Precontact", "aliases": ["pre contact", "precontact", "ready pre contact", "ready pre-contact", "ready precontact"], "origin": "default"}
+{"id": "refuel", "term": "refuel", "aliases": ["refiul"], "origin": "default"}
+{"id": "sierra", "term": "sierra", "aliases": ["syrah"], "origin": "default"}
+{"id": "chocks", "term": "chocks", "aliases": ["Chalks", "chalks", "chokes", "Chucks", "chucks", "shocks", "Shocks", "socks", "Trucks", "trucks"], "origin": "default"}
+{"id": "set-tune", "term": "set tune", "aliases": ["at the tune", "sit tune", "sit tuned"], "origin": "default"}
+{"id": "air-refuel", "term": "air refuel", "aliases": ["and refuel", "every fuel"], "origin": "default"}

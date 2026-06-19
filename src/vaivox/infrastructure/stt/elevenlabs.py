@@ -14,6 +14,7 @@ from vaivox.infrastructure.stt.http_utils import build_multipart_body
 
 if TYPE_CHECKING:
     from vaivox.infrastructure.config.settings import VaivoxConfiguration
+    from vaivox.infrastructure.stt.keyterms import SttKeyterms
 
 
 class ElevenLabsBackend:
@@ -22,11 +23,12 @@ class ElevenLabsBackend:
     provider_name = "elevenlabs"
     DEFAULT_API_URL = "https://api.elevenlabs.io/v1/speech-to-text"
 
-    def __init__(self, config: VaivoxConfiguration) -> None:
+    def __init__(self, config: VaivoxConfiguration, keyterms: SttKeyterms) -> None:
         """Read the ElevenLabs provider settings from ``config``.
 
         Args:
             config: The effective application configuration.
+            keyterms: The STT keyterm builder over structured vocabulary.
         """
         self.config = config
         self.model = config.get_provider_setting("elevenlabs", "model", "scribe_v2")
@@ -47,7 +49,7 @@ class ElevenLabsBackend:
         self.temperature = config.get_provider_setting("elevenlabs", "temperature", "")
         self.max_keyterms = config.get_provider_int("elevenlabs", "max_keyterms", 900)
         self.max_keyterm_chars = config.get_provider_int("elevenlabs", "max_keyterm_chars", 50)
-        self.keyterms = config.get_budgeted_stt_keyterms(
+        self.keyterms = keyterms.get_budgeted_stt_keyterms(
             self.provider_name,
             max_terms=self.max_keyterms,
             max_term_chars=self.max_keyterm_chars,

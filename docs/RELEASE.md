@@ -32,8 +32,8 @@ VAIVOX.exe
 Install VAIVOX VoiceAttack Plugin.exe
 _internal\
 settings.cfg
-fuzzy_words.txt
-word_mappings.txt
+fuzzy_word.jsonl
+word_mapping.jsonl
 README_FIRST.txt
 VoiceAttack\VAIVOX - VA Profile.vap
 VoiceAttack\Apps\VAIVOX\VaivoxVAPlugin.dll

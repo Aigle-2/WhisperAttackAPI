@@ -4,13 +4,13 @@ The legacy app stored vocabulary as flat text: ``fuzzy_words.txt`` (one word per
 ``word_mappings.txt`` (``alias1;alias2=replacement`` lines). ADR-0004 moves both to the
 structured JSONL source the :class:`~vaivox.application.ports.VocabularyRepository` reads —
 stable ``id``, ``aliases``, ``origin``. This module converts the in-memory legacy shapes
-(as :class:`~vaivox.infrastructure.config.settings.VaivoxConfiguration` already parses them)
-into :class:`~vaivox.domain.vocabulary.model.VocabularyEntry` records and seeds them through
-the repository.
+parsed by :mod:`vaivox.infrastructure.vocabulary.legacy_files` into
+:class:`~vaivox.domain.vocabulary.model.VocabularyEntry` records and seeds them through the
+repository.
 
-It is a one-shot utility (run via ``tools/migrate_vocabulary.py``); the live pipeline still
-reads vocabulary from config until it is migrated onto the repository (a separate ADR-0009
-follow-up), so this only populates the structured source the governance / API surfaces read.
+It is a one-shot compatibility utility (run via ``tools/migrate_vocabulary.py`` or startup
+upgrade code); the live pipeline reads structured vocabulary through the repository-backed
+projection port.
 """
 
 from __future__ import annotations

@@ -38,16 +38,23 @@ def test_env_override_takes_precedence(tmp_path, monkeypatch) -> None:
 
 def test_config_vaicom_source_reads_generated_file(tmp_path) -> None:
     from vaivox.infrastructure.config.settings import VaivoxConfiguration
+    from vaivox.infrastructure.stt.keyterms import SttKeyterms
+
+    class EmptyVocabulary:
+        def get_word_mappings(self):
+            return {}
+
+        def get_fuzzy_words(self):
+            return []
 
     app_dir = tmp_path / "app"
     data_dir = tmp_path / "data"
     app_dir.mkdir()
     data_dir.mkdir()
     (app_dir / "settings.cfg").write_text("stt_keyterm_sources=vaicom\n", encoding="utf-8")
-    (app_dir / "word_mappings.txt").write_text("", encoding="utf-8")
-    (app_dir / "fuzzy_words.txt").write_text("", encoding="utf-8")
     (data_dir / "vaicom_keyterms.txt").write_text("Texaco\nOverlord\n", encoding="utf-8")
 
     config = VaivoxConfiguration(str(app_dir), str(data_dir))
+    keyterms = SttKeyterms(config, EmptyVocabulary())
 
-    assert config.get_stt_keyterms() == ["Texaco", "Overlord"]
+    assert keyterms.get_stt_keyterms() == ["Texaco", "Overlord"]

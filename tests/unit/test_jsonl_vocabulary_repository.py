@@ -72,6 +72,40 @@ def test_add_is_idempotent_on_duplicate_id(tmp_path) -> None:
     assert len(repo.load(_KIND)) == 1
 
 
+def test_add_merges_word_mapping_aliases_for_existing_default(tmp_path) -> None:
+    defaults = tmp_path / "defaults"
+    data = tmp_path / "data"
+    defaults.mkdir()
+    data.mkdir()
+    (defaults / "word_mapping.jsonl").write_text(
+        json.dumps(
+            {
+                "id": "enter",
+                "term": "Enter",
+                "aliases": ["inter"],
+                "origin": "default",
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    repo = JsonlVocabularyRepository(str(data), default_source_dir=str(defaults))
+
+    repo.add(
+        VocabularyEntry(
+            id="enter",
+            kind=VocabularyKind.WORD_MAPPING,
+            term="Enter",
+            aliases=("inner",),
+        ),
+        _NOW,
+    )
+
+    governed = repo.load(VocabularyKind.WORD_MAPPING)[0]
+    assert governed.entry.aliases == ("inner", "inter")
+    assert (data / "word_mapping.jsonl").is_file()
+
+
 def test_mark_used_stamps_recency_and_hits(tmp_path) -> None:
     repo = JsonlVocabularyRepository(str(tmp_path))
     repo.add(_entry("a"), datetime(2026, 1, 1))

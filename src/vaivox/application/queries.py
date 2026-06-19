@@ -14,6 +14,7 @@ from vaivox import __version__
 from vaivox.application.ports import (
     AudioRecorder,
     ConfigProvider,
+    ReconciliationVocabulary,
     TelemetryReader,
     VocabularyRepository,
 )
@@ -71,13 +72,13 @@ class DescribeStatus:
 class DryRunReconcile:
     """Run text through the full reconciliation pipeline without any I/O."""
 
-    def __init__(self, config: ConfigProvider) -> None:
-        """Wire the configuration provider (read live for word mappings/fuzzy words).
+    def __init__(self, vocabulary: ReconciliationVocabulary) -> None:
+        """Wire the reconciliation vocabulary provider.
 
         Args:
-            config: The configuration provider port.
+            vocabulary: The reconciliation vocabulary port.
         """
-        self._config = config
+        self._vocabulary = vocabulary
 
     def execute(self, text: str) -> ReconciliationResult:
         """Reconcile ``text`` and return the staged transformations.
@@ -90,8 +91,8 @@ class DryRunReconcile:
         """
         return reconcile(
             text,
-            self._config.get_word_mappings(),
-            self._config.get_fuzzy_words(),
+            self._vocabulary.get_word_mappings(),
+            self._vocabulary.get_fuzzy_words(),
             PHONETIC_ALPHABET,
             _FUZZY_THRESHOLD,
             _FUZZY_THRESHOLD,

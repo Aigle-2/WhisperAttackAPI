@@ -143,8 +143,8 @@ uv run @PyInstallerArgs
 
 $Assets = @(
     "settings.cfg",
-    "fuzzy_words.txt",
-    "word_mappings.txt",
+    "fuzzy_word.jsonl",
+    "word_mapping.jsonl",
     "vaivox_icon.png",
     "add_icon.png",
     "Set STT API Key.cmd",
@@ -183,8 +183,8 @@ $ExpectedReleaseItems = @(
     "$AppName.exe",
     $PluginInstallerExeName,
     "settings.cfg",
-    "fuzzy_words.txt",
-    "word_mappings.txt",
+    "fuzzy_word.jsonl",
+    "word_mapping.jsonl",
     "vaivox_icon.png",
     "add_icon.png",
     "Set STT API Key.cmd",

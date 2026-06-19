@@ -28,6 +28,9 @@ from vaivox.infrastructure.config.identity import VAIVOX
 from vaivox.infrastructure.config.settings import VaivoxConfiguration
 from vaivox.infrastructure.telemetry.jsonl_reader import JsonlTelemetryReader
 from vaivox.infrastructure.vocabulary.jsonl_repository import JsonlVocabularyRepository
+from vaivox.infrastructure.vocabulary.reconciliation_vocabulary import (
+    RepositoryReconciliationVocabulary,
+)
 from vaivox.main import _ensure_src_on_path, _resolve_app_data_dir, _resolve_app_path
 
 _LOGGER = logging.getLogger(__name__)
@@ -61,12 +64,14 @@ def build_tools(app_path: str, app_data_dir: str) -> IntrospectionTools:
         The :class:`~vaivox.infrastructure.api.mcp_server.IntrospectionTools` bundle.
     """
     config = VaivoxConfiguration(app_path, app_data_dir)
+    vocabulary_repository = JsonlVocabularyRepository(app_data_dir, default_source_dir=app_path)
+    reconciliation_vocabulary = RepositoryReconciliationVocabulary(vocabulary_repository)
     return IntrospectionTools(
         DescribeStatus(_HeadlessRecorder(), config),
-        DryRunReconcile(config),
+        DryRunReconcile(reconciliation_vocabulary),
         ListRecentReconciliations(JsonlTelemetryReader(app_data_dir)),
         ComputeMetrics(JsonlTelemetryReader(app_data_dir)),
-        DescribeVocabulary(JsonlVocabularyRepository(app_data_dir)),
+        DescribeVocabulary(vocabulary_repository),
     )
 
 

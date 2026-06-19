@@ -1,15 +1,17 @@
 """JSONL vocabulary repository: versioned source + hot usage sidecar (ADR-0004).
 
 The :class:`~vaivox.application.ports.VocabularyRepository` adapter. It implements
-ADR-0004 Option A by keeping two artifacts per vocabulary kind:
+ADR-0004 Option A by keeping two artifact types per vocabulary kind:
 
 - **Source** (``<kind>.jsonl``): one structured :class:`VocabularyEntry` per line —
   versioned, diff-friendly, hand/UI-editable.
 - **Usage sidecar** (``<kind>.usage.json``): a ``id -> {last_used, hits}`` map written
   hot, never committed to git.
 
-Both live in the per-user VAIVOX data directory; the adapter reads them at
-:meth:`JsonlVocabularyRepository.load` time and joins on ``id``.
+Default source may ship beside the app, while user additions/overrides and usage live in
+the per-user VAIVOX data directory. The adapter reads them at
+:meth:`JsonlVocabularyRepository.load` time, overlays user source on defaults, and joins
+usage on ``id``.
 All disk access degrades gracefully (logged, never raised) so a missing or malformed
 sidecar can never crash reconciliation — usage simply resets to "never used".
 
@@ -43,11 +45,14 @@ class JsonlVocabularyRepository:
 
     Args:
         data_dir: The per-user VAIVOX data directory the source and sidecar live in.
+        default_source_dir: Optional application directory holding shipped default JSONL
+            sources. User data entries override default entries with the same id.
     """
 
-    def __init__(self, data_dir: str) -> None:
-        """Bind the repository to ``data_dir`` (paths are resolved lazily per call)."""
+    def __init__(self, data_dir: str, default_source_dir: str | None = None) -> None:
+        """Bind the repository paths (resolved lazily per call)."""
         self._data_dir = Path(data_dir)
+        self._default_source_dir = Path(default_source_dir) if default_source_dir else None
 
     def load(self, kind: VocabularyKind) -> list[GovernedEntry]:
         """Return every entry of ``kind`` joined with its usage stats.
@@ -101,15 +106,27 @@ class JsonlVocabularyRepository:
                 window protects the entry from immediate eviction.
         """
         existing = self._read_source(entry.kind)
-        if any(other.id == entry.id for other in existing):
+        existing_index = next(
+            (index for index, other in enumerate(existing) if other.id == entry.id), None
+        )
+        if existing_index is not None:
+            merged = _merge_entries(existing[existing_index], entry)
+            if merged != existing[existing_index]:
+                existing[existing_index] = merged
+                self._write_effective_source(entry.kind, existing)
+                usage = self._read_usage(entry.kind)
+                usage.setdefault(entry.id, UsageStats(last_used=when, hits=0))
+                self._write_usage(entry.kind, usage)
+                return
             _LOGGER.warning(
                 "Vocabulary entry '%s' already exists in %s; not re-adding.",
                 entry.id,
                 entry.kind.value,
             )
             return
-        existing.append(entry)
-        self._write_source(entry.kind, existing)
+        user_entries = self._read_user_source(entry.kind)
+        user_entries.append(entry)
+        self._write_user_source(entry.kind, user_entries)
 
         usage = self._read_usage(entry.kind)
         usage[entry.id] = UsageStats(last_used=when, hits=0)
@@ -126,7 +143,7 @@ class JsonlVocabularyRepository:
             kept: The retained governed entries.
         """
         kept_list = list(kept)
-        self._write_source(kind, [governed.entry for governed in kept_list])
+        self._write_effective_source(kind, [governed.entry for governed in kept_list])
         self._write_usage(kind, {governed.id: governed.usage for governed in kept_list})
 
     # -- source (JSONL) ----------------------------------------------------------------
@@ -134,8 +151,29 @@ class JsonlVocabularyRepository:
     def _source_path(self, kind: VocabularyKind) -> Path:
         return self._data_dir / f"{kind.value}.jsonl"
 
+    def _default_source_path(self, kind: VocabularyKind) -> Path | None:
+        if self._default_source_dir is None:
+            return None
+        return self._default_source_dir / f"{kind.value}.jsonl"
+
     def _read_source(self, kind: VocabularyKind) -> list[VocabularyEntry]:
-        path = self._source_path(kind)
+        merged: dict[str, VocabularyEntry] = {}
+        for entry in self._read_default_source(kind):
+            merged[entry.id] = entry
+        for entry in self._read_user_source(kind):
+            merged[entry.id] = entry
+        return list(merged.values())
+
+    def _read_default_source(self, kind: VocabularyKind) -> list[VocabularyEntry]:
+        path = self._default_source_path(kind)
+        if path is None:
+            return []
+        return self._read_source_file(path, kind)
+
+    def _read_user_source(self, kind: VocabularyKind) -> list[VocabularyEntry]:
+        return self._read_source_file(self._source_path(kind), kind)
+
+    def _read_source_file(self, path: Path, kind: VocabularyKind) -> list[VocabularyEntry]:
         if not path.is_file():
             return []
         entries: list[VocabularyEntry] = []
@@ -157,12 +195,23 @@ class JsonlVocabularyRepository:
             return []
         return entries
 
-    def _write_source(self, kind: VocabularyKind, entries: list[VocabularyEntry]) -> None:
+    def _write_user_source(self, kind: VocabularyKind, entries: list[VocabularyEntry]) -> None:
         lines = [json.dumps(_record_from_entry(entry), ensure_ascii=False) for entry in entries]
         body = "\n".join(lines)
         if body:
             body += "\n"
         self._atomic_write(self._source_path(kind), body)
+
+    def _write_effective_source(self, kind: VocabularyKind, entries: list[VocabularyEntry]) -> None:
+        defaults = {entry.id: entry for entry in self._read_default_source(kind)}
+        if not defaults:
+            self._write_user_source(kind, entries)
+            return
+
+        user_entries = [
+            entry for entry in entries if entry.id not in defaults or entry != defaults[entry.id]
+        ]
+        self._write_user_source(kind, user_entries)
 
     # -- usage sidecar (JSON) ----------------------------------------------------------
 
@@ -244,6 +293,24 @@ def _entry_from_record(line: str, kind: VocabularyKind) -> VocabularyEntry | Non
     aliases = tuple(str(alias) for alias in raw_aliases) if isinstance(raw_aliases, list) else ()
     origin = _origin_from_value(record.get("origin"))
     return VocabularyEntry(id=entry_id, kind=kind, term=term, aliases=aliases, origin=origin)
+
+
+def _merge_entries(existing: VocabularyEntry, incoming: VocabularyEntry) -> VocabularyEntry:
+    """Merge compatible entries with the same id, preserving the existing term/origin."""
+    if (
+        existing.kind is not VocabularyKind.WORD_MAPPING
+        or incoming.kind is not existing.kind
+        or incoming.term.casefold() != existing.term.casefold()
+    ):
+        return existing
+    aliases = tuple(sorted({*existing.aliases, *incoming.aliases}, key=str.casefold))
+    return VocabularyEntry(
+        id=existing.id,
+        kind=existing.kind,
+        term=existing.term,
+        aliases=aliases,
+        origin=existing.origin,
+    )
 
 
 def _origin_from_value(value: object) -> VocabularyOrigin:

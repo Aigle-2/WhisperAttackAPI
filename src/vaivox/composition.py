@@ -34,6 +34,7 @@ from vaivox.application.record_command import (
 )
 from vaivox.application.refresh_vocabulary import RefreshVocabulary, ReloadVocabulary
 from vaivox.application.shutdown import Shutdown
+from vaivox.application.vocabulary_commands import AddWordMapping
 from vaivox.domain.reconciliation.snapper import (
     DEFAULT_HIGH,
     DEFAULT_LOW,
@@ -47,12 +48,18 @@ from vaivox.infrastructure.inbound.control_server import ControlSocketServer
 from vaivox.infrastructure.kneeboard.sink import KneeboardSink
 from vaivox.infrastructure.reload.phrase_snapper import ReloadablePhraseSnapper
 from vaivox.infrastructure.stt.factory import create_stt_backend
+from vaivox.infrastructure.stt.keyterms import SttKeyterms
 from vaivox.infrastructure.system_clock import SystemClock
 from vaivox.infrastructure.telemetry.jsonl_reader import JsonlTelemetryReader
 from vaivox.infrastructure.telemetry.jsonl_sink import JsonlTelemetrySink
 from vaivox.infrastructure.telemetry.null_sink import NullTelemetrySink
 from vaivox.infrastructure.vocabulary.jsonl_repository import JsonlVocabularyRepository
+from vaivox.infrastructure.vocabulary.legacy_files import load_legacy_vocabulary
+from vaivox.infrastructure.vocabulary.migration import migrate_legacy_vocabulary
 from vaivox.infrastructure.vocabulary.phrase_index import load_phrase_index
+from vaivox.infrastructure.vocabulary.reconciliation_vocabulary import (
+    RepositoryReconciliationVocabulary,
+)
 from vaivox.infrastructure.vocabulary.vaicom_generator import VaicomVocabularyGenerator
 from vaivox.infrastructure.voiceattack.sink import VoiceAttackCommandSink
 
@@ -72,12 +79,19 @@ class WiredApp:
             point runs it on a background thread at startup; a UI action can run it with
             ``force=True``. It hot-applies the regenerated phrase index via
             ``phrase_snapper`` on success.
+        reconciliation_vocabulary: Projection of structured vocabulary used by the runtime
+            reconciliation pipeline.
+        stt_keyterms: Provider keyterm builder used by STT adapters and startup diagnostics.
+        add_word_mapping: Use case backing the UI "Add mapping" action.
         api_server: The introspection API server, or ``None`` when disabled.
     """
 
     control_server: ControlSocketServer
     phrase_snapper: ReloadablePhraseSnapper
     refresh_vocabulary: RefreshVocabulary
+    reconciliation_vocabulary: RepositoryReconciliationVocabulary
+    stt_keyterms: SttKeyterms
+    add_word_mapping: AddWordMapping
     api_server: IntrospectionServer | None = None
 
 
@@ -104,19 +118,34 @@ def build(
     """
     control_host = host or config.get_control_host()
     control_port = port or config.get_control_port()
-    speech_to_text = create_stt_backend(config)
     recorder = SoundDeviceRecorder()
+    clock = SystemClock()
+    # The structured-vocabulary store is on the reconciliation and routing path. Shipped
+    # defaults are read from the app directory; user additions, usage sidecars, and legacy
+    # upgrade imports are written to the per-user data directory.
+    vocabulary_repository = JsonlVocabularyRepository(
+        config.app_data_location,
+        default_source_dir=config.app_location,
+    )
+    legacy_word_mappings, legacy_fuzzy_words = load_legacy_vocabulary(
+        [config.app_location, config.app_data_location]
+    )
+    migrate_legacy_vocabulary(
+        legacy_word_mappings,
+        legacy_fuzzy_words,
+        vocabulary_repository,
+        clock.now(),
+    )
+    reconciliation_vocabulary = RepositoryReconciliationVocabulary(vocabulary_repository)
+    stt_keyterms = SttKeyterms(config, reconciliation_vocabulary)
+    speech_to_text = create_stt_backend(config, stt_keyterms)
     command_sink = VoiceAttackCommandSink(
         config.get_voiceattack_host(), config.get_voiceattack_port(), reporter
     )
     kneeboard_sink = KneeboardSink(config.get_text_line_length, reporter)
     telemetry = build_telemetry_sink(config)
-    clock = SystemClock()
     snapper = build_phrase_snapper(config, recorder, reporter)
-    # The structured-vocabulary store is on the routing path now (ADR-0006/0004): a matched
-    # command stamps usage on the credited entries. It reads the per-user data dir lazily, so
-    # it is harmless (a no-op) when nothing has been migrated/seeded there yet.
-    vocabulary_repository = JsonlVocabularyRepository(config.app_data_location)
+    add_word_mapping = AddWordMapping(vocabulary_repository, clock)
 
     start_recording = StartRecording(recorder, reporter)
     stop_and_reconcile = StopAndReconcile(
@@ -124,7 +153,7 @@ def build(
         speech_to_text,
         command_sink,
         kneeboard_sink,
-        config,
+        reconciliation_vocabulary,
         reporter,
         clock,
         telemetry,
@@ -162,14 +191,14 @@ def build(
         telemetry_reader = JsonlTelemetryReader(config.app_data_location)
         api_server = IntrospectionServer(
             DescribeStatus(recorder, config),
-            DryRunReconcile(config),
+            DryRunReconcile(reconciliation_vocabulary),
             ListRecentReconciliations(telemetry_reader),
             ComputeMetrics(telemetry_reader),
             DescribeVocabulary(vocabulary_repository),
             refresh_vocabulary,
             ReloadVocabulary(apply_phrase_index, reporter),
             SimulateUtterance(
-                config,
+                reconciliation_vocabulary,
                 snapper,
                 command_sink,
                 kneeboard_sink,
@@ -189,6 +218,9 @@ def build(
         control_server=control_server,
         phrase_snapper=snapper,
         refresh_vocabulary=refresh_vocabulary,
+        reconciliation_vocabulary=reconciliation_vocabulary,
+        stt_keyterms=stt_keyterms,
+        add_word_mapping=add_word_mapping,
         api_server=api_server,
     )
 

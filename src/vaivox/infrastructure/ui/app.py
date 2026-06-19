@@ -21,7 +21,7 @@ from typing import TYPE_CHECKING, Any, cast
 from vaivox import composition
 from vaivox.application.ports import StatusLevel
 from vaivox.infrastructure.config.identity import VAIVOX
-from vaivox.infrastructure.config.settings import ConfigurationError, VaivoxConfiguration
+from vaivox.infrastructure.config.settings import VaivoxConfiguration
 from vaivox.infrastructure.ui.theme import (
     TAG_BLACK,
     TAG_BLUE,
@@ -192,7 +192,6 @@ class VaivoxApp:
         self.writer = TkStatusWriter(theme, text_area, on_status=self._set_status_from_report)
         self.writer.write("Loaded configuration:", TAG_BLUE)
         self.writer.write_dict(dict(self.config.get_safe_configuration()), TAG_GREY)
-        self.write_startup_context()
 
         wired = composition.build(
             config=self.config,
@@ -203,6 +202,10 @@ class VaivoxApp:
         self.control_server = wired.control_server
         self.api_server = wired.api_server
         self.refresh_vocabulary = wired.refresh_vocabulary
+        self.reconciliation_vocabulary = wired.reconciliation_vocabulary
+        self.stt_keyterms = wired.stt_keyterms
+        self.add_word_mapping_use_case = wired.add_word_mapping
+        self.write_startup_context()
         if self.api_server is not None:
             self.api_server.start()
 
@@ -286,8 +289,8 @@ class VaivoxApp:
 
     def write_startup_context(self) -> None:
         """Write the startup vocabulary summary to the UI."""
-        word_mappings = self.config.get_word_mappings()
-        fuzzy_words = self.config.get_fuzzy_words()
+        word_mappings = self.reconciliation_vocabulary.get_word_mappings()
+        fuzzy_words = self.reconciliation_vocabulary.get_fuzzy_words()
 
         self.writer.write("Loaded post-processing word mappings:", TAG_BLUE)
         self.writer.write(f"{len(word_mappings)} mappings", TAG_GREY)
@@ -308,10 +311,12 @@ class VaivoxApp:
     def write_stt_keyterm_context(self) -> None:
         """Write the effective STT keyterm context without dumping the whole list."""
         provider = self.config.get_stt_backend()
-        source_counts = self.config.get_stt_keyterm_source_counts()
-        all_keyterms = self.config.get_stt_keyterms()
-        budget = self.config.get_provider_stt_keyterm_budget(provider)
-        budgeted = self.config.get_provider_budgeted_stt_keyterm_details(provider, log_result=False)
+        source_counts = self.stt_keyterms.get_stt_keyterm_source_counts()
+        all_keyterms = self.stt_keyterms.get_stt_keyterms()
+        budget = self.stt_keyterms.get_provider_stt_keyterm_budget(provider)
+        budgeted = self.stt_keyterms.get_provider_budgeted_stt_keyterm_details(
+            provider, log_result=False
+        )
 
         source_summary = (
             ", ".join(f"{source}={count}" for source, count in source_counts.items()) or "none"
@@ -368,10 +373,13 @@ class VaivoxApp:
 
         def update_word_mapping(aliases: str, replacement: str) -> None:
             try:
-                self.config.add_word_mapping(self.app_data_dir, aliases, replacement)
+                entry = self.add_word_mapping_use_case.execute(aliases, replacement)
+                if entry is None:
+                    return
                 self.writer.write("Added new word mapping:", TAG_BLUE)
                 self.writer.write(f"{aliases}: {replacement}", TAG_GREY)
-            except ConfigurationError as error:
+            except Exception as error:
+                _LOGGER.exception("Failed to add word mapping.")
                 self.writer.write(str(error), TAG_RED)
 
         VaivoxWordMappings(self.window, update_word_mapping)
