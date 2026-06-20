@@ -83,8 +83,8 @@ class UdpVaicomF10ActionSink:
         if action_index is None:
             return self._reject(
                 action,
-                "no current live ActionIndex available; open the F10 menu in-mission and "
-                "wait for the VAIVOX live-menu handshake",
+                "no current live ActionIndex available; wait up to 6 seconds for the DCS "
+                "menu heartbeat, then restart DCS if the handshake is still missing",
             )
 
         payload = {"type": _ACTION_SEQUENCE_TYPE, "actionsequence": [action_index]}

@@ -70,6 +70,26 @@ def test_new_menu_mutation_invalidates_committed_handles_immediately() -> None:
     listener.stop()
 
 
+def test_heartbeat_reconnects_a_restarted_listener_without_invalidating_an_active_one() -> None:
+    entries = [_entry("DREAM 7", 3)]
+    active_updates: list[int] = []
+    active = MissionMenuListener(port=0, debounce_seconds=0, on_update=active_updates.append)
+    active._handle_datagram(_datagram(entries, revision=7, phase="scan"))
+
+    heartbeat = _datagram(entries, revision=7, phase="heartbeat")
+    active._handle_datagram(heartbeat)
+
+    assert active.get_menu() == {"DREAM 7": 3}
+    assert active_updates == [1]
+
+    restarted = MissionMenuListener(port=0, debounce_seconds=0)
+    restarted._handle_datagram(heartbeat)
+
+    assert restarted.get_menu() == {"DREAM 7": 3}
+    assert restarted.get_health().runtime_confirmed is True
+    assert restarted.get_health().revision == 7
+
+
 def test_handle_datagram_drops_malformed_entries() -> None:
     listener = MissionMenuListener(port=0, debounce_seconds=0)
 

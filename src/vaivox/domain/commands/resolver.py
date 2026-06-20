@@ -36,9 +36,10 @@ class CommandSurfaceResolver:
     """Resolve text against a frozen command-surface index.
 
     Exact matches are resolved before fuzzy matches, with active mission F10 actions
-    taking priority over static VoiceAttack commands. Fuzzy matches use the same
-    conservative high/low/margin thresholds as phrase snap, and abstain when the best
-    match is too close to the runner-up.
+    taking priority over static VoiceAttack commands. Multi-token F10 labels may also
+    resolve when embedded contiguously in a longer radio call; the most specific unique
+    label wins. Fuzzy matches use the same conservative high/low/margin thresholds as
+    phrase snap, and abstain when the best match is too close to the runner-up.
     """
 
     def __init__(
@@ -77,6 +78,10 @@ class CommandSurfaceResolver:
         exact = self._exact_matches(query)
         if exact:
             return self._resolve_exact(exact)
+
+        embedded = self._embedded_label_matches(query)
+        if embedded:
+            return self._resolve_embedded(embedded)
 
         scored = self._score_surfaces(query)
         if not scored:
@@ -148,9 +153,53 @@ class CommandSurfaceResolver:
             )
         return CommandResolution(CommandResolutionDecision.RAW)
 
+    def _embedded_label_matches(self, query: str) -> list[_SurfaceScore]:
+        """Find multi-token F10 labels embedded contiguously in ``query``."""
+        query_tokens = tuple(query.split())
+        matches: list[_SurfaceScore] = []
+        for surface in self._surfaces:
+            if not isinstance(surface.dispatch_target, VaicomF10Action):
+                continue
+            label = _normalize(surface.label)
+            label_tokens = tuple(label.split())
+            if len(label_tokens) < 2:
+                continue
+            if _contains_contiguous_tokens(query_tokens, label_tokens):
+                matches.append(_SurfaceScore(surface, surface.label, 100.0))
+        return matches
+
+    def _resolve_embedded(self, matches: Sequence[_SurfaceScore]) -> CommandResolution:
+        """Resolve the unique most-specific embedded label, or fail closed."""
+        specificity = max(_embedded_specificity(match.surface) for match in matches)
+        most_specific = [
+            match for match in matches if _embedded_specificity(match.surface) == specificity
+        ]
+        best = most_specific[0]
+        if len({match.surface.id for match in most_specific}) > 1:
+            return CommandResolution(
+                CommandResolutionDecision.ABSTAINED,
+                surface=best.surface,
+                matched_alias=best.matched_alias,
+                score=100.0,
+            )
+        return CommandResolution(
+            CommandResolutionDecision.RESOLVED,
+            surface=best.surface,
+            matched_alias=best.matched_alias,
+            score=100.0,
+        )
+
     def _score_surfaces(self, query: str) -> tuple[_SurfaceScore, ...]:
         best_by_surface: dict[str, _SurfaceScore] = {}
         for surface in self._surfaces:
+            if (
+                isinstance(surface.dispatch_target, VaicomF10Action)
+                and len(_normalize(surface.label).split()) < 2
+            ):
+                # Single-token live menu entries (especially callsigns and digits) are
+                # too weak to infer from surrounding speech. They remain available via
+                # the whole-query exact phase above.
+                continue
             for alias in surface.all_phrases():
                 score = _score(query, _normalize(alias), surface)
                 current = best_by_surface.get(surface.id)
@@ -190,6 +239,19 @@ def _priority(surface: CommandSurface) -> int:
 
 def _target_kind(surface: CommandSurface) -> DispatchTargetKind:
     return surface.dispatch_target.target_kind
+
+
+def _embedded_specificity(surface: CommandSurface) -> tuple[int, int]:
+    label = _normalize(surface.label)
+    return len(label.split()), len(label)
+
+
+def _contains_contiguous_tokens(query_tokens: Sequence[str], label_tokens: Sequence[str]) -> bool:
+    width = len(label_tokens)
+    return any(
+        tuple(query_tokens[start : start + width]) == tuple(label_tokens)
+        for start in range(len(query_tokens) - width + 1)
+    )
 
 
 def _normalize(text: str) -> str:

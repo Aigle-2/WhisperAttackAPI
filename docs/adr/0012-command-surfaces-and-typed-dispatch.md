@@ -59,8 +59,14 @@ dispatch each target through the transport that actually executes it.
   `127.0.0.1:33491` (overridable via `vaicom_f10_host` / `vaicom_f10_port`). This is
   **fire-and-forget** — DCS sends no acknowledgement — so F10 dispatch yields a
   `DispatchOutcome` only, never a `MatchOutcome`.
-- `CommandSurfaceResolver` (unchanged) resolves exact mission F10, exact static, fuzzy
-  mission F10, fuzzy static, then raw fallback, using the conservative snap thresholds.
+- `CommandSurfaceResolver` resolves whole-query exact matches first. Before fuzzy scoring,
+  it may then resolve a live F10 **label** embedded as a contiguous token sequence in a
+  longer radio call. Only labels of at least two normalized tokens participate; the unique
+  most-specific match wins (most tokens, then longest normalized label), and equal
+  specificity abstains. Thus `DREAM 7` beats the numeric `7` inside a full clearance call,
+  while bare `7` remains available as an exact whole command. Diagnostic aliases are not
+  considered in this embedded phase. Fuzzy mission F10, fuzzy static, and raw fallback keep
+  the existing conservative snap thresholds.
 - **ActionIndex sourcing.** The authoritative source is the live DCS menu, delivered by a
   VAIVOX-owned hook (below). `mission_f10.py` clears every log-derived index before applying
   the current live map. The unreliable value from `Set menu F10 item: …, ActionIndex: N`
@@ -75,11 +81,14 @@ dispatch each target through the transport that actually executes it.
   `base.vaicom.state.menuaux`; late replacement of `clearOtherMenu` / `addOtherCommand` was
   rejected after live v5 testing showed DCS kept cached references and bypassed the wrappers.
   The scanner broadcasts a protocol-v2 cumulative snapshot over UDP to a VAIVOX-owned port
-  (default `33493`). Each snapshot has a DCS-process session id and monotonic revision.
-  `MissionMenuListener` debounces the
-  per-item updates, rejects stale revisions and ambiguous duplicate labels, and persists a
-  diagnostic mirror that is never restored for dispatch. This is fully VAIVOX-owned: it
-  never touches VAICOM or contends for a VAICOM-bound socket.
+  (default `33493`). Each snapshot has a DCS-process session id and monotonic menu revision.
+  It also re-sends the settled snapshot every five seconds **at the same revision**. This
+  heartbeat lets a VAIVOX process restarted after DCS establish a new live handshake; an
+  already-synchronized listener rejects the duplicate revision without invalidating its
+  handles. `MissionMenuListener` debounces changed snapshots, rejects stale revisions and
+  ambiguous duplicate labels, and persists a diagnostic mirror that is never restored for
+  dispatch. This is fully VAIVOX-owned: it never touches VAICOM or contends for a
+  VAICOM-bound socket.
 - When no surface resolves, VAIVOX keeps the legacy fallback: phrase-snap and dispatch the
   resulting text as a static `VoiceAttackCommand`.
 
@@ -140,7 +149,25 @@ authoritative source is `data.menuOther`, so v6 scans that tree directly. Live v
 2026-06-20 captured 88 commands at revision 3 with full submenu paths and no ambiguous
 labels; the VAIVOX listener persisted the same DCS session and indices (`FLEX NORTH=0`,
 `MORMON MESA 8=5`). The listener accepts only current protocol-v2 session snapshots. The
-remaining hardware-gated check is an utterance through reconciliation and send-time dispatch.
+The spoken software route was then validated with real ElevenLabs output
+`Voice command assist`: exact mission-surface resolution, send-time live lookup, and
+`actionsequence:[6]` dispatch all succeeded and were recorded in telemetry. Because the DCS
+transport has no acknowledgement, the final mission effect remains operator-observed.
+
+**Full AI ATC phrase resolution is regression-covered.** Two real operator transcripts,
+`Clearance Lion 6-1 Clearance on request IFR DREAM 7` and `Clearance delivery Lion 61
+Clearance on request IFR DREAM 7`, now resolve uniquely to the typed `DREAM 7` F10 surface
+against a live-like menu containing other departure routes, callsigns, and numeric `0–9`
+entries. The numeric entries no longer hijack the call; genuine equal-specificity matches
+still abstain.
+
+**VAIVOX-after-DCS restart race fixed in v7.** Live operator evidence exposed the gap: DCS
+had published revision 3 at 04:14, then VAIVOX restarted at 04:38. The new listener correctly
+refused to restore the 04:14 disk mirror, but v6 only transmitted when the menu changed, so
+the listener could remain empty indefinitely (`DREAM 7` resolved correctly but could not
+obtain its live index 3). v7 emits a same-revision heartbeat every five seconds. A restarted
+listener accepts that live UDP snapshot, while an active listener ignores it without a
+debounce gap, repeated notification, or handle invalidation.
 
 ## Action Items
 
@@ -166,5 +193,11 @@ remaining hardware-gated check is an utterance through reconciliation and send-t
     on every incoming menu mutation, closing the resolve-to-dispatch race.
 13. [x] Replace bypassed v5 callback wrappers with a v6 scan of `data.menuOther`, matching
     VAICOM's own `menuaux` source and preserving submenu paths.
-14. [ ] Validate one spoken F10 command through reconciliation, send-time live-index lookup,
-    UDP actionsequence dispatch, and the observed mission result.
+14. [x] Validate one spoken F10 command through reconciliation, send-time live-index lookup,
+    and UDP actionsequence dispatch (`Voice command assist` -> current index 6).
+15. [ ] Record operator confirmation of the resulting in-mission help/toggle effect; DCS
+    provides no programmatic acknowledgement for `actionsequence`.
+16. [x] Resolve unique, exact multi-token F10 labels embedded in realistic full radio calls,
+    while requiring single-token menu entries to match the whole utterance.
+17. [x] Re-publish the settled live menu at the same revision every five seconds, allowing a
+    VAIVOX restart to reacquire the current DCS session without restoring persisted handles.

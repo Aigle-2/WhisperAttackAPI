@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from vaivox.domain.commands.model import (
     CommandResolutionDecision,
     CommandSurface,
@@ -39,6 +41,20 @@ def _f10(label: str, identifier: str | None = None) -> CommandSurface:
     )
 
 
+def _live_like_f10_menu() -> list[CommandSurface]:
+    labels = [
+        "DREAM 7",
+        "FYTTR 7",
+        "MORMON MESA 8",
+        "FLEX NORTH",
+        "FLEX WEST",
+        "Request Engine Start",
+        "Lion",
+        *(str(digit) for digit in range(10)),
+    ]
+    return [_f10(label) for label in labels]
+
+
 def test_flex_north_resolves_to_f10_not_voiceattack() -> None:
     resolver = CommandSurfaceResolver([_voiceattack("FLEX NORTH"), _f10("FLEX NORTH")])
 
@@ -68,14 +84,79 @@ def test_request_alias_resolves_to_f10_action() -> None:
     assert isinstance(resolution.surface.dispatch_target, VaicomF10Action)
 
 
-def test_long_ai_atc_prompt_resolves_to_embedded_f10_action() -> None:
-    resolver = CommandSurfaceResolver([_f10("FLEX NORTH")])
+def test_long_ai_atc_prompt_resolves_to_embedded_f10_action_with_numeric_distractors() -> None:
+    resolver = CommandSurfaceResolver(_live_like_f10_menu())
 
     resolution = resolver.resolve("Clearance delivery Uzi61 Clearance on Request VFR FLEX NORTH")
 
     assert resolution.decision is CommandResolutionDecision.RESOLVED
     assert isinstance(resolution.surface.dispatch_target, VaicomF10Action)
     assert resolution.surface.dispatch_target.identifier == "Action FLEX NORTH"
+
+
+@pytest.mark.parametrize(
+    "transcript",
+    [
+        "Clearance Lion 6-1 Clearance on request IFR DREAM 7",
+        "Clearance delivery Lion 61 Clearance on request IFR DREAM 7",
+    ],
+)
+def test_real_clearance_calls_resolve_dream_7_with_numeric_distractors(
+    transcript: str,
+) -> None:
+    resolver = CommandSurfaceResolver(_live_like_f10_menu())
+
+    resolution = resolver.resolve(transcript)
+
+    assert resolution.decision is CommandResolutionDecision.RESOLVED
+    assert resolution.surface is not None
+    assert resolution.surface.label == "DREAM 7"
+    assert resolution.matched_alias == "DREAM 7"
+
+
+def test_long_engine_start_call_resolves_with_numeric_distractors() -> None:
+    resolver = CommandSurfaceResolver(_live_like_f10_menu())
+
+    resolution = resolver.resolve("Ground Lion 6 1 request engine start")
+
+    assert resolution.decision is CommandResolutionDecision.RESOLVED
+    assert resolution.surface is not None
+    assert resolution.surface.label == "Request Engine Start"
+
+
+def test_bare_digit_still_resolves_as_an_exact_f10_command() -> None:
+    resolver = CommandSurfaceResolver(_live_like_f10_menu())
+
+    resolution = resolver.resolve("7")
+
+    assert resolution.decision is CommandResolutionDecision.RESOLVED
+    assert resolution.surface is not None
+    assert resolution.surface.label == "7"
+
+
+def test_digit_embedded_in_unrelated_speech_never_resolves() -> None:
+    resolver = CommandSurfaceResolver(_live_like_f10_menu())
+
+    resolution = resolver.resolve("Lion 6 1 check radio 7")
+
+    assert resolution.decision is not CommandResolutionDecision.RESOLVED
+
+
+def test_equally_specific_embedded_labels_abstain() -> None:
+    resolver = CommandSurfaceResolver([_f10("DREAM 7"), _f10("FYTTR 7")])
+
+    resolution = resolver.resolve("Clearance request DREAM 7 or FYTTR 7")
+
+    assert resolution.decision is CommandResolutionDecision.ABSTAINED
+    assert resolution.score == 100.0
+
+
+def test_diagnostic_alias_is_not_used_for_embedded_matching() -> None:
+    resolver = CommandSurfaceResolver([_f10("NORTH", identifier="Action FLEX NORTH")])
+
+    resolution = resolver.resolve("Clearance request Action FLEX NORTH now")
+
+    assert resolution.decision is CommandResolutionDecision.RAW
 
 
 def test_static_command_resolves_to_voiceattack_command() -> None:

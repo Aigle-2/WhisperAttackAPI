@@ -89,6 +89,14 @@ example uses **Aspen 1‑1**.
   random `X001` per spawn.
 - **Gate N** = the range entry/exit gate for BlackJack / range work.
 
+## VAIVOX resolution behavior
+
+VAIVOX accepts the full call; it does not require speaking only the final menu label. It
+matches an exact, contiguous multi-token F10 label inside the reconciled phrase, so a call
+ending in `IFR DREAM 7` selects `DREAM 7` even when the live menu also contains numeric
+entries such as `1`, `6`, and `7`. A single-token menu item is intentionally selectable only
+as the complete spoken command, preventing incidental callsign digits from dispatching it.
+
 ## Known quirks (this example mission's script)
 
 - **Approach assist prompt does not display.** The helper table keys the Approach entry as

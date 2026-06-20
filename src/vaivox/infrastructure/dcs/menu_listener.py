@@ -5,10 +5,12 @@ starts empty on every VAIVOX run and exposes a dispatchable map only after a pro
 snapshot arrives from the currently running DCS process. A disk mirror is retained for
 diagnostics, never restored for dispatch.
 
-The hook sends a cumulative entry list after every menu mutation. The listener debounces
-those datagrams and commits only the settled snapshot. Duplicate labels on distinct menu
-paths are omitted from the label-only dispatch map so speech resolution fails closed rather
-than choosing an arbitrary action.
+The hook sends a cumulative entry list after every menu mutation and periodically re-sends
+the settled snapshot at the same revision. The heartbeat lets a VAIVOX process started after
+DCS establish a fresh live handshake; an already-synchronized listener ignores the duplicate
+revision without invalidating its handles. The listener debounces changed snapshots and
+commits only the settled menu. Duplicate labels on distinct menu paths are omitted from the
+label-only dispatch map so speech resolution fails closed rather than choosing arbitrarily.
 """
 
 from __future__ import annotations

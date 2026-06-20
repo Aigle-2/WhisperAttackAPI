@@ -130,7 +130,10 @@ navigation path" conclusion. The real fix is to send the `ActionIndex` (`0`).
   assigns to `base.vaicom.state.menuaux`) on a throttled GUI update callback. It extracts
   each command's label, submenu path, and `command.actionIndex`, then broadcasts protocol-v2
   cumulative snapshots to a VAIVOX-owned UDP port (default `33493`). Each snapshot carries a
-  process session id and revision. `MissionMenuListener` debounces the build, rejects stale
+  process session id and menu revision. v7 periodically re-sends the settled snapshot at the
+  same revision, so a VAIVOX process restarted after DCS can prove the current session live
+  without restoring the diagnostic disk mirror. An already-synchronized listener ignores
+  that duplicate revision. `MissionMenuListener` debounces changed builds, rejects stale
   revisions and duplicate
   labels on distinct paths, and supplies the only dispatchable index. Every mutation
   immediately invalidates the previous map, and the UDP sink resolves the label from the
@@ -143,11 +146,14 @@ navigation path" conclusion. The real fix is to send the `ActionIndex` (`0`).
   had retained the original callbacks. Upstream VAICOM confirms that its real source is the
   lexical `data.menuOther` tree, so v6 scans that object directly after
   `base.vaicom.init.start` registers the GUI update machinery. The listener starts empty
-  every time and never restores persisted action handles. **Status: v6 live capture
+  every time and never restores persisted action handles. v7 adds a five-second same-revision
+  heartbeat to close the VAIVOX-after-DCS restart race. **Status: v6 live capture
   validated on 2026-06-20:** DCS published revision 3 with 88 commands and complete submenu
   paths; VAIVOX received the same session with no ambiguous labels. Until a current scan
-  arrives, F10 items remain visible but non-dispatchable. A spoken-command dispatch smoke is
-  the only remaining end-to-end check.
+  arrives, F10 items remain visible but non-dispatchable. The spoken smoke then resolved real
+  ElevenLabs output `Voice command assist`, re-read live index 6 at send time, and emitted
+  `mission.player.actionsequence:[6]`; telemetry recorded accepted typed F10 dispatch. Only
+  the user-visible mission effect cannot be machine-acknowledged.
 
 ## Live validation (2026-06-20)
 
@@ -157,8 +163,10 @@ transport, message shape, and single-index-fires-nested-item behaviour.
 
 **Caveat from the same session:** minutes later, after the live menu changed, index `0`
 resolved to `Repeat last transmission` — the transport still worked, but the *index* was
-stale (see the sourcing limitation above). The transport and v6 live-index capture are now
-proven; the remaining smoke is the complete spoken-command route into that current index.
+stale (see the sourcing limitation above). The transport, v6 live-index capture, v7
+restart-safe heartbeat, and complete
+spoken-command software route into the current index are now proven. DCS exposes no reply for
+the final mission effect, so that last fact is operator-observed.
 
 ## VAIVOX implementation
 

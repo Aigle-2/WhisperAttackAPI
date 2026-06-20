@@ -27,7 +27,7 @@ def _panel(tmp_path: Path, content: str = _STOCK) -> Path:
 
 def test_render_hook_includes_port_type_and_markers() -> None:
     lua = render_hook(33493)
-    assert "VAIVOX_F10_HOOK v6" in lua
+    assert "VAIVOX_F10_HOOK v7" in lua
     assert "BEGIN" in lua and "END" in lua
     assert "33493" in lua
     assert "vaivox.f10menu" in lua
@@ -36,6 +36,14 @@ def test_render_hook_includes_port_type_and_markers() -> None:
     assert "revision = revision" in lua
     assert "entries = entries" in lua
     assert "path = append_path(path, nil)" in lua
+
+
+def test_render_hook_republishes_an_unchanged_revision_as_a_heartbeat() -> None:
+    lua = render_hook(33493)
+
+    assert "local heartbeat_seconds = 5" in lua
+    assert "if advance_revision ~= false then revision = revision + 1 end" in lua
+    assert 'publish("heartbeat", false)' in lua
 
 
 def test_render_hook_uses_the_dcs_base_namespace_for_standard_functions() -> None:

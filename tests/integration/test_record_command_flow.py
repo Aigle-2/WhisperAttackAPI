@@ -28,6 +28,7 @@ from vaivox.domain.commands.model import (
     VaicomF10Action,
     VoiceAttackCommand,
 )
+from vaivox.domain.commands.resolver import CommandSurfaceResolver
 from vaivox.domain.reconciliation.model import Transcription
 from vaivox.domain.reconciliation.snapper import PhraseSnapper
 from vaivox.domain.telemetry.model import MatchOutcome
@@ -205,18 +206,19 @@ def _fuzzy_entry(entry_id, term):
     )
 
 
-def _f10_surface(label="FLEX NORTH") -> CommandSurface:
+def _f10_surface(label="FLEX NORTH", action_index=3) -> CommandSurface:
+    identifier = f"Action {label}"
     return CommandSurface(
-        id="mission_f10:action-flex-north",
+        id=f"mission_f10:{label.casefold().replace(' ', '-')}",
         label=label,
-        aliases=("Action FLEX NORTH",),
+        aliases=(identifier,),
         source="mission_f10",
         scope="mission",
         dispatch_target=VaicomF10Action(
-            identifier="Action FLEX NORTH",
+            identifier=identifier,
             label=label,
             command_id=20042,
-            action_index=3,
+            action_index=action_index,
         ),
     )
 
@@ -387,6 +389,35 @@ def test_f10_surface_fires_through_the_udp_action_sink():
     assert outcome.dispatch is not None
     assert outcome.dispatch.target_kind == "vaicom_f10_action"
     assert outcome.dispatch.accepted is True
+
+
+def test_embedded_f10_label_uses_typed_dispatch_without_voiceattack_fallback():
+    command_sink = FakeCommandSink()
+    dispatcher = FakeCommandDispatcher(command_sink)
+    surfaces = [_f10_surface("DREAM 7", action_index=12)] + [
+        _f10_surface(str(digit), action_index=digit) for digit in range(10)
+    ]
+    use_case, _reporter, telemetry = _make_stop(
+        FakeRecorder(),
+        FakeSpeechToText(text="Clearance delivery Lion 61 Clearance on request IFR DREAM 7"),
+        command_sink=command_sink,
+        command_dispatcher=dispatcher,
+        surface_matcher=CommandSurfaceResolver(surfaces),
+        config=FakeConfig(fuzzy_words=[]),
+    )
+
+    use_case.execute()
+
+    assert command_sink.sent == []
+    assert [action.identifier for action in dispatcher.f10_sent] == ["Action DREAM 7"]
+    assert dispatcher.f10_sent[0].action_index == 12
+    outcome = telemetry.outcomes[0]
+    assert outcome.destination == "vaicom_f10_action"
+    assert outcome.sent_text == "Action DREAM 7"
+    assert outcome.resolution is not None
+    assert outcome.resolution.label == "DREAM 7"
+    assert outcome.dispatch is not None
+    assert outcome.dispatch.target_kind == "vaicom_f10_action"
 
 
 def test_f10_surface_without_action_index_is_reported_not_accepted():

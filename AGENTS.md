@@ -118,7 +118,12 @@ but never anything that does I/O (sockets, files, mic, network, UI).
     commands like `Radar Focus Target [1..20]`.
   - **Command surfaces + typed dispatch** (ADR-0012) ✅ *(amended 2026-06-20)*:
     `domain/commands/` resolves reconciled text to a `CommandSurface` with a typed target
-    before legacy snap fallback. Static commands dispatch their command name through the
+    before legacy snap fallback. Whole-query exact matching is followed by a conservative
+    embedded-label phase for realistic full radio calls: only contiguous live F10 labels
+    with at least two normalized tokens qualify, the unique most-specific label wins, and
+    equal specificity abstains. Single-token callsigns/numbers therefore require an exact
+    whole utterance (`DREAM 7` wins inside a clearance call; embedded `7` cannot hijack it).
+    Static commands dispatch their command name through the
     VoiceAttack sink; live F10 surfaces fire DCS `missionCommands.doAction(ActionIndex)` over
     a UDP datagram (`UdpVaicomF10ActionSink` → `127.0.0.1:33491`, settings
     `vaicom_f10_host`/`vaicom_f10_port`), replicating VAICOM's own
@@ -129,8 +134,11 @@ but never anything that does I/O (sockets, files, mic, network, UI).
     radio panel on every startup so it survives DCS/VAICOM updates) scans the authoritative
     `data.menuOther` tree that VAICOM itself exports as `menuaux`, then broadcasts the current
     path-aware protocol-v2 menu snapshots over UDP to `MissionMenuListener` (port `33493`).
-    Snapshots carry a DCS-process session id and revision; the listener debounces the menu
-    build, rejects stale revisions and ambiguous duplicate labels, and never restores its
+    Snapshots carry a DCS-process session id and menu revision; v7 also re-sends the settled
+    snapshot every 5 seconds at the same revision, so relaunching VAIVOX after DCS recovers
+    the live handshake without trusting disk or restarting DCS. An active listener ignores
+    the duplicate revision without invalidating its handles. The listener debounces changed
+    menus, rejects stale revisions and ambiguous duplicate labels, and never restores its
     diagnostic disk mirror for dispatch. `mission_f10.py` clears every unreliable whole-log
     `Set menu F10 item` index before applying that live map, so a missing handshake or label
     fails closed (`Command ID` and historical indices are diagnostic only). Every incoming
@@ -142,10 +150,14 @@ but never anything that does I/O (sockets, files, mic, network, UI).
     a dead end and is removed. Transport confirmed live (`actionsequence:[0]` fired
     FLEX NORTH); live v5 validated the namespace fix and protocol handshake but showed DCS
     bypassed late `clearOtherMenu` / `addOtherCommand` replacements, so v6 scans
-    `data.menuOther` on a throttled GUI callback. Live capture is **validated**: revision 3
+    `data.menuOther` on a throttled GUI callback; v7 adds the restart-safe heartbeat. Live
+    capture is **validated**: revision 3
     delivered 88 path-aware commands with no ambiguity and VAIVOX persisted the identical
-    DCS session (`FLEX NORTH=0`, `MORMON MESA 8=5`). Spoken end-to-end dispatch remains
-    pending. The DCS install dir is auto-discovered via registry + the Steam library owning app id
+    DCS session (`FLEX NORTH=0`, `MORMON MESA 8=5`). Spoken end-to-end dispatch is also
+    validated through UDP: real ElevenLabs output `Voice command assist` resolved to the
+    mission surface, re-read current index 6 at send time, and emitted accepted typed F10
+    dispatch. DCS provides no acknowledgement, so the final mission effect is operator-observed.
+    The DCS install dir is auto-discovered via registry + the Steam library owning app id
     223750; `dcs_install_dir` is an override. If a hook (re)install happens while DCS is
     running (`is_dcs_running`), VAIVOX **red-alerts** (modal + red status) to order a DCS
     restart — the stale loaded panel could otherwise misfire. Full source-cited write-up in

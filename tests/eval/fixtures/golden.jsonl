@@ -22,3 +22,4 @@
 {"raw_stt": "mormon mesa eight", "expected_command": "MORMON MESA 8", "tags": ["mission_f10", "ai_atc", "number_form"]}
 {"raw_stt": "Action DREAM 7", "expected_command": "DREAM 7", "tags": ["mission_f10", "ai_atc", "vaicom_identifier"]}
 {"raw_stt": "Request a MORMON MESA 8", "expected_command": "MORMON MESA 8", "tags": ["mission_f10", "ai_atc", "request_alias"]}
+{"raw_stt": "Voice command assist", "expected_command": "Voice command assist", "tags": ["mission_f10", "ai_atc", "clean", "real_operator", "live_dispatch"]}

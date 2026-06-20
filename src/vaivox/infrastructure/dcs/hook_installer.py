@@ -25,10 +25,13 @@ from vaivox.infrastructure.dcs.menu_listener import DEFAULT_MENU_PORT
 _LOGGER = logging.getLogger(__name__)
 
 #: Bump when the Lua changes so :meth:`ensure_installed` replaces an older deployed block.
-#: v6 scans the authoritative ``data.menuOther`` tree that VAICOM itself exports. DCS keeps
-#: cached references to the original public menu callbacks, so replacing those functions at
-#: the end of the panel (v5) did not observe missionCommands/MOOSE updates.
-_HOOK_VERSION = "v6"
+#: v7 periodically re-sends the settled snapshot at the same menu revision so a VAIVOX
+#: process restarted after DCS can establish a fresh live handshake. v6 introduced the scan
+#: of the authoritative ``data.menuOther`` tree that VAICOM itself exports.
+_HOOK_VERSION = "v7"
+
+#: Maximum wait for a newly started VAIVOX listener to receive the current DCS snapshot.
+_HEARTBEAT_SECONDS = 5
 
 #: Matches any deployed VAIVOX block (any version) plus the blank lines before it, so a stale
 #: or older-version block is removed cleanly before the current one is appended.
@@ -80,6 +83,16 @@ local _vaivox_ok, _vaivox_err = base.pcall(function()
   local session = base.tostring({{}})
   local revision = 0
   local entries = {{}}
+  local heartbeat_seconds = {heartbeat_seconds}
+
+  local function monotonic_now()
+    if base.os and base.os.clock then
+      return base.os.clock()
+    elseif base.Export and base.Export.LoGetModelTime then
+      return base.Export.LoGetModelTime()
+    end
+    return nil
+  end
 
   local function append_path(path, name)
     local copied = {{}}
@@ -88,8 +101,9 @@ local _vaivox_ok, _vaivox_err = base.pcall(function()
     return copied
   end
 
-  local function publish(phase)
-    revision = revision + 1
+  local last_publish = nil
+  local function publish(phase, advance_revision)
+    if advance_revision ~= false then revision = revision + 1 end
     local ok_payload, payload = base.pcall(function()
       return JSON:encode({{
         type = "vaivox.f10menu",
@@ -106,6 +120,7 @@ local _vaivox_ok, _vaivox_err = base.pcall(function()
     end
     if sock then base.pcall(function() sock:send(payload) end) end
     _vaivox_write("vaivox_f10_menu.json", payload)
+    last_publish = monotonic_now()
   end
 
   local function scan_node(node, path, found)
@@ -137,7 +152,7 @@ local _vaivox_ok, _vaivox_err = base.pcall(function()
   local last_fingerprint = nil
   local last_poll = nil
   local last_scan_error = nil
-  local function scan_if_changed()
+  local function scan_or_heartbeat(now)
     local found = {{}}
     scan_node(data and data.menuOther, {{}}, found)
     local ok_fingerprint, fingerprint = base.pcall(function() return JSON:encode(found) end)
@@ -151,22 +166,23 @@ local _vaivox_ok, _vaivox_err = base.pcall(function()
         " entries=" .. base.tostring(#entries) .. " session=" .. session,
         false
       )
+    elseif now ~= nil and
+           (last_publish == nil or now < last_publish or
+            now - last_publish >= heartbeat_seconds) then
+      -- A heartbeat keeps the same revision because the menu did not mutate. Existing
+      -- listeners ignore the duplicate revision; a listener started after DCS accepts it.
+      publish("heartbeat", false)
     end
   end
 
   local function poll_menu()
     local ok_scan, scan_error = base.pcall(function()
-      local now = nil
-      if base.os and base.os.clock then
-        now = base.os.clock()
-      elseif base.Export and base.Export.LoGetModelTime then
-        now = base.Export.LoGetModelTime()
-      end
+      local now = monotonic_now()
       if now ~= nil and last_poll ~= nil and now >= last_poll and now - last_poll < 0.5 then
         return
       end
       last_poll = now
-      scan_if_changed()
+      scan_or_heartbeat(now)
     end)
     if not ok_scan then
       local rendered = base.tostring(scan_error)
@@ -216,7 +232,11 @@ if not _vaivox_ok then _vaivox_report("ERROR " .. base.tostring(_vaivox_err), tr
 
 def render_hook(port: int = DEFAULT_MENU_PORT, version: str = _HOOK_VERSION) -> str:
     """Render the Lua hook block for ``port`` (the VAIVOX menu-listener UDP port)."""
-    return _HOOK_TEMPLATE.format(version=version, port=port)
+    return _HOOK_TEMPLATE.format(
+        version=version,
+        port=port,
+        heartbeat_seconds=_HEARTBEAT_SECONDS,
+    )
 
 
 class DcsHookInstaller:

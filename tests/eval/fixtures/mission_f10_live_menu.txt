@@ -1,0 +1,19 @@
+# Live-like AI ATC mission menu: departure routes, callsign, and Set Integer digits.
+DREAM 7
+FYTTR 7
+MORMON MESA 8
+FLEX NORTH
+FLEX WEST
+FLEX 3M
+Request Engine Start
+Lion
+0
+1
+2
+3
+4
+5
+6
+7
+8
+9
