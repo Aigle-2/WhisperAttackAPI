@@ -63,13 +63,12 @@ abstain + near-miss`, `score < low → send raw`.
 
 **Boundaries & robustness:**
 
-- `matched` means VoiceAttack found and dispatched a command for that exact text —
+- `matched` means VoiceAttack found and dispatched a profile command for that text —
   it is **not** a guarantee that VAICOM issued the in-game radio call (downstream,
   a different failure class, not cheaply observable).
-- After ADR-0012, `MatchOutcome` is explicitly the static VoiceAttack
-  `Command.Exists` result. Dynamic targets such as `VaicomF10Action` record
-  `resolution` and `dispatch` telemetry instead; their `match` field remains `null`
-  because no static VoiceAttack exact-name check was performed.
+- After the ADR-0012 amendment, `MatchOutcome` is the VoiceAttack `Command.Exists`
+  result for static commands and canonical VAICOM F10 `Action …` aliases. Typed targets
+  additionally record `resolution` and `dispatch` telemetry.
 - The return is **best-effort**: a short read timeout; on no reply the outcome is
   `unknown`, telemetry records it, no usage stamp, and the app continues. The user
   is never blocked.
@@ -114,7 +113,7 @@ in-project constraint, Option A is the cleaner fit.
 
 1. [x] Define the result message format (text, matched, resolved command). One JSON line
    `{ "text", "matched", "resolved_command" }` (newline-terminated), `resolved_command` =
-   the received text when matched (exact-name check) else `null`.
+   the submitted profile phrase when matched, else `null`.
 2. [x] Emit the result from the plugin after the match attempt. `HandleVaivoxCommand`
    replies on the same socket right after `Command.Exists` (before `Command.Execute`);
    `VoiceAttackCommandSink.send` reads it back (short timeout; EOF/timeout/malformed →
@@ -126,4 +125,5 @@ in-project constraint, Option A is the cleaner fit.
 4. [ ] Build the offline review report (frequent not-founds, suggested mappings) — needs
    accumulated live match data from the deploy above.
 5. [x] Add ADR-0012 typed routing telemetry fields (`resolution`, `dispatch`) while
-   preserving `match` for the VoiceAttack static path only.
+   preserving `match` for every target handed to the VoiceAttack profile, including
+   canonical VAICOM F10 `Action …` aliases.

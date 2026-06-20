@@ -33,8 +33,8 @@ executing the command:
 {"text": "<received>", "matched": true, "resolved_command": "<command or null>"}
 ```
 
-`resolved_command` is the received text when matched (VoiceAttack's `Command.Exists` is an
-exact-name check), otherwise `null`. The reply is sent **before** `Command.Execute`, so it
+`resolved_command` is the submitted profile phrase when matched, otherwise `null`. The
+reply is sent **before** `Command.Execute`, so it
 does not wait on the in-game radio call. It is best-effort: the server applies a short read
 timeout and treats a missing/garbled reply as *unknown*, so an older server build (or none)
 never breaks dispatch. The Python side reads it in

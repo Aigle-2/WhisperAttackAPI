@@ -99,6 +99,7 @@ def test_record_serializes_resolution_and_dispatch(tmp_path) -> None:
         command_text="FLEX NORTH",
         sent_text="Action FLEX NORTH",
         destination="vaicom_f10_action",
+        match=MatchOutcome(matched=True, resolved_command="Action FLEX NORTH"),
         resolution=CommandResolutionSummary(
             decision="resolved",
             surface_id="mission_f10:action-flex-north",
@@ -110,9 +111,9 @@ def test_record_serializes_resolution_and_dispatch(tmp_path) -> None:
         ),
         dispatch=DispatchOutcome(
             target_kind="vaicom_f10_action",
-            accepted=False,
+            accepted=True,
             resolved_target="Action FLEX NORTH",
-            detail="disabled",
+            detail="VAICOM F10 Action alias via VoiceAttack profile",
         ),
     )
 
@@ -120,11 +121,15 @@ def test_record_serializes_resolution_and_dispatch(tmp_path) -> None:
 
     record = json.loads((tmp_path / TELEMETRY_FILE).read_text(encoding="utf-8").strip())
     assert record["resolution"]["surface_id"] == "mission_f10:action-flex-north"
+    assert record["match"] == {
+        "matched": True,
+        "resolved_command": "Action FLEX NORTH",
+    }
     assert record["dispatch"] == {
         "target_kind": "vaicom_f10_action",
-        "accepted": False,
+        "accepted": True,
         "resolved_target": "Action FLEX NORTH",
-        "detail": "disabled",
+        "detail": "VAICOM F10 Action alias via VoiceAttack profile",
     }
 
 

@@ -4,6 +4,9 @@ VAIVOX turns push-to-talk speech into DCS radio commands on top of **VoiceAttack
 + **VAICOM Community** (Windows desktop app). It is a divergence of WhisperAttackAPI,
 mid-rewrite from a legacy layout to a hexagonal one. Decisions live in
 [`docs/adr/`](docs/adr/); the phased roadmap is [`docs/MIGRATION_PLAN.md`](docs/MIGRATION_PLAN.md).
+An **optional**, mission-specific voice-call reference — for missions that bundle the
+community MOOSE "AI ATC" script — lives in
+[`docs/AI_ATC_EXAMPLE_CALLS.md`](docs/AI_ATC_EXAMPLE_CALLS.md) (most missions don't include it).
 
 ## Architecture (ADR-0001): hexagonal, dependencies point inward
 
@@ -113,12 +116,40 @@ but never anything that does I/O (sockets, files, mic, network, UI).
     generator splits CommandStrings on top-level `;` only (keeping `[Alpha;Bravo]` alternation
     groups intact) and keeps balanced `[...]` parameter slots, so the Core list shows clean
     commands like `Radar Focus Target [1..20]`.
-  - **Command surfaces + typed dispatch** (ADR-0012) ✅: `domain/commands/` resolves
-    reconciled text to a `CommandSurface` with a typed target before legacy snap fallback.
-    Static commands dispatch as `VoiceAttackCommand` through the existing sink; live F10
-    surfaces dispatch as `VaicomF10Action` through a disabled-by-default adapter until the
-    VAICOM/DCS smoke test validates real actionsequence execution. Telemetry keeps
-    `match` for static `Command.Exists` only and adds `resolution` + `dispatch`.
+  - **Command surfaces + typed dispatch** (ADR-0012) ✅ *(amended 2026-06-20)*:
+    `domain/commands/` resolves reconciled text to a `CommandSurface` with a typed target
+    before legacy snap fallback. Static commands dispatch their command name through the
+    VoiceAttack sink; live F10 surfaces fire DCS `missionCommands.doAction(ActionIndex)` over
+    a UDP datagram (`UdpVaicomF10ActionSink` → `127.0.0.1:33491`, settings
+    `vaicom_f10_host`/`vaicom_f10_port`), replicating VAICOM's own
+    `mission.player.actionsequence` path — F10 items are **not** VoiceAttack commands (zero
+    `Action …` entries in any profile), so they take a separate transport. A single
+    `ActionIndex` fires nested items. The authoritative index is the **live DCS menu**: a
+    VAIVOX-owned panel hook (`infrastructure/dcs/`, `DcsHookInstaller` self-heals it into the
+    radio panel on every startup so it survives DCS/VAICOM updates) scans the authoritative
+    `data.menuOther` tree that VAICOM itself exports as `menuaux`, then broadcasts the current
+    path-aware protocol-v2 menu snapshots over UDP to `MissionMenuListener` (port `33493`).
+    Snapshots carry a DCS-process session id and revision; the listener debounces the menu
+    build, rejects stale revisions and ambiguous duplicate labels, and never restores its
+    diagnostic disk mirror for dispatch. `mission_f10.py` clears every unreliable whole-log
+    `Set menu F10 item` index before applying that live map, so a missing handshake or label
+    fails closed (`Command ID` and historical indices are diagnostic only). Every incoming
+    mutation invalidates the old map immediately, and `UdpVaicomF10ActionSink` resolves the
+    label from the settled map again at send time to close the resolve-to-dispatch race.
+    F10 dispatch is fire-and-forget (no `match`); telemetry records `resolution` + typed
+    `dispatch`. When no surface resolves, the legacy snapper picks a static
+    `VoiceAttackCommand`. The earlier "F10 via a VoiceAttack `Action …` alias" amendment was
+    a dead end and is removed. Transport confirmed live (`actionsequence:[0]` fired
+    FLEX NORTH); live v5 validated the namespace fix and protocol handshake but showed DCS
+    bypassed late `clearOtherMenu` / `addOtherCommand` replacements, so v6 scans
+    `data.menuOther` on a throttled GUI callback. Live capture is **validated**: revision 3
+    delivered 88 path-aware commands with no ambiguity and VAIVOX persisted the identical
+    DCS session (`FLEX NORTH=0`, `MORMON MESA 8=5`). Spoken end-to-end dispatch remains
+    pending. The DCS install dir is auto-discovered via registry + the Steam library owning app id
+    223750; `dcs_install_dir` is an override. If a hook (re)install happens while DCS is
+    running (`is_dcs_running`), VAIVOX **red-alerts** (modal + red status) to order a DCS
+    restart — the stale loaded panel could otherwise misfire. Full source-cited write-up in
+    [`docs/VAICOM_F10_EXECUTION_CONTRACT.md`](docs/VAICOM_F10_EXECUTION_CONTRACT.md).
   - **Agent API/MCP** (ADR-0010) ✅ read API **+ gated actions + MCP**: introspection
     endpoints `/status`, `/metrics`, `/reconciliations`, `/vocabulary` + `POST
     /reconcile/dry-run` over query use cases (off by default, localhost, optional bearer
@@ -244,6 +275,9 @@ The full debug recipes (curl examples, the dry-run workflow, the gated actions, 
   the relevant test dataset before or alongside the fix. Prefer the eval fixtures in
   `tests/eval/` for end-to-end reconciliation/snap outcomes and focused unit/integration
   tests for narrow regressions. This keeps the dataset growing from actual operator
-  evidence and makes future threshold/scoring changes safer.
+  evidence and makes future threshold/scoring changes safer. For mission-F10 ATC
+  phraseology specifically, the optional reference
+  [`docs/AI_ATC_EXAMPLE_CALLS.md`](docs/AI_ATC_EXAMPLE_CALLS.md) documents example calls and
+  is already seeded into the `tests/eval/` fixtures (tagged `ai_atc` / `mission_f10`).
 - Don't reformat or tighten types on the `tools/` scripts just to satisfy a gate; they're
   excluded on purpose (utility code, not part of the strict tree).

@@ -43,7 +43,8 @@ files.
 After ADR-0012, the mission overlay is a catalog of ephemeral command surfaces rather
 than permanent vocabulary. The UI and STT keyterms use the human label (for example
 `FLEX NORTH`), while routing preserves VAICOM's identifier (`Action FLEX NORTH`),
-`ActionIndex`, and `Command ID` as a typed `VaicomF10Action` target.
+`ActionIndex`, and `Command ID` as a typed `VaicomF10Action` target. Only the identifier
+is dispatched through the VoiceAttack/VAICOM profile; numeric log fields are diagnostic.
 
 ## Options Considered
 

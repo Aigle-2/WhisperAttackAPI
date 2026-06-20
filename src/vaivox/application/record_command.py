@@ -244,10 +244,13 @@ def route_command(
     (:class:`StopAndReconcile`) and the gated simulate action (:class:`SimulateUtterance`,
     ADR-0010) dispatch and record identically — there is exactly one routing path.
 
-    On the VoiceAttack path the sink returns the plugin's :class:`MatchOutcome` (ADR-0006);
-    it is recorded in telemetry, and on a positive match the contributing vocabulary entries
-    are credited with usage (ADR-0004 attribution). The kneeboard path never matches, so it
-    is never stamped.
+    A resolved command surface dispatches its typed target: a static
+    :class:`~vaivox.domain.commands.model.VoiceAttackCommand` goes to VoiceAttack (returning
+    the plugin's :class:`MatchOutcome`, ADR-0006), while a live
+    :class:`~vaivox.domain.commands.model.VaicomF10Action` fires DCS ``doAction`` over the
+    UDP F10 sink (fire-and-forget — no match, ADR-0012). When nothing resolves, the legacy
+    phrase snapper picks a static VoiceAttack command. Positive VoiceAttack matches credit
+    the contributing vocabulary entries with usage (ADR-0004 attribution).
 
     Args:
         result: The staged reconciliation result to route.
@@ -287,8 +290,7 @@ def route_command(
             and resolution.surface is not None
         ):
             surface = resolution.surface
-            target = surface.dispatch_target
-            dispatch_result = command_dispatcher.dispatch(target)
+            dispatch_result = command_dispatcher.dispatch(surface.dispatch_target)
             dispatch = dispatch_result.dispatch
             match = dispatch_result.match
             destination = dispatch.target_kind
@@ -306,8 +308,8 @@ def route_command(
             destination = DispatchTargetKind.VOICEATTACK.value
             sent_text = dispatch.resolved_target or snap.text
         if match is not None and match.matched:
-            # Only a positive match stamps usage; the matched command (resolved_command,
-            # which equals sent_text for VA's exact-name check) carries the surviving tokens.
+            # Only a positive match stamps usage; the submitted profile phrase carries the
+            # surviving tokens used by Tier 1 attribution.
             _stamp_matched_usage(match.resolved_command or sent_text, repository, clock)
 
     telemetry.record(

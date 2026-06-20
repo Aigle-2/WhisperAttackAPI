@@ -736,7 +736,15 @@ def parse_wso_caches(vaicom_root: Path, terms: list[str]) -> None:
         path = vaicom_root / "Logs" / filename
         if not path.is_file():
             continue
-        payload = json.loads(path.read_text(encoding="utf-8", errors="ignore"))
+        # VAICOM may leave an empty or half-written cache (e.g. between sessions). Skip it
+        # rather than letting one malformed file abort the whole vocabulary refresh.
+        raw = path.read_text(encoding="utf-8", errors="ignore").strip()
+        if not raw:
+            continue
+        try:
+            payload = json.loads(raw)
+        except json.JSONDecodeError:
+            continue
         walk_json_terms(payload, terms)
 
 

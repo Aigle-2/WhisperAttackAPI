@@ -27,8 +27,8 @@ class MatchOutcome:
 
     Attributes:
         matched: Whether VoiceAttack found and dispatched a command for the text.
-        resolved_command: The command VoiceAttack resolved to, when matched (the received
-            text, since ``Command.Exists`` is an exact-name check); ``None`` otherwise.
+        resolved_command: The submitted VoiceAttack profile phrase when matched; ``None``
+            otherwise.
     """
 
     matched: bool

@@ -8,7 +8,7 @@ keeping the inner layers free of wiring concerns.
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from threading import Event, Lock
 
@@ -51,6 +51,12 @@ from vaivox.domain.reconciliation.snapper import (
 from vaivox.infrastructure.api.introspection import IntrospectionServer
 from vaivox.infrastructure.audio.recorder import SoundDeviceRecorder
 from vaivox.infrastructure.config.settings import VaivoxConfiguration
+from vaivox.infrastructure.dcs.hook_installer import (
+    DcsHookInstaller,
+    discover_dcs_install_dir,
+    discover_panel_path,
+)
+from vaivox.infrastructure.dcs.menu_listener import MissionMenuListener, menu_file_path
 from vaivox.infrastructure.inbound.control_server import ControlSocketServer
 from vaivox.infrastructure.kneeboard.sink import KneeboardSink
 from vaivox.infrastructure.reload.command_surface_resolver import (
@@ -75,11 +81,9 @@ from vaivox.infrastructure.vocabulary.reconciliation_vocabulary import (
     RepositoryReconciliationVocabulary,
 )
 from vaivox.infrastructure.vocabulary.vaicom_generator import VaicomVocabularyGenerator
-from vaivox.infrastructure.voiceattack.dispatcher import (
-    DisabledVaicomF10ActionSink,
-    TypedCommandDispatcher,
-)
+from vaivox.infrastructure.voiceattack.dispatcher import TypedCommandDispatcher
 from vaivox.infrastructure.voiceattack.sink import VoiceAttackCommandSink
+from vaivox.infrastructure.voiceattack.vaicom_f10_sink import UdpVaicomF10ActionSink
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -109,6 +113,10 @@ class WiredApp:
         get_mission_phrases: Live mission-scoped F10 command phrases — the "F10" tab of the
             UI commands browser.
         api_server: The introspection API server, or ``None`` when disabled.
+        menu_listener: The live F10 menu UDP listener (ADR-0012), or ``None`` when the live
+            menu is disabled. The entry point starts it on a daemon thread.
+        hook_installer: The DCS panel hook self-healer (ADR-0012), or ``None`` when no DCS
+            install is configured/found. The entry point runs it once at startup.
     """
 
     control_server: ControlSocketServer
@@ -121,6 +129,8 @@ class WiredApp:
     get_core_phrases: Callable[[], tuple[str, ...]]
     get_mission_phrases: Callable[[], tuple[str, ...]]
     api_server: IntrospectionServer | None = None
+    menu_listener: MissionMenuListener | None = None
+    hook_installer: DcsHookInstaller | None = None
 
 
 def build(
@@ -180,12 +190,41 @@ def build(
     def get_mission_keyterms() -> list[str]:
         return _mission_keyterms_from_phrases(get_mission_phrases())
 
+    # Build the authoritative live-index provider before the dispatcher. Both vocabulary
+    # overlay and send-time dispatch consult the same current-session map (ADR-0012).
+    menu_listener: MissionMenuListener | None = None
+    hook_installer: DcsHookInstaller | None = None
+    live_index: Callable[[], Mapping[str, int]] | None = None
+    if config.get_bool_setting("vaicom_f10_live_menu", True):
+        menu_port = config.get_vaicom_f10_menu_port()
+        menu_listener = MissionMenuListener(
+            port=menu_port,
+            persist_path=menu_file_path(config.app_data_location),
+            on_update=lambda count: reporter.report(
+                f"F10 live menu active: {count} dispatchable commands", StatusLevel.DETAIL
+            ),
+            on_error=lambda message: reporter.report(message, StatusLevel.WARNING),
+        )
+        live_index = menu_listener.get_menu
+        install_dir = (
+            config.get_setting("dcs_install_dir", "").strip() or discover_dcs_install_dir()
+        )
+        panel_path = discover_panel_path(install_dir)
+        if panel_path is not None:
+            hook_installer = DcsHookInstaller(panel_path, menu_port)
+
     stt_keyterms = SttKeyterms(config, reconciliation_vocabulary, get_mission_keyterms)
     speech_to_text = create_stt_backend(config, stt_keyterms)
     command_sink = VoiceAttackCommandSink(
         config.get_voiceattack_host(), config.get_voiceattack_port(), reporter
     )
-    command_dispatcher = TypedCommandDispatcher(command_sink, DisabledVaicomF10ActionSink())
+    vaicom_f10_sink = UdpVaicomF10ActionSink(
+        config.get_vaicom_f10_host(),
+        config.get_vaicom_f10_port(),
+        reporter,
+        live_index=live_index,
+    )
+    command_dispatcher = TypedCommandDispatcher(command_sink, vaicom_f10_sink)
     kneeboard_sink = KneeboardSink(config.get_text_line_length, reporter)
     telemetry = build_telemetry_sink(config)
     snapper = build_phrase_snapper(config, recorder, reporter)
@@ -261,7 +300,9 @@ def build(
         max_value=5000,
     )
     refresh_mission_vocabulary = RefreshMissionVocabulary(
-        VaicomF10MissionVocabulary(mission_log_path, max_phrases=mission_max_phrases),
+        VaicomF10MissionVocabulary(
+            mission_log_path, max_phrases=mission_max_phrases, live_index=live_index
+        ),
         reporter,
         apply_mission_phrase_index,
         verbose=lambda: config.get_bool_setting("mission_f10_verbose_logging", False),
@@ -307,6 +348,8 @@ def build(
         get_core_phrases=get_core_phrases,
         get_mission_phrases=get_mission_phrases,
         api_server=api_server,
+        menu_listener=menu_listener,
+        hook_installer=hook_installer,
     )
 
 

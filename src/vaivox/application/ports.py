@@ -67,11 +67,13 @@ class AudioRecorder(Protocol):
 
 @runtime_checkable
 class CommandSink(Protocol):
-    """Driven port: dispatch a static command to VoiceAttack.
+    """Driven port: dispatch a static command phrase to VoiceAttack.
 
-    This is the legacy/static VoiceAttack path. New routing code should prefer
-    :class:`CommandDispatcher`, which accepts typed dispatch targets and delegates this
-    exact-name path only for :class:`~vaivox.domain.commands.model.VoiceAttackCommand`.
+    New routing code should prefer :class:`CommandDispatcher`, which accepts typed
+    dispatch targets and delegates this exact-name path only for
+    :class:`~vaivox.domain.commands.model.VoiceAttackCommand`. Live VAICOM F10 actions take
+    the separate :class:`VaicomF10ActionSink` path (ADR-0012) — they are *not* VoiceAttack
+    commands, so they would never match here.
     """
 
     def send(self, command: str) -> MatchOutcome | None:
@@ -95,8 +97,10 @@ class CommandDispatchResult:
 
     Attributes:
         dispatch: Adapter-level dispatch result for telemetry and diagnostics.
-        match: VoiceAttack's exact-name match result when the target was a static
-            VoiceAttack command; ``None`` for non-VoiceAttack targets or unknown results.
+        match: VoiceAttack's exact-name match result for a static
+            :class:`~vaivox.domain.commands.model.VoiceAttackCommand` (ADR-0006); ``None``
+            for a VAICOM F10 action (the UDP ``doAction`` path is fire-and-forget, with no
+            return channel) or when the plugin reply is unavailable.
     """
 
     dispatch: DispatchOutcome
@@ -113,10 +117,18 @@ class CommandDispatcher(Protocol):
 
 @runtime_checkable
 class VaicomF10ActionSink(Protocol):
-    """Driven port: dispatch a live VAICOM F10 action target."""
+    """Driven port: fire a live VAICOM-imported DCS F10 action (ADR-0012).
+
+    Mission F10 items are *not* VoiceAttack commands; VAICOM fires them by sending DCS a
+    ``mission.player.actionsequence`` datagram carrying the menu item's ``ActionIndex``,
+    which DCS runs via ``missionCommands.doAction`` (a single index fires any item, nesting
+    included). The adapter replicates exactly that datagram. It is fire-and-forget — DCS
+    sends no acknowledgement — so the result is a :class:`DispatchOutcome` only (no
+    :class:`MatchOutcome`).
+    """
 
     def dispatch(self, action: VaicomF10Action) -> DispatchOutcome:
-        """Dispatch a VAICOM-imported F10 action, or report why it was not accepted."""
+        """Fire ``action`` via DCS ``doAction``, or report why it could not be sent."""
 
 
 @runtime_checkable
@@ -289,8 +301,8 @@ class MissionVocabularyDiagnostics:
         mission_markers: Number of ``Mission title:`` markers found in the log.
         latest_mission: The latest mission title the overlay scoped to, if any.
         scoped_matches: F10 command matches within the latest-mission scope.
-        whole_log_matches: F10 command matches across the entire log.
-        fallback_used: Whether the whole-log fallback was used (scoping found none).
+        whole_log_matches: Historical ``Set menu F10 item`` matches across the log.
+        fallback_used: Whether a marker-free legacy log required whole-file parsing.
         deduped_phrases: Final command count after de-duplication and the safety cap.
     """
 

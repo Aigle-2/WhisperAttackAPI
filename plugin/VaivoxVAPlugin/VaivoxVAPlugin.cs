@@ -184,8 +184,8 @@ namespace VaivoxServerCommand
                     // ADR-0006 return channel: decide the match, reply on the SAME socket,
                     // then dispatch. Replying before Command.Execute keeps the round-trip off
                     // the (potentially slow) in-game radio call, so the server learns the
-                    // outcome with negligible latency. Command.Exists is an exact-name check,
-                    // so the resolved command is the received text when matched.
+                    // outcome with negligible latency. The resolved value is the submitted
+                    // profile phrase, including canonical VAICOM `Action ...` aliases.
                     bool matched = vaProxy.Command.Exists(receivedMessage);
                     string resolvedCommand = matched ? receivedMessage : null;
                     await SendMatchOutcome(stream, receivedMessage, matched, resolvedCommand);

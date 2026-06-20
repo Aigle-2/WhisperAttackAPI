@@ -149,15 +149,16 @@ generator, and ADR-0005 **background** generation on first run / on stale all no
   current mission's F10 entries and exposes **command surfaces** with a human label
   (`FLEX NORTH`) plus the preserved VAICOM identifier/metadata (`Action FLEX NORTH`,
   `ActionIndex`, `Command ID`). The labels feed the UI/STT keyterms, while the typed
-  `VaicomF10Action` target feeds ADR-0012 routing. *Deferred:* recipient segmentation
-  and real F10 action execution after the DCS/VAICOM smoke test.
+  `VaicomF10Action` target feeds ADR-0012 routing; numeric ids are diagnostics only.
+  *Deferred:* recipient segmentation.
 - **Command surfaces + typed dispatch** (ADR-0012) ✅: `domain/commands/` defines
   `CommandSurface`, `VoiceAttackCommand`, `VaicomF10Action`, `CommandResolution`, and
   `DispatchOutcome`; `CommandSurfaceResolver` resolves reconciled text before legacy
   snap fallback. `route_command` dispatches typed targets through `CommandDispatcher`,
-  preserving `VoiceAttackCommandSink` for static commands and using a disabled-by-default
-  `VaicomF10Action` sink until smoke-tested. Telemetry keeps `match` for static
-  `Command.Exists` only and adds `resolution` + `dispatch` for typed routing.
+  using `VoiceAttackCommandSink` for static names and canonical VAICOM `Action …` aliases.
+  An explicit F10 alias miss gets one legacy phrase fallback; unknown results do not retry.
+  Telemetry records VoiceAttack `match` for both target types and adds typed `resolution`
+  + `dispatch` provenance.
 - **Agent API + skills** (ADR-0010) ✅ read API **+ gated actions**: the localhost
   introspection API serves `/status`, `/metrics`, `/reconciliations`, `/vocabulary` +
   `POST /reconcile/dry-run` over read-only query use cases, plus the **mutating actions**

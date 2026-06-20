@@ -23,6 +23,7 @@ from vaivox.application.ports import StatusLevel
 from vaivox.domain.reconciliation.snapper import DEFAULT_HIGH
 from vaivox.infrastructure.config.identity import VAIVOX
 from vaivox.infrastructure.config.settings import VaivoxConfiguration
+from vaivox.infrastructure.dcs.hook_installer import is_dcs_running
 from vaivox.infrastructure.ui.commands_window import VaivoxCommands
 from vaivox.infrastructure.ui.settings import VaivoxSettings
 from vaivox.infrastructure.ui.theme import (
@@ -227,6 +228,8 @@ class VaivoxApp:
         self.reconciliation_vocabulary = wired.reconciliation_vocabulary
         self.stt_keyterms = wired.stt_keyterms
         self.add_word_mapping_use_case = wired.add_word_mapping
+        self.menu_listener = wired.menu_listener
+        self.hook_installer = wired.hook_installer
         self.write_startup_context()
         if self.api_server is not None:
             self.api_server.start()
@@ -253,6 +256,13 @@ class VaivoxApp:
                 target=self._poll_mission_vocabulary_in_background,
             ).start()
 
+        # Live F10 ActionIndex (ADR-0012): listen for the DCS hook's menu broadcast and
+        # self-heal the hook into the panel (off the UI thread; both are best-effort).
+        if self.menu_listener is not None:
+            self.menu_listener.start()
+        if self.hook_installer is not None:
+            threading.Thread(daemon=True, target=self._install_dcs_hook).start()
+
     def run(self) -> None:
         """Run the Tk main loop (blocks until the window is destroyed)."""
         self.window.mainloop()
@@ -269,6 +279,65 @@ class VaivoxApp:
             _LOGGER.exception("Background vocabulary refresh failed.")
         finally:
             self._vocabulary_refresh_lock.release()
+
+    def _install_dcs_hook(self) -> None:
+        """Self-heal the DCS F10 menu hook off the UI thread (ADR-0012); best effort."""
+        if self.hook_installer is None:
+            self.writer.report(
+                "DCS F10 live menu: no DCS install found (set dcs_install_dir)",
+                StatusLevel.WARNING,
+            )
+            return
+        try:
+            result = self.hook_installer.ensure_installed()
+        except Exception:
+            _LOGGER.exception("DCS F10 hook install failed.")
+            self.writer.report("DCS F10 hook install failed (see log)", StatusLevel.WARNING)
+            return
+        _LOGGER.info("DCS F10 hook: %s", result)
+        if result in ("installed", "updated"):
+            if is_dcs_running():
+                # Dangerous state: DCS still holds the pre-hook panel, so F10 commands can
+                # fire the WRONG action until it reloads. Order a restart loudly.
+                self.writer.report(
+                    "⚠ RESTART DCS NOW — the F10 hook changed but DCS still has the old radio "
+                    "menu loaded; F10 voice commands may fire the WRONG action until you "
+                    "restart DCS.",
+                    StatusLevel.ERROR,
+                )
+                self._alert_restart_dcs()
+            else:
+                self.writer.report(
+                    f"DCS F10 hook {result} on disk (loads when you next start DCS)",
+                    StatusLevel.SUCCESS,
+                )
+        elif result == "already current":
+            self.writer.report(
+                "DCS F10 hook current on disk; awaiting runtime handshake",
+                StatusLevel.DETAIL,
+            )
+        else:
+            self.writer.report(f"DCS F10 hook: {result}", StatusLevel.WARNING)
+
+    def _alert_restart_dcs(self) -> None:
+        """Pop a modal ordering a DCS restart (marshalled to the Tk thread)."""
+
+        def show() -> None:
+            try:
+                from tkinter import messagebox
+
+                messagebox.showwarning(
+                    f"{VAIVOX.name} — restart DCS required",
+                    "VAIVOX updated its F10 hook while DCS is running.\n\n"
+                    "DCS only loads the radio menu at startup, so it still has the OLD menu — "
+                    "F10 voice commands may fire the WRONG action until you restart.\n\n"
+                    "Please exit and restart DCS before flying.",
+                    parent=self.window,
+                )
+            except Exception:
+                _LOGGER.exception("Could not show the restart-DCS alert.")
+
+        self.window.after(0, show)
 
     def _poll_mission_vocabulary_in_background(self) -> None:
         """Poll VAICOM's live F10 menu imports and hot-apply the mission overlay."""
@@ -576,6 +645,8 @@ class VaivoxApp:
         self.exit_event.set()
         if self.api_server is not None:
             self.api_server.stop()
+        if self.menu_listener is not None:
+            self.menu_listener.stop()
         self.icon.visible = False
         self.icon.stop()
         self.window.destroy()

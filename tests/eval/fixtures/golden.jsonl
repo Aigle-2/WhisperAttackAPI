@@ -15,3 +15,10 @@
 {"raw_stt": "FLEX NORTH", "expected_command": "FLEX NORTH", "tags": ["mission_f10", "clean"]}
 {"raw_stt": "Action FLEX NORTH", "expected_command": "FLEX NORTH", "tags": ["mission_f10", "vaicom_identifier"]}
 {"raw_stt": "Request a FLEX NORTH", "expected_command": "FLEX NORTH", "tags": ["mission_f10", "request_alias"]}
+{"raw_stt": "FLEX WEST", "expected_command": "FLEX WEST", "tags": ["mission_f10", "ai_atc", "clean"]}
+{"raw_stt": "DREAM 7", "expected_command": "DREAM 7", "tags": ["mission_f10", "ai_atc", "clean"]}
+{"raw_stt": "FYTTR 7", "expected_command": "FYTTR 7", "tags": ["mission_f10", "ai_atc", "clean"]}
+{"raw_stt": "dream seven", "expected_command": "DREAM 7", "tags": ["mission_f10", "ai_atc", "number_form"]}
+{"raw_stt": "mormon mesa eight", "expected_command": "MORMON MESA 8", "tags": ["mission_f10", "ai_atc", "number_form"]}
+{"raw_stt": "Action DREAM 7", "expected_command": "DREAM 7", "tags": ["mission_f10", "ai_atc", "vaicom_identifier"]}
+{"raw_stt": "Request a MORMON MESA 8", "expected_command": "MORMON MESA 8", "tags": ["mission_f10", "ai_atc", "request_alias"]}

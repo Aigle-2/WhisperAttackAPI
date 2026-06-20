@@ -13,6 +13,11 @@ from collections.abc import Mapping
 from ipaddress import ip_address
 
 from vaivox.infrastructure.config.identity import VAIVOX
+from vaivox.infrastructure.dcs.menu_listener import DEFAULT_MENU_PORT
+from vaivox.infrastructure.voiceattack.vaicom_f10_sink import (
+    DEFAULT_VAICOM_F10_HOST,
+    DEFAULT_VAICOM_F10_PORT,
+)
 
 _DEFAULT_THEME = "default"
 _DEFAULT_API_MAX_POST_BYTES = 16 * 1024
@@ -358,6 +363,30 @@ class VaivoxConfiguration:
         """Return the port to connect to for VoiceAttack (default from ProductIdentity)."""
         return self.get_int_setting(
             "voiceattack_port", VAIVOX.voiceattack_port, min_value=1, max_value=65535
+        )
+
+    def get_vaicom_f10_host(self) -> str:
+        """Return the host VAICOM's F10 action relay listens on (default localhost, ADR-0012).
+
+        This is VAICOM's own UDP endpoint, not a VAIVOX-owned port; live F10 actions are
+        fired to it via ``doAction`` rather than through the VoiceAttack command profile.
+        """
+        return self.config.get("vaicom_f10_host", DEFAULT_VAICOM_F10_HOST)
+
+    def get_vaicom_f10_port(self) -> int:
+        """Return the UDP port VAICOM receives F10 actions on (default ``33491``, ADR-0012)."""
+        return self.get_int_setting(
+            "vaicom_f10_port", DEFAULT_VAICOM_F10_PORT, min_value=1, max_value=65535
+        )
+
+    def get_vaicom_f10_menu_port(self) -> int:
+        """Return the VAIVOX-owned UDP port the DCS hook broadcasts the live F10 menu to.
+
+        This is VAIVOX's own listener port (default ``33493``), distinct from VAICOM's
+        ports, so VAIVOX never contends for a VAICOM-bound socket (ADR-0012).
+        """
+        return self.get_int_setting(
+            "vaicom_f10_menu_port", DEFAULT_MENU_PORT, min_value=1, max_value=65535
         )
 
     def get_control_host(self) -> str:

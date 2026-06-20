@@ -5,19 +5,19 @@ them in ``Logs/VAICOMPRO.log``. These entries are mission/server scoped: their h
 labels should help the live STT request and command browser, but they must not be folded
 into the permanent VAIVOX vocabulary source.
 
-The overlay is scoped to the **current mission**: the log accumulates F10 imports across
-missions and sessions, so :func:`parse_f10_phrases` keeps only the blocks for the latest
-``Mission title:`` marker (see :func:`_latest_mission_text`). A new mission therefore
-replaces the previous mission's command surfaces, while the current mission's labels are
-shown even when they were imported before VAIVOX started.
+The overlay is scoped to the **current menu snapshot**: when mission markers exist,
+:func:`parse_f10_phrases` reads only the block beginning at the final ``Mission title:``
+marker. VAICOM logs ``Adding new`` / ``Updating existing`` lines on every scan, so those
+lines are authoritative for live labels even when the older ``Set menu F10 item`` line is
+not repeated. Numeric ids from ``Set`` lines remain diagnostic metadata only.
 """
 
 from __future__ import annotations
 
 import logging
 import re
-from collections.abc import Callable
-from dataclasses import dataclass
+from collections.abc import Callable, Mapping
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 from vaivox.application.ports import MissionVocabularyDiagnostics, MissionVocabularySnapshot
@@ -42,6 +42,11 @@ _LEGACY_F10_RE = re.compile(
     r"actionIndex\s+(?P<action_index>-?\d+)\s+as\s+command\s+(?P<command_id>-?\d+)",
     re.IGNORECASE,
 )
+_F10_ACTIVITY_RE = re.compile(
+    r"\b(?:Adding new|Updating existing) menu item:\s*"
+    r"(?P<identifier>Action\s+[^\r\n]+)",
+    re.IGNORECASE,
+)
 
 
 @dataclass(frozen=True)
@@ -57,15 +62,19 @@ class _F10Item:
 class VaicomF10MissionVocabulary:
     """Read the current mission's imported F10 command surfaces from VAICOM's log.
 
-    The log accumulates F10 imports across missions; :func:`parse_f10_phrases` keeps only
-    the latest mission's blocks, so a new mission replaces the previous overlay while the
-    current mission's commands remain visible across a VAIVOX restart.
+    The log accumulates F10 imports across missions; :func:`parse_f10_phrases` uses the
+    final mission scan block, so a later snapshot replaces the previous overlay.
 
     Args:
         log_path: Optional explicit ``VAICOMPRO.log`` path. When omitted, the adapter
             auto-discovers the VAICOM root and reads ``Logs/VAICOMPRO.log``.
         discover: Optional VAICOM-root discovery override for tests.
         max_phrases: Safety cap for large dynamic menus.
+        live_index: Optional callable returning the settled current-session
+            ``{label: ActionIndex}`` map from the DCS hook
+            (:mod:`~vaivox.infrastructure.dcs.menu_listener`). It is the **only** source of
+            executable indices. Historical log values remain diagnostic metadata and are
+            always cleared from runtime targets before this map is applied (ADR-0012).
     """
 
     def __init__(
@@ -73,11 +82,13 @@ class VaicomF10MissionVocabulary:
         log_path: str | None = None,
         discover: Callable[[], Path | None] | None = None,
         max_phrases: int = DEFAULT_MAX_MISSION_F10_PHRASES,
+        live_index: Callable[[], Mapping[str, int]] | None = None,
     ) -> None:
-        """Wire the optional log override, discovery hook, and phrase cap."""
+        """Wire the optional log override, discovery hook, phrase cap, and live index."""
         self._log_path = Path(log_path) if log_path else None
         self._discover = discover
         self._max_phrases = max_phrases
+        self._live_index = live_index
 
     def load(self) -> MissionVocabularySnapshot:
         """Return the current mission's F10 labels and command surfaces."""
@@ -107,15 +118,37 @@ class VaicomF10MissionVocabulary:
                 diagnostics=MissionVocabularyDiagnostics(log_path=str(path)),
             )
 
-        items = parse_f10_items(text, max_phrases=self._max_phrases)
+        items = self._with_live_index(parse_f10_items(text, max_phrases=self._max_phrases))
         phrases = [item.label for item in items]
         return MissionVocabularySnapshot(
             tuple(phrases),
-            surfaces=tuple(_surface_from_item(item) for item in items),
+            surfaces=tuple(
+                _surface_from_item(item, dispatch_index=item.action_index) for item in items
+            ),
             source=str(path),
             reason="loaded" if phrases else "no F10 commands found",
             diagnostics=_build_diagnostics(path, text, phrases),
         )
+
+    def _with_live_index(self, items: list[_F10Item]) -> list[_F10Item]:
+        """Apply only current-session live indices, clearing historical fallbacks.
+
+        A missing listener, listener fault, empty handshake, or label absent from the live
+        map leaves that item visible but non-dispatchable. This is deliberately fail-closed:
+        a stale ``ActionIndex`` can execute a different F10 action.
+        """
+        safe_items = [replace(item, action_index=None) for item in items]
+        if self._live_index is None:
+            return safe_items
+        try:
+            live = self._live_index()
+        except Exception as error:  # never let a live-source fault break the overlay
+            _LOGGER.debug("Live F10 index unavailable: %s", error)
+            return safe_items
+        if not live:
+            return safe_items
+        lookup = {label.casefold(): index for label, index in live.items()}
+        return [_override_action_index(item, lookup) for item in safe_items]
 
     def _resolve_log_path(self) -> Path | None:
         if self._log_path is not None:
@@ -138,11 +171,8 @@ def parse_f10_phrases(
 ) -> list[str]:
     """Extract human-facing F10 labels from a log snapshot.
 
-    When mission markers are present, only blocks for the latest mission title are used.
-    This keeps the overlay scoped to the current mission even if ``VAICOMPRO.log`` still
-    contains older imports from the same VoiceAttack session. If that scoped view holds no
-    F10 items (VAICOM also logs menu markers, so the latest marker need not bracket the F10
-    import block) the whole log is used as a fallback, so the commands still surface.
+    When mission markers are present, only the final marker block is authoritative. A
+    whole-file fallback is retained solely for older log formats without mission markers.
     """
     return [item.label for item in parse_f10_items(text, max_phrases=max_phrases)]
 
@@ -151,7 +181,11 @@ def parse_f10_surfaces(
     text: str,
     max_phrases: int = DEFAULT_MAX_MISSION_F10_PHRASES,
 ) -> list[CommandSurface]:
-    """Extract typed mission F10 command surfaces from a log snapshot."""
+    """Extract non-dispatchable mission F10 surfaces from a log snapshot.
+
+    Log indices are intentionally not copied onto executable targets. Runtime dispatchable
+    surfaces are built by :class:`VaicomF10MissionVocabulary` only after live-map overlay.
+    """
     return [_surface_from_item(item) for item in parse_f10_items(text, max_phrases=max_phrases)]
 
 
@@ -159,39 +193,131 @@ def parse_f10_items(
     text: str,
     max_phrases: int = DEFAULT_MAX_MISSION_F10_PHRASES,
 ) -> list[_F10Item]:
-    """Extract scoped, de-duplicated VAICOM F10 items from a log snapshot."""
-    items = _extract_f10_items(_latest_mission_text(text))
-    if not items:
-        items = _extract_f10_items(text)
+    """Extract scoped, de-duplicated VAICOM F10 items from a log snapshot.
+
+    The current-mission block is scanned for the live command **labels** (its
+    ``Adding new`` / ``Updating existing`` lines), but those lines omit the executable
+    ``ActionIndex`` (ADR-0012). The index is therefore sourced separately, from the latest
+    ``Set menu F10 item`` line per identifier across the whole log (see
+    :func:`_action_metadata_map`), and merged onto the scoped items.
+    """
+    scoped_text, _latest_title, _has_marker = _current_mission_text(text)
+    metadata = _action_metadata_map(text)
+    items = [_with_action_metadata(item, metadata) for item in _extract_f10_items(scoped_text)]
     return _dedupe_items(items, max_phrases=max_phrases)
 
 
+def _action_metadata_map(text: str) -> dict[str, tuple[int | None, int | None]]:
+    """Map each F10 identifier to its latest ``(ActionIndex, Command ID)`` from the log.
+
+    VAICOM logs ``Set menu F10 item: …, ActionIndex: N, Command ID: M`` only when it first
+    *registers* a command; later mission scans emit marker-free ``Adding/Updating`` lines
+    that omit the index. So the executable ``ActionIndex`` lives in older log lines, not the
+    current mission block. We take the most recent occurrence per identifier across the
+    whole log.
+
+    Limitation (ADR-0012): ``ActionIndex`` is assigned by DCS per mission load, so the most
+    recent value is correct while a mission's menu build order is stable but can be stale
+    across *different* missions. The robust source is the live ``menuaux`` feed (a later
+    enhancement); until then a ``None`` index leaves the item visible but non-dispatchable.
+    """
+    positioned: list[tuple[int, str, int | None, int | None]] = []
+    for regex in (_CURRENT_F10_RE, _LEGACY_F10_RE):
+        for match in regex.finditer(text):
+            identifier = generator.clean_term(match.group("identifier"))
+            positioned.append(
+                (
+                    match.start(),
+                    identifier.casefold(),
+                    _to_int(match.group("action_index")),
+                    _to_int(match.group("command_id")),
+                )
+            )
+
+    metadata: dict[str, tuple[int | None, int | None]] = {}
+    # Sort by position so the last (most recent) occurrence per identifier wins.
+    for _position, key, action_index, command_id in sorted(positioned, key=lambda value: value[0]):
+        metadata[key] = (action_index, command_id)
+    return metadata
+
+
+def _with_action_metadata(
+    item: _F10Item,
+    metadata: dict[str, tuple[int | None, int | None]],
+) -> _F10Item:
+    """Fill an item's ``ActionIndex`` / ``Command ID`` from the whole-log map when missing."""
+    if item.action_index is not None:
+        return item
+    found = metadata.get(item.identifier.casefold())
+    if found is None:
+        return item
+    action_index, command_id = found
+    return replace(
+        item,
+        action_index=action_index,
+        command_id=item.command_id if item.command_id is not None else command_id,
+    )
+
+
+def _override_action_index(item: _F10Item, lookup: Mapping[str, int]) -> _F10Item:
+    """Replace an item's ``ActionIndex`` with the live DCS value when its label is present."""
+    index = lookup.get(item.label.casefold())
+    if index is None or index == item.action_index:
+        return item
+    return replace(item, action_index=index)
+
+
 def _extract_f10_items(text: str) -> list[_F10Item]:
-    """Return the raw VAICOM F10 items matched by either log format."""
-    items: list[_F10Item] = []
+    """Return metadata and live-scan VAICOM F10 items in log order."""
+    positioned: list[tuple[int, _F10Item]] = []
     for regex in (_CURRENT_F10_RE, _LEGACY_F10_RE):
         for match in regex.finditer(text):
             identifier = generator.clean_term(match.group("identifier"))
             label = _label_from_identifier(identifier)
             if label is None:
                 continue
-            items.append(
+            positioned.append(
+                (
+                    match.start(),
+                    _F10Item(
+                        identifier=identifier,
+                        label=label,
+                        action_index=_to_int(match.group("action_index")),
+                        command_id=_to_int(match.group("command_id")),
+                    ),
+                )
+            )
+
+    for match in _F10_ACTIVITY_RE.finditer(text):
+        identifier = generator.clean_term(match.group("identifier"))
+        label = _label_from_identifier(identifier)
+        if label is None:
+            continue
+        positioned.append(
+            (
+                match.start(),
                 _F10Item(
                     identifier=identifier,
                     label=label,
-                    action_index=_to_int(match.group("action_index")),
-                    command_id=_to_int(match.group("command_id")),
-                )
+                    action_index=None,
+                    command_id=None,
+                ),
             )
-    return items
+        )
+
+    return [item for _position, item in sorted(positioned, key=lambda value: value[0])]
 
 
 def _build_diagnostics(path: Path, text: str, phrases: list[str]) -> MissionVocabularyDiagnostics:
-    """Capture verbose pull detail for the diagnostic log (cheap; F10 logs are small)."""
-    markers = list(_MISSION_MARKER_RE.finditer(text))
-    latest = markers[-1].group("title").strip() if markers else None
-    scoped = _extract_f10_items(_latest_mission_text(text))
-    whole = _extract_f10_items(text)
+    """Capture verbose pull detail without reparsing repeated activity across the log."""
+    folded = text.casefold()
+    marker_count = folded.count("mission title:")
+    scoped_text, latest, has_marker = _current_mission_text(text)
+    scoped = _extract_f10_items(scoped_text)
+    # Live activity repeats on every VAICOM scan and can produce hundreds of thousands of
+    # historical matches. Count only bounded Set-item markers without re-running the full
+    # regular-expression parser over a potentially large log.
+    whole_log_matches = folded.count("set menu f10 item:") + folded.count("setting menu f10 item ")
     try:
         file_bytes = path.stat().st_size
     except OSError:
@@ -199,42 +325,41 @@ def _build_diagnostics(path: Path, text: str, phrases: list[str]) -> MissionVoca
     return MissionVocabularyDiagnostics(
         log_path=str(path),
         file_bytes=file_bytes,
-        mission_markers=len(markers),
+        mission_markers=marker_count,
         latest_mission=latest,
         scoped_matches=len(scoped),
-        whole_log_matches=len(whole),
-        fallback_used=not scoped and bool(whole),
+        whole_log_matches=whole_log_matches,
+        fallback_used=not has_marker and bool(scoped),
         deduped_phrases=len(phrases),
     )
 
 
-def _latest_mission_text(text: str) -> str:
-    markers = list(_MISSION_MARKER_RE.finditer(text))
-    if not markers:
-        return text
+def _current_mission_text(text: str) -> tuple[str, str | None, bool]:
+    """Return the final mission scan block, or the whole legacy log without markers."""
+    marker_start = max(text.rfind("Mission title:"), text.rfind("mission title:"))
+    if marker_start < 0:
+        return text, None, False
 
-    latest_title = markers[-1].group("title").strip()
-    blocks: list[str] = []
-    for index, marker in enumerate(markers):
-        start = marker.start()
-        end = markers[index + 1].start() if index + 1 < len(markers) else len(text)
-        if marker.group("title").strip() == latest_title:
-            blocks.append(text[start:end])
-    return "\n".join(blocks)
+    marker = _MISSION_MARKER_RE.match(text, marker_start)
+    if marker is None:
+        return text, None, False
+    latest_title = marker.group("title").strip()
+    return text[marker_start:], latest_title, True
 
 
 def _dedupe_items(items: list[_F10Item], max_phrases: int) -> list[_F10Item]:
+    """De-duplicate by label with the final log occurrence winning."""
     seen: set[str] = set()
-    deduped: list[_F10Item] = []
-    for item in items:
+    reversed_items: list[_F10Item] = []
+    for item in reversed(items):
         key = item.label.lower()
         if key in seen:
             continue
         seen.add(key)
-        deduped.append(item)
-        if len(deduped) >= max_phrases:
+        reversed_items.append(item)
+        if len(reversed_items) >= max_phrases:
             break
-    return deduped
+    return list(reversed(reversed_items))
 
 
 def _label_from_identifier(identifier: str) -> str | None:
@@ -251,29 +376,29 @@ def _label_from_identifier(identifier: str) -> str | None:
     return label
 
 
-def _surface_from_item(item: _F10Item) -> CommandSurface:
+def _surface_from_item(
+    item: _F10Item,
+    *,
+    dispatch_index: int | None = None,
+) -> CommandSurface:
+    """Build a surface, copying only an explicitly supplied live dispatch index."""
     return CommandSurface(
         id=f"mission_f10:{_surface_key(item.identifier)}",
         label=item.label,
-        aliases=_f10_aliases(item.label, item.identifier),
+        aliases=_f10_aliases(item.identifier),
         source="mission_f10",
         scope="mission",
         dispatch_target=VaicomF10Action(
             identifier=item.identifier,
             label=item.label,
             command_id=item.command_id,
-            action_index=item.action_index,
+            action_index=dispatch_index,
         ),
     )
 
 
-def _f10_aliases(label: str, identifier: str) -> tuple[str, ...]:
-    aliases = [identifier]
-    if not label.casefold().startswith("request "):
-        aliases.extend((f"Request {label}", f"Request a {label}"))
-        if not label.casefold().endswith("transition"):
-            aliases.append(f"Request {label} Transition")
-    return tuple(aliases)
+def _f10_aliases(identifier: str) -> tuple[str, ...]:
+    return (identifier,)
 
 
 def _surface_key(value: str) -> str:

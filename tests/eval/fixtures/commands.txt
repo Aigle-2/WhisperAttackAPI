@@ -19,4 +19,10 @@ TACAN Air refuel
 TACAN Oscar Alfa Lima
 
 # Mission F10 overlay surface examples (ephemeral; not permanent shipped vocabulary).
+# Static departure-route surfaces from a community AI ATC mission; phraseology reference
+# in docs/AI_ATC_EXAMPLE_CALLS.md. Fixture evidence only, not shipped vocabulary (ADR-0005).
 FLEX NORTH
+FLEX WEST
+DREAM 7
+FYTTR 7
+MORMON MESA 8

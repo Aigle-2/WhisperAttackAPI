@@ -1,72 +1,170 @@
 # ADR-0012: Command surfaces and typed dispatch
 
-**Status:** Accepted
+**Status:** Accepted (amended 2026-06-20)
 **Date:** 2026-06-19
 **Deciders:** Project owner (Aigle_2)
 
+> **Amendment 2026-06-20 (supersedes the 2026-06-19 amendment).** The prior amendment
+> assumed VAICOM exposes mission F10 items as VoiceAttack commands (`Action FLEX NORTH`)
+> and routed F10 dispatch through the VoiceAttack command port. That premise was **wrong**:
+> a grep of every active profile (`VAICOM F-4E WSO.vap`, `VAICOM PRO for DCS World.vap`,
+> `VAIVOX - VA Profile.vap`) finds **zero** `Action …` commands, and the plugin return
+> channel reports `matched=false` for them. VAICOM fires F10 items over a **UDP
+> `doAction`** path instead. This amendment corrects the decision to replicate that path;
+> the corrected approach is **confirmed working live**. Full source-level write-up:
+> [`docs/VAICOM_F10_EXECUTION_CONTRACT.md`](../VAICOM_F10_EXECUTION_CONTRACT.md).
+
 ## Context
 
-VAIVOX originally treated the reconciled utterance as the executable command string:
-`reconcile(...) -> PhraseSnapper -> VoiceAttack Command.Exists/Execute(text)`.
-That is valid for static VoiceAttack commands, but it is not the whole VAICOM model.
+VAIVOX originally treated reconciled text as the executable VoiceAttack command:
+`reconcile(...) -> PhraseSnapper -> Command.Exists/Execute(text)`. Static commands do use
+their command name, but mission F10 items imported by VAICOM are different in kind:
 
-Mission F10 items imported by VAICOM are dynamic. The live log records entries such as
-`Action FLEX NORTH`, with an `ActionIndex` and a `Command ID`. The human-facing menu
-label is `FLEX NORTH`, but `Command.Exists("FLEX NORTH")` is not the execution contract
-for that dynamic action. Treating the label as a static VoiceAttack command makes
-VAIVOX fail on compatible VAICOM missions that expect VAICOM's dynamic F10 dispatch path.
+- they have a human menu label such as `FLEX NORTH`;
+- VAICOM tracks them internally under the identifier `Action FLEX NORTH`, with an
+  `ActionIndex` and a `Command ID` logged in `VAICOMPRO.log`;
+- **they are not VoiceAttack commands.** VAICOM does not register an `Action …` command in
+  any VoiceAttack profile, so `Command.Exists("Action FLEX NORTH")` is always false.
+
+Reading VAICOM-Community source settles how F10 actually fires (see the contract doc for
+file/line citations):
+
+- `ConstructMessage.cs` → `SetMenuItemAction.cs` appends the item's `actionIndex` to an
+  `actionsequence` list and sends `{"type":"mission.player.actionsequence",
+  "actionsequence":[<actionIndex>]}` to VAICOM's client send port `127.0.0.1:33491`.
+- DCS (`Append.Core.RadioCommandDialogsPanel.lua`) loops the array and calls
+  `missionCommands.doAction(actionsequence[i])`.
+- `doAction(actionIndex)` is the same call DCS makes when you click the menu item by hand.
+  It fires a registered mission action **by its handle**, so a *single* `actionIndex` fires
+  any item — submenu nesting is irrelevant; it is **not** a navigation path.
+
+`Command ID` (VAICOM's sequential id, 20000-range) is a diagnostic only — it is *not* the
+DCS action index. `ActionIndex` is the executable value.
 
 ## Decision
 
-Model a spoken command as a **command surface** resolved to a **typed dispatch target**.
-The recognized text is no longer assumed to be the executable string.
+Model recognized commands as **command surfaces** with typed dispatch targets, and
+dispatch each target through the transport that actually executes it.
 
-- `CommandSurface` is the pure domain object exposed by catalogs. It carries a label,
-  aliases, source, scope, and a typed dispatch target.
-- `VoiceAttackCommand(command_name)` is the target for static VoiceAttack commands.
-  `Command.Exists/Execute` belongs only to this adapter path.
-- `VaicomF10Action(identifier, label, command_id, action_index)` is the target for
-  VAICOM-imported mission F10 actions. The identifier remains `Action ...`; the label is
-  the human surface such as `FLEX NORTH`.
-- `CommandSurfaceResolver` is pure domain logic. It resolves reconciled text against the
-  live surface index with the conservative snap thresholds:
-  exact mission F10, exact static, fuzzy mission F10, fuzzy static, then raw fallback.
-  If two targets are too close, it abstains and no typed target is dispatched.
-- `CommandDispatcher.dispatch(dispatch_target)` is the application port. It dispatches by
-  target type and returns a `DispatchOutcome`. The legacy VoiceAttack sink remains as the
-  adapter for `VoiceAttackCommand`.
-- If no surface resolves, VAIVOX keeps the legacy fallback: phrase snap and dispatch the
+- `CommandSurface` carries a human label, aliases, source, scope, and a typed target.
+- `VoiceAttackCommand(command_name)` targets a static VoiceAttack command. It dispatches
+  through `CommandSink` (exact-name `Command.Exists`/`Execute` + the return channel,
+  ADR-0006).
+- `VaicomF10Action(identifier, label, command_id, action_index)` targets a live imported
+  action. It dispatches through a **separate** `VaicomF10ActionSink`, not VoiceAttack.
+  `action_index` is the executable value; `identifier`/`label` are for display and
+  telemetry; `command_id` is diagnostic only.
+- `UdpVaicomF10ActionSink` replicates VAICOM's datagram exactly: it sends
+  `{"type":"mission.player.actionsequence","actionsequence":[action_index]}` over UDP to
+  `127.0.0.1:33491` (overridable via `vaicom_f10_host` / `vaicom_f10_port`). This is
+  **fire-and-forget** — DCS sends no acknowledgement — so F10 dispatch yields a
+  `DispatchOutcome` only, never a `MatchOutcome`.
+- `CommandSurfaceResolver` (unchanged) resolves exact mission F10, exact static, fuzzy
+  mission F10, fuzzy static, then raw fallback, using the conservative snap thresholds.
+- **ActionIndex sourcing.** The authoritative source is the live DCS menu, delivered by a
+  VAIVOX-owned hook (below). `mission_f10.py` clears every log-derived index before applying
+  the current live map. The unreliable value from `Set menu F10 item: …, ActionIndex: N`
+  remains diagnostic metadata only: a missing handshake, missing label, listener fault, or
+  ambiguous label leaves the item visible but non-dispatchable. The UDP sink resolves the
+  label from that map again at send time, so a surface created before a menu rebuild cannot
+  carry an old handle into dispatch.
+- **Live menu hook.** A small Lua block, self-healed into the DCS radio command panel by
+  `DcsHookInstaller` (idempotent, marker-guarded, re-applied on every VAIVOX startup so it
+  survives DCS/VAICOM updates), scans the panel's authoritative `data.menuOther` tree on a
+  throttled GUI update callback. This is the same tree VAICOM assigns to
+  `base.vaicom.state.menuaux`; late replacement of `clearOtherMenu` / `addOtherCommand` was
+  rejected after live v5 testing showed DCS kept cached references and bypassed the wrappers.
+  The scanner broadcasts a protocol-v2 cumulative snapshot over UDP to a VAIVOX-owned port
+  (default `33493`). Each snapshot has a DCS-process session id and monotonic revision.
+  `MissionMenuListener` debounces the
+  per-item updates, rejects stale revisions and ambiguous duplicate labels, and persists a
+  diagnostic mirror that is never restored for dispatch. This is fully VAIVOX-owned: it
+  never touches VAICOM or contends for a VAICOM-bound socket.
+- When no surface resolves, VAIVOX keeps the legacy fallback: phrase-snap and dispatch the
   resulting text as a static `VoiceAttackCommand`.
-
-Mission F10 dispatch is deliberately conservative at first. VAIVOX can resolve a live F10
-surface and record the typed dispatch attempt, but the default `VaicomF10Action` adapter
-refuses execution until the VAICOM/DCS smoke test validates the actual actionsequence
-payload.
 
 ## Consequences
 
-- Static VoiceAttack behavior stays compatible through `VoiceAttackCommand` and the raw
-  fallback.
-- Dynamic F10 mission commands are no longer polluted into the permanent vocabulary.
-  They are ephemeral command surfaces scoped to the current mission overlay.
-- Telemetry now has two separate concepts:
-  - `match`: VoiceAttack's exact-name `Command.Exists` result for static commands only.
-  - `resolution` / `dispatch`: VAIVOX's typed surface resolution and adapter result.
-- The command browser may show human labels, but the F10 source must preserve VAICOM's
-  identifier and metadata for routing.
-- ADR-0011 remains useful as the conservative scoring policy, but "snap to phrase" is no
-  longer the main routing model. For typed routing, the result is "resolve to command
-  surface".
+- F10 mission commands fire through VAIVOX without VAICOM voice recognition, by the same
+  mechanism VAICOM itself uses. A single `actionIndex` reaches nested items.
+- A small VAICOM transport setting **is** needed (`vaicom_f10_host`/`vaicom_f10_port`,
+  default `127.0.0.1:33491`); no VAICOM/DCS installation patch is required — the existing
+  `VAICOMPRO.export.lua` relay forwards `:33491` to the in-sim panel.
+- Telemetry keeps two concepts: `match` is VoiceAttack's exact-name acceptance, recorded
+  for **static** targets only; F10 dispatch records `resolution` + `dispatch` (with
+  `target_kind = vaicom_f10_action`) and no `match`, since the UDP path has no reply.
+- The command browser shows bare human labels while dispatch carries the `ActionIndex`.
+- **The log-derived index is unreliable and is never dispatched.** VAICOM logs
+  `Set menu F10 item: …, ActionIndex: N` only on a command's
+  *first* registration; later menu scans log index-less `Adding/Updating` lines while
+  updating the index **in memory** (`AuxMenu.cs`). So the log value is frozen at
+  first-seen and drifts as the live menu changes. Confirmed on the operator's real log
+  (2026-06-20): the current mission block had **0** fresh `Set` lines, and **8**
+  `ActionIndex` values mapped to two different commands across the log — e.g. `0` =
+  `FLEX NORTH` *or* `Repeat last transmission`, `1` = `FLEX WEST` *or* `Squawk 2001`. After
+  the live menu changed, index `0` resolved to `Repeat last transmission` even though it had
+  fired `FLEX NORTH` minutes earlier. A stale index therefore fires the **wrong** action.
+  This is what the live menu hook (above) resolves by capturing the *current* index. Until
+  the hook is validated live, F10 dispatch fails closed rather than using the log value.
+
+## Rejected approach: F10 via a VoiceAttack `Action …` alias
+
+The 2026-06-19 amendment routed F10 targets through the VoiceAttack command port, sending
+`Action FLEX NORTH` and expecting VAICOM to resolve it. Rejected: VAICOM registers no such
+VoiceAttack command (zero `Action …` entries in any profile), so the plugin always replies
+`matched=false` and nothing fires. The added "explicit-negative-only legacy fallback" then
+sent the bare label, which also is not a VoiceAttack command — so it could only ever fire
+by coincidence (a same-named static command). This path is removed.
+
+## Rejected approach: replaying the Command ID
+
+An earlier experimental probe sent `actionsequence:[<Command ID>]` (e.g. `20086`). Rejected:
+`Command ID` is VAICOM's internal id, not a DCS action index, so `doAction` did nothing.
+The correct value is the small `ActionIndex` from the same log line (e.g. `0`). This was the
+root cause of the earlier (mistaken) "single id cannot fire nested items" conclusion.
+
+## Validation status
+
+**Transport confirmed working live (2026-06-20).** Sending
+`{"type":"mission.player.actionsequence","actionsequence":[0]}` to `127.0.0.1:33491` while
+in the AI ATC Nellis mission fired `FLEX NORTH` (its logged `ActionIndex` was `0`). This
+proves the transport, the message shape, and the single-index-fires-nested-item property.
+
+**Index sourcing is fail-closed and v6 live capture is validated.** A follow-up check minutes later
+showed index `0` now resolved to `Repeat last transmission`, and the whole-log scan found
+8 ambiguous indices with 0 fresh `Set` lines in the current block. Historical values are
+therefore no longer eligible for dispatch. Live v5 testing fixed and validated the DCS
+namespace/transport path (`base.pcall` / `base.type`, protocol-v2 handshake), but showed the
+late function wrappers never observed mission menu changes. Upstream VAICOM confirms its
+authoritative source is `data.menuOther`, so v6 scans that tree directly. Live validation on
+2026-06-20 captured 88 commands at revision 3 with full submenu paths and no ambiguous
+labels; the VAIVOX listener persisted the same DCS session and indices (`FLEX NORTH=0`,
+`MORMON MESA 8=5`). The listener accepts only current protocol-v2 session snapshots. The
+remaining hardware-gated check is an utterance through reconciliation and send-time dispatch.
 
 ## Action Items
 
-1. [x] Add pure domain command-surface value objects and `CommandSurfaceResolver`.
-2. [x] Add the typed `CommandDispatcher` port and keep the existing VoiceAttack sink as
-   the `VoiceAttackCommand` adapter.
-3. [x] Parse mission F10 log entries into `VaicomF10Action` surfaces while continuing to
-   expose bare labels to the UI.
-4. [x] Route through surface resolution first, then fallback to legacy VoiceAttack snap.
-5. [x] Extend telemetry with `resolution` and `dispatch` without changing `match`
-   semantics.
-6. [ ] Validate real VAICOM/DCS F10 execution by smoke test, then replace the disabled
-   `VaicomF10Action` sink with the active adapter behind an explicit setting/default.
+1. [x] Add pure command-surface value objects and `CommandSurfaceResolver`.
+2. [x] Dispatch static commands via VoiceAttack and F10 actions via the UDP `doAction` sink.
+3. [x] Preserve human F10 labels separately from VAICOM identifiers and the `ActionIndex`.
+4. [x] Source the `ActionIndex` from the whole-log `Set menu F10 item` lines.
+5. [x] Record typed resolution, dispatch, and (static-only) VoiceAttack match telemetry.
+6. [x] Validate the UDP `doAction` contract live.
+7. [x] Robust `ActionIndex` sourcing from the live DCS menu: a VAIVOX-owned panel hook
+   (`DcsHookInstaller`, self-healing) broadcasts the current menu to `MissionMenuListener`,
+   which supplies the only dispatchable index.
+8. [x] Validate live hook installation and menu capture: v6 broadcast 88 current commands
+   with paths/indices and VAIVOX received the identical session snapshot. The DCS install dir is
+   auto-discovered (ED registry, then the Steam library owning app id 223750); the
+   `dcs_install_dir` setting is only an override for non-standard installs.
+9. [ ] Optional: recipient/segmentation handling for F10 items that need it.
+10. [x] Fail closed without a current-session live index; never restore persisted action
+    handles or dispatch historical log values.
+11. [x] Stamp snapshots with protocol/session/revision metadata and reject duplicate labels
+    on distinct submenu paths.
+12. [x] Re-resolve the live label at send time and invalidate the committed map immediately
+    on every incoming menu mutation, closing the resolve-to-dispatch race.
+13. [x] Replace bypassed v5 callback wrappers with a v6 scan of `data.menuOther`, matching
+    VAICOM's own `menuaux` source and preserving submenu paths.
+14. [ ] Validate one spoken F10 command through reconciliation, send-time live-index lookup,
+    UDP actionsequence dispatch, and the observed mission result.

@@ -77,12 +77,15 @@ class FakeSpeechToText:
 
 
 class FakeCommandSink:
-    def __init__(self, outcome=None):
+    def __init__(self, outcome=None, *, outcomes=None):
         self.sent = []
         self._outcome = outcome
+        self._outcomes = list(outcomes or [])
 
     def send(self, command):
         self.sent.append(command)
+        if self._outcomes:
+            return self._outcomes.pop(0)
         return self._outcome  # None == unknown (a pre-return-channel plugin)
 
 
@@ -206,7 +209,7 @@ def _f10_surface(label="FLEX NORTH") -> CommandSurface:
     return CommandSurface(
         id="mission_f10:action-flex-north",
         label=label,
-        aliases=("Action FLEX NORTH", "Request a FLEX NORTH"),
+        aliases=("Action FLEX NORTH",),
         source="mission_f10",
         scope="mission",
         dispatch_target=VaicomF10Action(
@@ -347,7 +350,9 @@ def test_empty_index_snapper_is_a_no_op():
     assert ("Phrase snap: raw (no phrase index loaded)", StatusLevel.DETAIL) in reporter.lines
 
 
-def test_f10_surface_dispatches_to_vaicom_action_not_voiceattack():
+def test_f10_surface_fires_through_the_udp_action_sink():
+    # F10 items are not VoiceAttack commands: a resolved F10 surface fires through the
+    # dedicated action sink (UDP doAction, ADR-0012), never the VoiceAttack profile.
     command_sink = FakeCommandSink()
     dispatcher = FakeCommandDispatcher(command_sink)
     surface = _f10_surface()
@@ -370,16 +375,56 @@ def test_f10_surface_dispatches_to_vaicom_action_not_voiceattack():
 
     use_case.execute()
 
-    assert command_sink.sent == []
-    assert dispatcher.f10_sent == [surface.dispatch_target]
+    assert command_sink.sent == []  # the VoiceAttack command profile is never touched
+    assert [action.identifier for action in dispatcher.f10_sent] == ["Action FLEX NORTH"]
+    assert dispatcher.f10_sent[0].action_index == 3
     outcome = telemetry.outcomes[0]
     assert outcome.destination == "vaicom_f10_action"
     assert outcome.sent_text == "Action FLEX NORTH"
-    assert outcome.match is None
+    assert outcome.match is None  # fire-and-forget UDP path: no return channel
     assert outcome.resolution is not None
     assert outcome.resolution.target_kind == "vaicom_f10_action"
     assert outcome.dispatch is not None
     assert outcome.dispatch.target_kind == "vaicom_f10_action"
+    assert outcome.dispatch.accepted is True
+
+
+def test_f10_surface_without_action_index_is_reported_not_accepted():
+    # No live ActionIndex -> the sink cannot fire and reports it; there is no VoiceAttack
+    # fallback, because an F10 item is not a VoiceAttack command.
+    command_sink = FakeCommandSink()
+    rejected = DispatchOutcome(
+        target_kind=DispatchTargetKind.VAICOM_F10_ACTION.value,
+        accepted=False,
+        resolved_target="Action FLEX NORTH",
+        detail="no live ActionIndex available",
+    )
+    dispatcher = FakeCommandDispatcher(command_sink, f10_dispatch=rejected)
+    matcher = FakeSurfaceMatcher(
+        CommandResolution(
+            CommandResolutionDecision.RESOLVED,
+            surface=_f10_surface(),
+            matched_alias="FLEX NORTH",
+            score=100.0,
+        )
+    )
+    use_case, reporter, telemetry = _make_stop(
+        FakeRecorder(),
+        FakeSpeechToText(text="FLEX NORTH"),
+        command_sink=command_sink,
+        command_dispatcher=dispatcher,
+        surface_matcher=matcher,
+        config=FakeConfig(fuzzy_words=[]),
+    )
+
+    use_case.execute()
+
+    assert command_sink.sent == []  # no VoiceAttack fallback for an unfireable F10 item
+    outcome = telemetry.outcomes[0]
+    assert outcome.destination == "vaicom_f10_action"
+    assert outcome.dispatch is not None
+    assert outcome.dispatch.accepted is False
+    assert any("Dispatch not accepted" in message for message, _level in reporter.lines)
 
 
 def test_static_surface_dispatches_to_voiceattack_command():
