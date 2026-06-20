@@ -23,6 +23,24 @@ from vaivox.domain.commands.model import (
 from vaivox.domain.reconciliation.snapper import DEFAULT_HIGH, DEFAULT_LOW, DEFAULT_MARGIN
 
 _PUNCTUATION = re.compile(r"[^\w\s]", flags=re.UNICODE)
+_CALLSIGN_PREFIXES = (("set", "call", "sign"), ("set", "callsign"))
+_DIGIT_WORDS = {
+    "zero": "0",
+    "one": "1",
+    "two": "2",
+    "three": "3",
+    "four": "4",
+    "five": "5",
+    "six": "6",
+    "seven": "7",
+    "eight": "8",
+    "nine": "9",
+    "niner": "9",
+}
+_COMBINED_CALLSIGN_REASON = (
+    "AI_ATC exposes separate callsign-name and digit actions but no safe atomic combined "
+    "action; set the name or digit separately"
+)
 
 
 @dataclass(frozen=True)
@@ -37,9 +55,10 @@ class CommandSurfaceResolver:
 
     Exact matches are resolved before fuzzy matches, with active mission F10 actions
     taking priority over static VoiceAttack commands. Multi-token F10 labels may also
-    resolve when embedded contiguously in a longer radio call; the most specific unique
-    label wins. Fuzzy matches use the same conservative high/low/margin thresholds as
-    phrase snap, and abstain when the best match is too close to the runner-up.
+    resolve through the anchored ``set call sign <label>`` grammar or when embedded
+    contiguously in a longer radio call; the most specific unique label wins. Fuzzy matches
+    use the same conservative high/low/margin thresholds as phrase snap, and abstain when
+    the best match is too close to the runner-up.
     """
 
     def __init__(
@@ -75,13 +94,21 @@ class CommandSurfaceResolver:
         if not query or not self._surfaces:
             return CommandResolution(CommandResolutionDecision.RAW)
 
+        combined = self._combined_callsign_rejection(query)
+        if combined is not None:
+            return combined
+
         exact = self._exact_matches(query)
         if exact:
             return self._resolve_exact(exact)
 
+        callsign = self._anchored_callsign_matches(query)
+        if callsign:
+            return self._resolve_exact(callsign)
+
         embedded = self._embedded_label_matches(query)
         if embedded:
-            return self._resolve_embedded(embedded)
+            return self._resolve_embedded(embedded, query)
 
         scored = self._score_surfaces(query)
         if not scored:
@@ -99,12 +126,7 @@ class CommandSurfaceResolver:
                     matched_alias=best.matched_alias,
                     score=best.score,
                 )
-            return CommandResolution(
-                CommandResolutionDecision.RESOLVED,
-                surface=best.surface,
-                matched_alias=best.matched_alias,
-                score=best.score,
-            )
+            return _resolved_or_rejected(best)
 
         best_overall = scored[0]
         if best_overall.score >= self._low:
@@ -135,6 +157,9 @@ class CommandSurfaceResolver:
             same_kind = [match for match in matches if _target_kind(match.surface) is kind]
             if not same_kind:
                 continue
+            available = [match for match in same_kind if match.surface.available]
+            if available:
+                same_kind = available
             ids = {match.surface.id for match in same_kind}
             if len(ids) > 1:
                 best = same_kind[0]
@@ -145,13 +170,60 @@ class CommandSurfaceResolver:
                     score=100.0,
                 )
             best = same_kind[0]
-            return CommandResolution(
-                CommandResolutionDecision.RESOLVED,
-                surface=best.surface,
-                matched_alias=best.matched_alias,
-                score=100.0,
-            )
+            return _resolved_or_rejected(best)
         return CommandResolution(CommandResolutionDecision.RAW)
+
+    def _combined_callsign_rejection(self, query: str) -> CommandResolution | None:
+        """Reject ``set callsign <name> <digits>`` before any legacy fallback."""
+        remainder = _callsign_remainder(query)
+        if remainder is None or len(remainder) < 2:
+            return None
+        for split in range(1, len(remainder)):
+            name = " ".join(remainder[:split])
+            digits = remainder[split:]
+            if not all(_is_callsign_number_token(token) for token in digits):
+                continue
+            surface = next(
+                (
+                    candidate
+                    for candidate in self._surfaces
+                    if isinstance(candidate.dispatch_target, VaicomF10Action)
+                    and any(character.isalpha() for character in candidate.label)
+                    and _normalize(candidate.label) == name
+                ),
+                None,
+            )
+            if surface is not None:
+                return CommandResolution(
+                    CommandResolutionDecision.REJECTED,
+                    surface=surface,
+                    matched_alias=surface.label,
+                    score=100.0,
+                    reason_code="combined_callsign_unsupported",
+                    reason=_COMBINED_CALLSIGN_REASON,
+                )
+        return None
+
+    def _anchored_callsign_matches(self, query: str) -> list[_SurfaceScore]:
+        """Match ``set call sign|callsign <label>`` to an exact nonnumeric F10 label."""
+        remainder = _callsign_remainder(query)
+        if remainder is None:
+            return []
+        if remainder[:1] in (("digit",), ("digits",)):
+            remainder = remainder[1:]
+        if len(remainder) != 1 and not any(character.isalpha() for character in remainder):
+            return []
+        requested_label = " ".join(remainder)
+        digit = _digit_token(requested_label)
+        if digit is not None:
+            requested_label = digit
+        return [
+            _SurfaceScore(surface, surface.label, 100.0)
+            for surface in self._surfaces
+            if isinstance(surface.dispatch_target, VaicomF10Action)
+            and _normalize(surface.label) == requested_label
+            and (digit is None or _is_callsign_digit_surface(surface))
+        ]
 
     def _embedded_label_matches(self, query: str) -> list[_SurfaceScore]:
         """Find multi-token F10 labels embedded contiguously in ``query``."""
@@ -160,20 +232,33 @@ class CommandSurfaceResolver:
         for surface in self._surfaces:
             if not isinstance(surface.dispatch_target, VaicomF10Action):
                 continue
-            label = _normalize(surface.label)
-            label_tokens = tuple(label.split())
-            if len(label_tokens) < 2:
-                continue
-            if _contains_contiguous_tokens(query_tokens, label_tokens):
-                matches.append(_SurfaceScore(surface, surface.label, 100.0))
+            for phrase in surface.embedded_phrases():
+                phrase_tokens = tuple(_normalize(phrase).split())
+                if len(phrase_tokens) < 2:
+                    continue
+                if _contains_contiguous_tokens(query_tokens, phrase_tokens):
+                    matches.append(_SurfaceScore(surface, phrase, 100.0))
         return matches
 
-    def _resolve_embedded(self, matches: Sequence[_SurfaceScore]) -> CommandResolution:
+    def _resolve_embedded(self, matches: Sequence[_SurfaceScore], query: str) -> CommandResolution:
         """Resolve the unique most-specific embedded label, or fail closed."""
-        specificity = max(_embedded_specificity(match.surface) for match in matches)
-        most_specific = [
-            match for match in matches if _embedded_specificity(match.surface) == specificity
-        ]
+        specificity = max(_embedded_specificity(match) for match in matches)
+        most_specific = [match for match in matches if _embedded_specificity(match) == specificity]
+        available = [match for match in most_specific if match.surface.available]
+        if available:
+            most_specific = available
+        if len({match.surface.id for match in most_specific}) > 1:
+            context_scores = {
+                match.surface.id: _path_context_score(query, match.surface)
+                for match in most_specific
+            }
+            best_context = max(context_scores.values())
+            if best_context > 0:
+                most_specific = [
+                    match
+                    for match in most_specific
+                    if context_scores[match.surface.id] == best_context
+                ]
         best = most_specific[0]
         if len({match.surface.id for match in most_specific}) > 1:
             return CommandResolution(
@@ -182,12 +267,7 @@ class CommandSurfaceResolver:
                 matched_alias=best.matched_alias,
                 score=100.0,
             )
-        return CommandResolution(
-            CommandResolutionDecision.RESOLVED,
-            surface=best.surface,
-            matched_alias=best.matched_alias,
-            score=100.0,
-        )
+        return _resolved_or_rejected(best)
 
     def _score_surfaces(self, query: str) -> tuple[_SurfaceScore, ...]:
         best_by_surface: dict[str, _SurfaceScore] = {}
@@ -241,9 +321,68 @@ def _target_kind(surface: CommandSurface) -> DispatchTargetKind:
     return surface.dispatch_target.target_kind
 
 
-def _embedded_specificity(surface: CommandSurface) -> tuple[int, int]:
-    label = _normalize(surface.label)
-    return len(label.split()), len(label)
+def _embedded_specificity(match: _SurfaceScore) -> tuple[int, int]:
+    phrase = _normalize(match.matched_alias)
+    return len(phrase.split()), len(phrase)
+
+
+def _path_context_score(query: str, surface: CommandSurface) -> int:
+    target = surface.dispatch_target
+    if not isinstance(target, VaicomF10Action):
+        return 0
+    query_tokens = set(query.split())
+    path_tokens = set(_normalize(" ".join(target.menu_path)).split())
+    return len(query_tokens & path_tokens)
+
+
+def _resolved_or_rejected(match: _SurfaceScore) -> CommandResolution:
+    surface = match.surface
+    if not surface.available:
+        return CommandResolution(
+            CommandResolutionDecision.REJECTED,
+            surface=surface,
+            matched_alias=match.matched_alias,
+            score=match.score,
+            reason_code="mission_action_inactive",
+            reason=surface.unavailable_reason or "mission action is not currently available",
+        )
+    return CommandResolution(
+        CommandResolutionDecision.RESOLVED,
+        surface=surface,
+        matched_alias=match.matched_alias,
+        score=match.score,
+    )
+
+
+def _callsign_remainder(query: str) -> tuple[str, ...] | None:
+    tokens = tuple(query.split())
+    for prefix in _CALLSIGN_PREFIXES:
+        if tokens[: len(prefix)] == prefix:
+            remainder = tokens[len(prefix) :]
+            return remainder or None
+    return None
+
+
+def _digit_token(token: str) -> str | None:
+    normalized = _normalize(token)
+    if len(normalized) == 1 and normalized.isdigit():
+        return normalized
+    return _DIGIT_WORDS.get(normalized)
+
+
+def _is_callsign_number_token(token: str) -> bool:
+    normalized = _normalize(token)
+    return (normalized.isdigit() and len(normalized) <= 2) or normalized in _DIGIT_WORDS
+
+
+def _is_callsign_digit_surface(surface: CommandSurface) -> bool:
+    target = surface.dispatch_target
+    if not isinstance(target, VaicomF10Action):
+        return False
+    if not target.menu_path:
+        return True
+    path = _normalize(" ".join(target.menu_path))
+    return "set integer" in path or "set callsign" in path or "set call sign" in path
 
 
 def _contains_contiguous_tokens(query_tokens: Sequence[str], label_tokens: Sequence[str]) -> bool:

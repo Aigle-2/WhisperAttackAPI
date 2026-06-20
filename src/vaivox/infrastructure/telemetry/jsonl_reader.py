@@ -172,6 +172,9 @@ def _resolution_from_record(record: object) -> CommandResolutionSummary | None:
         target_kind=_optional_str(record.get("target_kind")),
         matched_alias=_optional_str(record.get("matched_alias")),
         score=score,
+        reason_code=_optional_str(record.get("reason_code")),
+        reason=_optional_str(record.get("reason")),
+        menu_path=_string_tuple(record.get("menu_path")),
     )
 
 
@@ -193,6 +196,12 @@ def _dispatch_from_record(record: object) -> DispatchOutcome | None:
 
 def _optional_str(value: object) -> str | None:
     return value if isinstance(value, str) else None
+
+
+def _string_tuple(value: object) -> tuple[str, ...]:
+    if not isinstance(value, list):
+        return ()
+    return tuple(item for item in value if isinstance(item, str))
 
 
 def _near_misses_from_record(record: object) -> tuple[tuple[str, float], ...]:

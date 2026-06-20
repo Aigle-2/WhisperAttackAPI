@@ -336,6 +336,7 @@ class MissionVocabularySnapshot:
     source: str | None = None
     reason: str = "loaded"
     diagnostics: MissionVocabularyDiagnostics | None = None
+    display_phrases: tuple[str, ...] = ()
 
 
 @runtime_checkable

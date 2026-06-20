@@ -16,12 +16,12 @@ from __future__ import annotations
 
 import logging
 import re
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from pathlib import Path
 
 from vaivox.application.ports import MissionVocabularyDiagnostics, MissionVocabularySnapshot
-from vaivox.domain.commands.model import CommandSurface, VaicomF10Action
+from vaivox.domain.commands.model import CommandSurface, MissionMenuEntry, VaicomF10Action
 from vaivox.infrastructure.vocabulary import vaicom_generator_core as generator
 
 _LOGGER = logging.getLogger(__name__)
@@ -83,24 +83,28 @@ class VaicomF10MissionVocabulary:
         discover: Callable[[], Path | None] | None = None,
         max_phrases: int = DEFAULT_MAX_MISSION_F10_PHRASES,
         live_index: Callable[[], Mapping[str, int]] | None = None,
+        live_entries: Callable[[], Sequence[MissionMenuEntry]] | None = None,
+        action_aliases: Callable[[], Mapping[str, tuple[str, ...]]] | None = None,
     ) -> None:
         """Wire the optional log override, discovery hook, phrase cap, and live index."""
         self._log_path = Path(log_path) if log_path else None
         self._discover = discover
         self._max_phrases = max_phrases
         self._live_index = live_index
+        self._live_entries = live_entries
+        self._action_aliases = action_aliases
 
     def load(self) -> MissionVocabularySnapshot:
         """Return the current mission's F10 labels and command surfaces."""
         path = self._resolve_log_path()
         if path is None:
-            return MissionVocabularySnapshot(
+            return self._snapshot(
                 (),
                 reason="no VAICOM install found",
                 diagnostics=MissionVocabularyDiagnostics(),
             )
         if not path.is_file():
-            return MissionVocabularySnapshot(
+            return self._snapshot(
                 (),
                 source=str(path),
                 reason="VAICOM F10 log not found",
@@ -111,44 +115,103 @@ class VaicomF10MissionVocabulary:
             text = path.read_text(encoding="utf-8", errors="ignore")
         except OSError as error:
             _LOGGER.warning("Failed to read VAICOM F10 log '%s': %s", path, error)
-            return MissionVocabularySnapshot(
+            return self._snapshot(
                 (),
                 source=str(path),
                 reason="VAICOM F10 log unreadable",
                 diagnostics=MissionVocabularyDiagnostics(log_path=str(path)),
             )
 
-        items = self._with_live_index(parse_f10_items(text, max_phrases=self._max_phrases))
-        phrases = [item.label for item in items]
-        return MissionVocabularySnapshot(
-            tuple(phrases),
-            surfaces=tuple(
-                _surface_from_item(item, dispatch_index=item.action_index) for item in items
-            ),
+        items = parse_f10_items(text, max_phrases=self._max_phrases)
+        return self._snapshot(
+            items,
             source=str(path),
-            reason="loaded" if phrases else "no F10 commands found",
-            diagnostics=_build_diagnostics(path, text, phrases),
+            reason="no live F10 handshake",
+            diagnostics=_build_diagnostics(path, text, [item.label for item in items]),
         )
 
-    def _with_live_index(self, items: list[_F10Item]) -> list[_F10Item]:
-        """Apply only current-session live indices, clearing historical fallbacks.
+    def _snapshot(
+        self,
+        items: Sequence[_F10Item],
+        *,
+        source: str | None = None,
+        reason: str,
+        diagnostics: MissionVocabularyDiagnostics,
+    ) -> MissionVocabularySnapshot:
+        """Build active and unavailable surfaces around the live menu authority."""
+        aliases = self._load_aliases()
+        surfaces = self._build_surfaces(items, aliases)
+        active = [surface for surface in surfaces if surface.available]
+        phrases = _recognition_phrases(active)
+        return MissionVocabularySnapshot(
+            tuple(phrases),
+            surfaces=tuple(surfaces),
+            source=source,
+            reason="loaded" if active else reason,
+            diagnostics=diagnostics,
+            display_phrases=_display_phrases(surfaces),
+        )
 
-        A missing listener, listener fault, empty handshake, or label absent from the live
-        map leaves that item visible but non-dispatchable. This is deliberately fail-closed:
-        a stale ``ActionIndex`` can execute a different F10 action.
-        """
-        safe_items = [replace(item, action_index=None) for item in items]
-        if self._live_index is None:
-            return safe_items
+    def _load_aliases(self) -> Mapping[str, tuple[str, ...]]:
+        if self._action_aliases is None:
+            return {}
         try:
-            live = self._live_index()
-        except Exception as error:  # never let a live-source fault break the overlay
-            _LOGGER.debug("Live F10 index unavailable: %s", error)
-            return safe_items
-        if not live:
-            return safe_items
-        lookup = {label.casefold(): index for label, index in live.items()}
-        return [_override_action_index(item, lookup) for item in safe_items]
+            return self._action_aliases()
+        except Exception as error:
+            _LOGGER.warning("VAICOM action aliases unavailable: %s", error)
+            return {}
+
+    def _build_surfaces(
+        self,
+        items: Sequence[_F10Item],
+        aliases: Mapping[str, tuple[str, ...]],
+    ) -> list[CommandSurface]:
+        """Join diagnostic log metadata to the authoritative path-aware live menu."""
+        by_label: dict[str, _F10Item] = {item.label.casefold(): item for item in items}
+        live = self._read_live_entries()
+        surfaces: list[CommandSurface] = []
+        active_labels: set[str] = set()
+        for entry in live[: self._max_phrases]:
+            item = by_label.get(entry.label.casefold()) or _F10Item(
+                identifier=f"Action {entry.label}",
+                label=entry.label,
+                action_index=None,
+                command_id=None,
+            )
+            active_labels.add(entry.label.casefold())
+            surfaces.append(
+                _surface_from_item(
+                    item,
+                    dispatch_index=entry.action_index,
+                    menu_path=entry.path,
+                    semantic_aliases=_semantic_aliases(item.identifier, aliases),
+                )
+            )
+        for item in items:
+            if item.label.casefold() in active_labels:
+                continue
+            surfaces.append(
+                _surface_from_item(
+                    item,
+                    semantic_aliases=_semantic_aliases(item.identifier, aliases),
+                    available=False,
+                    unavailable_reason="not present in the settled live DCS F10 menu",
+                )
+            )
+        return surfaces
+
+    def _read_live_entries(self) -> tuple[MissionMenuEntry, ...]:
+        try:
+            if self._live_entries is not None:
+                return tuple(self._live_entries())
+            if self._live_index is not None:
+                return tuple(
+                    MissionMenuEntry(label=label, action_index=index)
+                    for label, index in self._live_index().items()
+                )
+        except Exception as error:
+            _LOGGER.debug("Live F10 menu unavailable: %s", error)
+        return ()
 
     def _resolve_log_path(self) -> Path | None:
         if self._log_path is not None:
@@ -257,14 +320,6 @@ def _with_action_metadata(
         action_index=action_index,
         command_id=item.command_id if item.command_id is not None else command_id,
     )
-
-
-def _override_action_index(item: _F10Item, lookup: Mapping[str, int]) -> _F10Item:
-    """Replace an item's ``ActionIndex`` with the live DCS value when its label is present."""
-    index = lookup.get(item.label.casefold())
-    if index is None or index == item.action_index:
-        return item
-    return replace(item, action_index=index)
 
 
 def _extract_f10_items(text: str) -> list[_F10Item]:
@@ -380,10 +435,14 @@ def _surface_from_item(
     item: _F10Item,
     *,
     dispatch_index: int | None = None,
+    menu_path: tuple[str, ...] = (),
+    semantic_aliases: tuple[str, ...] = (),
+    available: bool = True,
+    unavailable_reason: str | None = None,
 ) -> CommandSurface:
     """Build a surface, copying only an explicitly supplied live dispatch index."""
     return CommandSurface(
-        id=f"mission_f10:{_surface_key(item.identifier)}",
+        id=f"mission_f10:{_surface_key(item.identifier)}:{_surface_key('/'.join(menu_path))}",
         label=item.label,
         aliases=_f10_aliases(item.identifier),
         source="mission_f10",
@@ -393,12 +452,51 @@ def _surface_from_item(
             label=item.label,
             command_id=item.command_id,
             action_index=dispatch_index,
+            menu_path=menu_path,
         ),
+        semantic_aliases=semantic_aliases,
+        available=available,
+        unavailable_reason=unavailable_reason,
     )
 
 
 def _f10_aliases(identifier: str) -> tuple[str, ...]:
     return (identifier,)
+
+
+def _semantic_aliases(
+    identifier: str,
+    aliases: Mapping[str, tuple[str, ...]],
+) -> tuple[str, ...]:
+    """Return only aliases joined by exact normalized VAICOM action identifier."""
+    return tuple(aliases.get(" ".join(identifier.split()).casefold(), ()))
+
+
+def _recognition_phrases(surfaces: Sequence[CommandSurface]) -> list[str]:
+    phrases: list[str] = []
+    seen: set[str] = set()
+    for surface in surfaces:
+        for phrase in (surface.label, *surface.semantic_aliases):
+            key = " ".join(phrase.split()).casefold()
+            if key and key not in seen:
+                seen.add(key)
+                phrases.append(phrase)
+    return phrases
+
+
+def _display_phrases(surfaces: Sequence[CommandSurface]) -> tuple[str, ...]:
+    rows: list[str] = []
+    for surface in surfaces:
+        target = surface.dispatch_target
+        assert isinstance(target, VaicomF10Action)
+        if surface.available:
+            path = " / ".join(target.menu_path)
+            suffix = f" — live ({path})" if path else " — live"
+        else:
+            suffix = " — unavailable"
+        rows.append(f"{surface.label}{suffix}")
+        rows.extend(f"  Say: {alias}" for alias in surface.semantic_aliases)
+    return tuple(rows)
 
 
 def _surface_key(value: str) -> str:

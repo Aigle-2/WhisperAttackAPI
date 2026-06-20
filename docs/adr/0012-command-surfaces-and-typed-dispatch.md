@@ -59,14 +59,17 @@ dispatch each target through the transport that actually executes it.
   `127.0.0.1:33491` (overridable via `vaicom_f10_host` / `vaicom_f10_port`). This is
   **fire-and-forget** — DCS sends no acknowledgement — so F10 dispatch yields a
   `DispatchOutcome` only, never a `MatchOutcome`.
-- `CommandSurfaceResolver` resolves whole-query exact matches first. Before fuzzy scoring,
-  it may then resolve a live F10 **label** embedded as a contiguous token sequence in a
-  longer radio call. Only labels of at least two normalized tokens participate; the unique
-  most-specific match wins (most tokens, then longest normalized label), and equal
-  specificity abstains. Thus `DREAM 7` beats the numeric `7` inside a full clearance call,
-  while bare `7` remains available as an exact whole command. Diagnostic aliases are not
-  considered in this embedded phase. Fuzzy mission F10, fuzzy static, and raw fallback keep
-  the existing conservative snap thresholds.
+- `CommandSurfaceResolver` resolves whole-query exact matches first. It then recognizes the
+  exact anchored grammar `Set call sign|callsign <label>` for a unique nonnumeric live F10
+  label. This safely permits `Set call sign Chaos` without making every incidental
+  single-token callsign eligible. Before fuzzy scoring, it may also resolve a live F10
+  **label** embedded as a contiguous token sequence in a longer radio call. Only labels of
+  at least two normalized tokens participate; the unique most-specific match wins (most
+  tokens, then longest normalized label), and equal specificity abstains. Thus `DREAM 7`
+  beats the numeric `7` inside a full clearance call, while bare `7` remains available as an
+  exact whole command. Diagnostic aliases are not considered in either special phase.
+  Fuzzy mission F10, fuzzy static, and raw fallback keep the existing conservative snap
+  thresholds.
 - **ActionIndex sourcing.** The authoritative source is the live DCS menu, delivered by a
   VAIVOX-owned hook (below). `mission_f10.py` clears every log-derived index before applying
   the current live map. The unreliable value from `Set menu F10 item: …, ActionIndex: N`
@@ -169,6 +172,12 @@ obtain its live index 3). v7 emits a same-revision heartbeat every five seconds.
 listener accepts that live UDP snapshot, while an active listener ignores it without a
 debounce gap, repeated notification, or handle invalidation.
 
+**Anchored single-token callsign resolution is regression-covered.** Real operator output
+`Set call sign Chaos` previously fell through to VoiceAttack because the generic embedded
+phase correctly excludes single-token F10 labels. The explicit callsign grammar now resolves
+that phrase to the typed `Chaos` surface. Numeric labels, unanchored mentions, trailing
+composite digits (`Chaos 1-1`), and duplicate live labels remain fail-closed.
+
 ## Action Items
 
 1. [x] Add pure command-surface value objects and `CommandSurfaceResolver`.
@@ -201,3 +210,5 @@ debounce gap, repeated notification, or handle invalidation.
     while requiring single-token menu entries to match the whole utterance.
 17. [x] Re-publish the settled live menu at the same revision every five seconds, allowing a
     VAIVOX restart to reacquire the current DCS session without restoring persisted handles.
+18. [x] Resolve exact anchored `Set call sign|callsign <label>` phrases to a unique
+    nonnumeric live F10 surface without reopening generic single-token embedded matching.

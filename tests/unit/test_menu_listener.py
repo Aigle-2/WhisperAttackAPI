@@ -108,7 +108,7 @@ def test_handle_datagram_drops_malformed_entries() -> None:
     assert listener.get_menu() == {"good": 3}
 
 
-def test_duplicate_labels_on_different_paths_are_non_dispatchable() -> None:
+def test_duplicate_labels_on_different_paths_remain_available_path_aware() -> None:
     listener = MissionMenuListener(port=0, debounce_seconds=0)
 
     listener._handle_datagram(
@@ -121,6 +121,10 @@ def test_duplicate_labels_on_different_paths_are_non_dispatchable() -> None:
     )
 
     assert listener.get_menu() == {}
+    assert [(entry.label, entry.action_index, entry.path) for entry in listener.get_entries()] == [
+        ("CHECK IN", 2, ("ATC",)),
+        ("CHECK IN", 9, ("Support",)),
+    ]
     assert listener.get_health().ambiguous_labels == ("CHECK IN",)
 
 

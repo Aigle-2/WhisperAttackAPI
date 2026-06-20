@@ -28,10 +28,15 @@ from __future__ import annotations
 import json
 import logging
 import socket
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 
 from vaivox.application.ports import StatusLevel, StatusReporter
-from vaivox.domain.commands.model import DispatchOutcome, DispatchTargetKind, VaicomF10Action
+from vaivox.domain.commands.model import (
+    DispatchOutcome,
+    DispatchTargetKind,
+    MissionMenuEntry,
+    VaicomF10Action,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -53,6 +58,7 @@ class UdpVaicomF10ActionSink:
         port: int = DEFAULT_VAICOM_F10_PORT,
         reporter: StatusReporter | None = None,
         live_index: Callable[[], Mapping[str, int]] | None = None,
+        live_entries: Callable[[], Sequence[MissionMenuEntry]] | None = None,
     ) -> None:
         """Configure the DCS/VAICOM action endpoint.
 
@@ -63,11 +69,13 @@ class UdpVaicomF10ActionSink:
             live_index: Current-session label-to-index provider. It is consulted at send
                 time so a surface resolved before a menu rebuild cannot dispatch a stale
                 handle.
+            live_entries: Preferred path-aware current-session menu provider.
         """
         self._host = host
         self._port = port
         self._reporter = reporter
         self._live_index = live_index
+        self._live_entries = live_entries
 
     def dispatch(self, action: VaicomF10Action) -> DispatchOutcome:
         """Resolve ``action`` from the live map and send its current index to DCS.
@@ -79,7 +87,7 @@ class UdpVaicomF10ActionSink:
             A :class:`DispatchOutcome`; ``accepted`` is ``True`` when the datagram was sent,
             ``False`` when there is no live ``ActionIndex`` to send or the socket errored.
         """
-        action_index = self._current_action_index(action.label)
+        action_index = self._current_action_index(action)
         if action_index is None:
             return self._reject(
                 action,
@@ -113,17 +121,31 @@ class UdpVaicomF10ActionSink:
             detail=f"DCS doAction actionIndex {action_index} via {_ACTION_SEQUENCE_TYPE}",
         )
 
-    def _current_action_index(self, label: str) -> int | None:
-        """Resolve ``label`` from the authoritative map at the instant of dispatch."""
-        if self._live_index is None:
-            return None
+    def _current_action_index(self, action: VaicomF10Action) -> int | None:
+        """Resolve ``(path, label)`` from the authoritative menu at dispatch time."""
+        index: int | None
         try:
-            live = self._live_index()
+            if self._live_entries is not None:
+                candidates = [
+                    entry
+                    for entry in self._live_entries()
+                    if entry.label.casefold() == action.label.casefold()
+                    and (not action.menu_path or entry.path == action.menu_path)
+                ]
+                if len(candidates) != 1:
+                    return None
+                index = candidates[0].action_index
+            elif self._live_index is not None:
+                live = self._live_index()
+                folded = action.label.casefold()
+                index = next(
+                    (value for name, value in live.items() if name.casefold() == folded), None
+                )
+            else:
+                return None
         except Exception as error:
-            _LOGGER.warning("Cannot read the live F10 index: %s", error)
+            _LOGGER.warning("Cannot read the live F10 menu: %s", error)
             return None
-        folded = label.casefold()
-        index = next((value for name, value in live.items() if name.casefold() == folded), None)
         if not isinstance(index, int) or isinstance(index, bool) or index < 0:
             return None
         return index

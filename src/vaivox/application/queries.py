@@ -13,14 +13,19 @@ from dataclasses import dataclass, field
 from vaivox import __version__
 from vaivox.application.ports import (
     AudioRecorder,
+    CommandSurfaceMatcher,
     ConfigProvider,
     ReconciliationVocabulary,
     TelemetryReader,
     VocabularyRepository,
 )
-from vaivox.domain.reconciliation.model import ReconciliationResult
+from vaivox.domain.commands.model import VaicomF10Action
 from vaivox.domain.reconciliation.pipeline import reconcile
-from vaivox.domain.telemetry.model import MatchOutcome, ReconciliationOutcome
+from vaivox.domain.telemetry.model import (
+    CommandResolutionSummary,
+    MatchOutcome,
+    ReconciliationOutcome,
+)
 from vaivox.domain.vocabulary.keyterms import PHONETIC_ALPHABET
 from vaivox.domain.vocabulary.model import VocabularyKind
 
@@ -72,15 +77,21 @@ class DescribeStatus:
 class DryRunReconcile:
     """Run text through the full reconciliation pipeline without any I/O."""
 
-    def __init__(self, vocabulary: ReconciliationVocabulary) -> None:
+    def __init__(
+        self,
+        vocabulary: ReconciliationVocabulary,
+        surface_matcher: CommandSurfaceMatcher | None = None,
+    ) -> None:
         """Wire the reconciliation vocabulary provider.
 
         Args:
             vocabulary: The reconciliation vocabulary port.
+            surface_matcher: Optional typed surface matcher for routing diagnostics.
         """
         self._vocabulary = vocabulary
+        self._surface_matcher = surface_matcher
 
-    def execute(self, text: str) -> ReconciliationResult:
+    def execute(self, text: str) -> DryRunResult:
         """Reconcile ``text`` and return the staged transformations.
 
         Args:
@@ -89,7 +100,7 @@ class DryRunReconcile:
         Returns:
             The staged raw -> cleaned -> command result.
         """
-        return reconcile(
+        result = reconcile(
             text,
             self._vocabulary.get_word_mappings(),
             self._vocabulary.get_fuzzy_words(),
@@ -97,6 +108,44 @@ class DryRunReconcile:
             _FUZZY_THRESHOLD,
             _FUZZY_THRESHOLD,
         )
+        resolution = (
+            None
+            if self._surface_matcher is None
+            else self._surface_matcher.resolve(result.command_text)
+        )
+        surface = None if resolution is None else resolution.surface
+        target = None if surface is None else surface.dispatch_target
+        return DryRunResult(
+            raw_text=result.raw_text,
+            cleaned_text=result.cleaned_text,
+            command_text=result.command_text,
+            resolution=(
+                None
+                if resolution is None
+                else CommandResolutionSummary(
+                    decision=str(resolution.decision),
+                    surface_id=None if surface is None else surface.id,
+                    label=None if surface is None else surface.label,
+                    source=None if surface is None else surface.source,
+                    target_kind=None if target is None else target.target_kind.value,
+                    matched_alias=resolution.matched_alias,
+                    score=resolution.score,
+                    reason_code=resolution.reason_code,
+                    reason=resolution.reason,
+                    menu_path=target.menu_path if isinstance(target, VaicomF10Action) else (),
+                )
+            ),
+        )
+
+
+@dataclass(frozen=True)
+class DryRunResult:
+    """Reconciliation stages plus additive typed command-surface diagnostics."""
+
+    raw_text: str
+    cleaned_text: str
+    command_text: str
+    resolution: CommandResolutionSummary | None = None
 
 
 @dataclass(frozen=True)

@@ -92,10 +92,22 @@ example uses **Aspen 1‑1**.
 ## VAIVOX resolution behavior
 
 VAIVOX accepts the full call; it does not require speaking only the final menu label. It
-matches an exact, contiguous multi-token F10 label inside the reconciled phrase, so a call
+loads the user's local VAICOM `Export/keywords.html` and joins each exact `Action ...`
+identifier to its spoken aliases. It then matches an exact, contiguous multi-token label or
+trusted alias inside the reconciled phrase, so a call
 ending in `IFR DREAM 7` selects `DREAM 7` even when the live menu also contains numeric
 entries such as `1`, `6`, and `7`. A single-token menu item is intentionally selectable only
 as the complete spoken command, preventing incidental callsign digits from dispatching it.
+The explicit forms `Set call sign <CALLSIGN>` and `Set callsign <CALLSIGN>` are the safe
+exception: they select a unique exact live label, so `Set call sign Chaos` fires `Chaos`,
+while `Set callsign digit six` fires the numeric leaf under the callsign path. A combined
+phrase such as `Set callsign Chaos 61` is recognized but deliberately rejected without UDP
+or VoiceAttack fallback: this mission exposes no safe atomic combined action, and its two
+separate callbacks can overwrite the requested prefix.
+
+Only the settled, path-aware live DCS menu is executable. Log-only entries remain visible as
+unavailable diagnostics; an inactive or ambiguous action is rejected rather than routed to
+a similarly named VoiceAttack command.
 
 ## Known quirks (this example mission's script)
 

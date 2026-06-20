@@ -40,7 +40,7 @@ from vaivox.application.refresh_vocabulary import (
 )
 from vaivox.application.shutdown import Shutdown
 from vaivox.application.vocabulary_commands import AddWordMapping
-from vaivox.domain.commands.model import CommandSurface, VoiceAttackCommand
+from vaivox.domain.commands.model import CommandSurface, MissionMenuEntry, VoiceAttackCommand
 from vaivox.domain.commands.resolver import CommandSurfaceResolver
 from vaivox.domain.reconciliation.snapper import (
     DEFAULT_HIGH,
@@ -80,6 +80,7 @@ from vaivox.infrastructure.vocabulary.phrase_index import load_phrase_index
 from vaivox.infrastructure.vocabulary.reconciliation_vocabulary import (
     RepositoryReconciliationVocabulary,
 )
+from vaivox.infrastructure.vocabulary.vaicom_action_aliases import VaicomActionAliasCatalog
 from vaivox.infrastructure.vocabulary.vaicom_generator import VaicomVocabularyGenerator
 from vaivox.infrastructure.voiceattack.dispatcher import TypedCommandDispatcher
 from vaivox.infrastructure.voiceattack.sink import VoiceAttackCommandSink
@@ -128,6 +129,7 @@ class WiredApp:
     add_word_mapping: AddWordMapping
     get_core_phrases: Callable[[], tuple[str, ...]]
     get_mission_phrases: Callable[[], tuple[str, ...]]
+    get_mission_display_phrases: Callable[[], tuple[str, ...]]
     api_server: IntrospectionServer | None = None
     menu_listener: MissionMenuListener | None = None
     hook_installer: DcsHookInstaller | None = None
@@ -177,6 +179,7 @@ def build(
     reconciliation_vocabulary = RepositoryReconciliationVocabulary(vocabulary_repository)
     mission_phrase_lock = Lock()
     mission_phrases: tuple[str, ...] = ()
+    mission_display_phrases: tuple[str, ...] = ()
     mission_surfaces: tuple[CommandSurface, ...] = ()
 
     def get_mission_phrases() -> tuple[str, ...]:
@@ -187,6 +190,10 @@ def build(
         with mission_phrase_lock:
             return mission_surfaces
 
+    def get_mission_display_phrases() -> tuple[str, ...]:
+        with mission_phrase_lock:
+            return mission_display_phrases
+
     def get_mission_keyterms() -> list[str]:
         return _mission_keyterms_from_phrases(get_mission_phrases())
 
@@ -195,6 +202,7 @@ def build(
     menu_listener: MissionMenuListener | None = None
     hook_installer: DcsHookInstaller | None = None
     live_index: Callable[[], Mapping[str, int]] | None = None
+    live_entries: Callable[[], Sequence[MissionMenuEntry]] | None = None
     if config.get_bool_setting("vaicom_f10_live_menu", True):
         menu_port = config.get_vaicom_f10_menu_port()
         menu_listener = MissionMenuListener(
@@ -206,6 +214,7 @@ def build(
             on_error=lambda message: reporter.report(message, StatusLevel.WARNING),
         )
         live_index = menu_listener.get_menu
+        live_entries = menu_listener.get_entries
         install_dir = (
             config.get_setting("dcs_install_dir", "").strip() or discover_dcs_install_dir()
         )
@@ -223,6 +232,7 @@ def build(
         config.get_vaicom_f10_port(),
         reporter,
         live_index=live_index,
+        live_entries=live_entries,
     )
     command_dispatcher = TypedCommandDispatcher(command_sink, vaicom_f10_sink)
     kneeboard_sink = KneeboardSink(config.get_text_line_length, reporter)
@@ -277,10 +287,11 @@ def build(
         return len(phrases)
 
     def apply_mission_phrase_index(snapshot: MissionVocabularySnapshot) -> int:
-        nonlocal mission_phrases, mission_surfaces
+        nonlocal mission_display_phrases, mission_phrases, mission_surfaces
         with mission_phrase_lock:
             mission_phrases = snapshot.phrases
             mission_surfaces = snapshot.surfaces
+            mission_display_phrases = snapshot.display_phrases or snapshot.phrases
         return apply_phrase_index()
 
     def get_core_phrases() -> tuple[str, ...]:
@@ -301,7 +312,11 @@ def build(
     )
     refresh_mission_vocabulary = RefreshMissionVocabulary(
         VaicomF10MissionVocabulary(
-            mission_log_path, max_phrases=mission_max_phrases, live_index=live_index
+            mission_log_path,
+            max_phrases=mission_max_phrases,
+            live_index=live_index,
+            live_entries=live_entries,
+            action_aliases=VaicomActionAliasCatalog().load,
         ),
         reporter,
         apply_mission_phrase_index,
@@ -313,7 +328,7 @@ def build(
         telemetry_reader = JsonlTelemetryReader(config.app_data_location)
         api_server = IntrospectionServer(
             DescribeStatus(recorder, config),
-            DryRunReconcile(reconciliation_vocabulary),
+            DryRunReconcile(reconciliation_vocabulary, surface_resolver),
             ListRecentReconciliations(telemetry_reader),
             ComputeMetrics(telemetry_reader),
             DescribeVocabulary(vocabulary_repository),
@@ -347,6 +362,7 @@ def build(
         add_word_mapping=add_word_mapping,
         get_core_phrases=get_core_phrases,
         get_mission_phrases=get_mission_phrases,
+        get_mission_display_phrases=get_mission_display_phrases,
         api_server=api_server,
         menu_listener=menu_listener,
         hook_installer=hook_installer,

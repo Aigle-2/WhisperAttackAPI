@@ -12,8 +12,11 @@ from datetime import datetime
 from vaivox.application.queries import (
     ComputeMetrics,
     DescribeVocabulary,
+    DryRunReconcile,
     ListRecentReconciliations,
 )
+from vaivox.domain.commands.model import CommandSurface, VaicomF10Action
+from vaivox.domain.commands.resolver import CommandSurfaceResolver
 from vaivox.domain.telemetry.model import MatchOutcome, ReconciliationOutcome, SnapSummary
 from vaivox.domain.vocabulary.model import (
     GovernedEntry,
@@ -58,11 +61,44 @@ class FakeVocabularyRepository:
         return list(self._entries.get(kind, []))
 
 
+class FakeReconciliationVocabulary:
+    def get_word_mappings(self):
+        return {}
+
+    def get_fuzzy_words(self):
+        return []
+
+
 def _governed(entry_id, kind, term, hits, last_used, origin=VocabularyOrigin.DEFAULT, aliases=()):
     return GovernedEntry(
         entry=VocabularyEntry(id=entry_id, kind=kind, term=term, aliases=aliases, origin=origin),
         usage=UsageStats(last_used=last_used, hits=hits),
     )
+
+
+def test_dry_run_adds_surface_alias_path_and_reason_diagnostics():
+    surface = CommandSurface(
+        id="mission_f10:engine",
+        label="Request Engine Start",
+        aliases=("Action Request Engine Start",),
+        semantic_aliases=("Request To Start Engines",),
+        source="mission_f10",
+        scope="mission",
+        dispatch_target=VaicomF10Action(
+            "Action Request Engine Start",
+            "Request Engine Start",
+            action_index=4,
+            menu_path=("AI ATC", "Ground"),
+        ),
+    )
+    query = DryRunReconcile(FakeReconciliationVocabulary(), CommandSurfaceResolver([surface]))
+
+    result = query.execute("Ground Uzi 61 request to start engines")
+
+    assert result.resolution is not None
+    assert result.resolution.decision == "resolved"
+    assert result.resolution.matched_alias == "Request To Start Engines"
+    assert result.resolution.menu_path == ("AI ATC", "Ground")
 
 
 # -- ListRecentReconciliations --------------------------------------------------------

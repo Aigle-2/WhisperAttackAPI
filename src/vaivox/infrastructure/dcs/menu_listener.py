@@ -25,6 +25,8 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
+from vaivox.domain.commands.model import MissionMenuEntry
+
 _LOGGER = logging.getLogger(__name__)
 
 #: VAIVOX-owned port the DCS hook broadcasts the live F10 menu to. Distinct from VAICOM's
@@ -62,8 +64,18 @@ class _MenuSnapshot:
     session_id: str
     revision: int
     phase: str
-    menu: dict[str, int]
+    entries: tuple[MissionMenuEntry, ...]
     ambiguous_labels: tuple[str, ...]
+
+    @property
+    def menu(self) -> dict[str, int]:
+        """Compatibility label map, excluding path-ambiguous labels."""
+        ambiguous = {label.casefold() for label in self.ambiguous_labels}
+        return {
+            entry.label: entry.action_index
+            for entry in self.entries
+            if entry.label.casefold() not in ambiguous
+        }
 
 
 class MissionMenuListener:
@@ -96,6 +108,7 @@ class MissionMenuListener:
         self._on_error = on_error
         self._debounce_seconds = debounce_seconds
         self._menu: dict[str, int] = {}
+        self._entries: tuple[MissionMenuEntry, ...] = ()
         self._ambiguous_labels: tuple[str, ...] = ()
         self._session_id: str | None = None
         self._revision: int | None = None
@@ -114,6 +127,11 @@ class MissionMenuListener:
         with self._lock:
             return dict(self._menu)
 
+    def get_entries(self) -> tuple[MissionMenuEntry, ...]:
+        """Return every settled path-aware entry, including duplicate labels."""
+        with self._lock:
+            return self._entries
+
     def get_health(self) -> MissionMenuHealth:
         """Return an immutable snapshot of listener and runtime-handshake state."""
         with self._lock:
@@ -122,7 +140,7 @@ class MissionMenuListener:
                 runtime_confirmed=self._session_id is not None,
                 session_id=self._session_id,
                 revision=self._revision,
-                command_count=len(self._menu),
+                command_count=len(self._entries),
                 ambiguous_labels=self._ambiguous_labels,
                 last_update_unix=self._last_update_unix,
                 error=self._error,
@@ -197,12 +215,15 @@ class MissionMenuListener:
             # Any menu mutation invalidates the previously committed handles immediately.
             # The cumulative replacement becomes dispatchable only after its build settles.
             self._menu = {}
+            self._entries = ()
             self._ambiguous_labels = ()
             if session_changed:
                 self._revision = None
             self._session_id = snapshot.session_id
             if immediate:
                 self._pending = None
+                self._entries = snapshot.entries
+                self._menu = snapshot.menu
                 self._revision = snapshot.revision
                 self._last_update_unix = time.time()
                 received_at = self._last_update_unix
@@ -214,7 +235,7 @@ class MissionMenuListener:
                 self._commit_timer.cancel()
             assert received_at is not None
             self._persist(snapshot, received_at)
-            self._emit_notify(len(snapshot.menu))
+            self._emit_notify(len(snapshot.entries))
             return
         self._schedule_commit(snapshot.session_id, snapshot.revision)
 
@@ -248,6 +269,7 @@ class MissionMenuListener:
             if expected_revision is not None and snapshot.revision != expected_revision:
                 return
             self._pending = None
+            self._entries = snapshot.entries
             self._menu = dict(snapshot.menu)
             self._ambiguous_labels = snapshot.ambiguous_labels
             self._session_id = snapshot.session_id
@@ -255,7 +277,7 @@ class MissionMenuListener:
             self._last_update_unix = time.time()
             received_at = self._last_update_unix
         self._persist(snapshot, received_at)
-        self._emit_notify(len(snapshot.menu))
+        self._emit_notify(len(snapshot.entries))
 
     def _emit_notify(self, count: int) -> None:
         """Invoke the update callback, guarding against a faulty consumer."""
@@ -286,6 +308,14 @@ class MissionMenuListener:
             "phase": snapshot.phase,
             "received_at": received_at,
             "menu": snapshot.menu,
+            "entries": [
+                {
+                    "label": entry.label,
+                    "action_index": entry.action_index,
+                    "path": list(entry.path),
+                }
+                for entry in snapshot.entries
+            ],
             "ambiguous_labels": list(snapshot.ambiguous_labels),
         }
         try:
@@ -325,15 +355,17 @@ def _parse_snapshot(data: bytes) -> _MenuSnapshot | None:
     parsed = _coerce_entries(record.get("entries"))
     if parsed is None:
         return None
-    menu, ambiguous = parsed
-    return _MenuSnapshot(session_id, revision, phase, menu, ambiguous)
+    entries, ambiguous = parsed
+    return _MenuSnapshot(session_id, revision, phase, entries, ambiguous)
 
 
-def _coerce_entries(raw: object) -> tuple[dict[str, int], tuple[str, ...]] | None:
-    """Build a label map while excluding labels that identify multiple menu paths."""
+def _coerce_entries(
+    raw: object,
+) -> tuple[tuple[MissionMenuEntry, ...], tuple[str, ...]] | None:
+    """Build path-aware entries while reporting duplicate labels as ambiguous."""
     # DCS's Lua JSON encoder may serialize an empty table as ``{}`` rather than ``[]``.
     if raw == {}:
-        return {}, ()
+        return (), ()
     if not isinstance(raw, list):
         return None
     grouped: dict[str, list[tuple[str, int, tuple[str, ...]]]] = {}
@@ -349,16 +381,17 @@ def _coerce_entries(raw: object) -> tuple[dict[str, int], tuple[str, ...]] | Non
         path = _coerce_path(raw_entry.get("path"))
         grouped.setdefault(label.casefold(), []).append((label, index, path))
 
-    menu: dict[str, int] = {}
+    entries: list[MissionMenuEntry] = []
     ambiguous: list[str] = []
     for values in grouped.values():
         signatures = {(index, path) for _label, index, path in values}
         label = values[0][0]
-        if len(signatures) != 1:
+        if len(signatures) > 1:
             ambiguous.append(label)
-            continue
-        menu[label] = values[0][1]
-    return menu, tuple(sorted(ambiguous, key=str.casefold))
+        for index, path in sorted(signatures, key=lambda value: (value[1], value[0])):
+            entries.append(MissionMenuEntry(label=label, action_index=index, path=path))
+    entries.sort(key=lambda entry: (entry.path, entry.label.casefold(), entry.action_index))
+    return tuple(entries), tuple(sorted(ambiguous, key=str.casefold))
 
 
 def _coerce_path(raw: object) -> tuple[str, ...]:
@@ -377,6 +410,7 @@ def _coerce_path(raw: object) -> tuple[str, ...]:
 __all__ = [
     "DEFAULT_MENU_PORT",
     "MENU_PROTOCOL_VERSION",
+    "MissionMenuEntry",
     "MissionMenuHealth",
     "MissionMenuListener",
     "menu_file_path",

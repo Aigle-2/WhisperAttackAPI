@@ -17,6 +17,18 @@ from vaivox.domain.commands.resolver import CommandSurfaceResolver
 from vaivox.domain.reconciliation.pipeline import reconcile
 
 _FIXTURES = Path(__file__).parent / "fixtures"
+_SEMANTIC_ALIASES = {
+    "Request Engine Start": (
+        "Engine Start",
+        "Request To Start Engines",
+        "Requesting Start",
+    ),
+    "Request Takeoff": (
+        "Ready at the Hold",
+        "Ready in turn",
+        "Requesting Takeoff Clearance",
+    ),
+}
 
 
 def _load_cases() -> list[dict[str, object]]:
@@ -50,6 +62,7 @@ def _load_live_menu() -> list[CommandSurface]:
                 command_id=20_000 + index,
                 action_index=index,
             ),
+            semantic_aliases=_SEMANTIC_ALIASES.get(label, ()),
         )
         for index, label in enumerate(labels)
     ]

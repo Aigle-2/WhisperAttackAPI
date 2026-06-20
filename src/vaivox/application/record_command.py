@@ -29,6 +29,7 @@ from vaivox.domain.commands.model import (
     CommandResolutionDecision,
     DispatchOutcome,
     DispatchTargetKind,
+    VaicomF10Action,
     VoiceAttackCommand,
 )
 from vaivox.domain.reconciliation.model import ReconciliationResult
@@ -297,6 +298,27 @@ def route_command(
             sent_text = dispatch.resolved_target or surface.label
             if not dispatch.accepted:
                 _report_dispatch_rejection(dispatch, reporter)
+        elif resolution.decision is CommandResolutionDecision.REJECTED or (
+            resolution.decision is CommandResolutionDecision.ABSTAINED
+            and resolution.surface is not None
+            and resolution.surface.dispatch_target.target_kind
+            is DispatchTargetKind.VAICOM_F10_ACTION
+        ):
+            rejected_surface = resolution.surface
+            target_kind = (
+                DispatchTargetKind.VAICOM_F10_ACTION.value
+                if rejected_surface is None
+                else rejected_surface.dispatch_target.target_kind.value
+            )
+            detail = resolution.reason or "ambiguous mission F10 command; nothing dispatched"
+            dispatch = DispatchOutcome(
+                target_kind=target_kind,
+                accepted=False,
+                resolved_target=(None if rejected_surface is None else rejected_surface.label),
+                detail=detail,
+            )
+            destination = "rejected"
+            sent_text = command
         else:
             snap = snapper.snap(command)
             _report_snap_diagnostics(command, snap, reporter)
@@ -467,6 +489,14 @@ def _resolution_summary(
         target_kind=None if surface is None else surface.dispatch_target.target_kind.value,
         matched_alias=resolution.matched_alias,
         score=resolution.score,
+        reason_code=resolution.reason_code,
+        reason=resolution.reason,
+        menu_path=(
+            resolution.surface.dispatch_target.menu_path
+            if resolution.surface is not None
+            and isinstance(resolution.surface.dispatch_target, VaicomF10Action)
+            else ()
+        ),
     )
 
 
@@ -563,6 +593,13 @@ def _report_resolution_diagnostics(
         reporter.report(
             f"Command surface: abstained; best '{surface.label}' "
             f"({_format_score(resolution.score)})",
+            StatusLevel.WARNING,
+        )
+        return
+
+    if resolution.decision is CommandResolutionDecision.REJECTED:
+        reporter.report(
+            f"Command surface: rejected ({resolution.reason or 'unsupported command'})",
             StatusLevel.WARNING,
         )
         return

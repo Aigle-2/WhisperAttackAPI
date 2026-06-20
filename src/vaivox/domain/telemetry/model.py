@@ -84,6 +84,9 @@ class CommandResolutionSummary:
     target_kind: str | None = None
     matched_alias: str | None = None
     score: float = 0.0
+    reason_code: str | None = None
+    reason: str | None = None
+    menu_path: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)

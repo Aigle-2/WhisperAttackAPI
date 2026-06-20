@@ -420,6 +420,55 @@ def test_embedded_f10_label_uses_typed_dispatch_without_voiceattack_fallback():
     assert outcome.dispatch.target_kind == "vaicom_f10_action"
 
 
+def test_anchored_callsign_uses_typed_dispatch_without_voiceattack_fallback():
+    command_sink = FakeCommandSink()
+    dispatcher = FakeCommandDispatcher(command_sink)
+    use_case, _reporter, telemetry = _make_stop(
+        FakeRecorder(),
+        FakeSpeechToText(text="Set call sign Chaos"),
+        command_sink=command_sink,
+        command_dispatcher=dispatcher,
+        surface_matcher=CommandSurfaceResolver([_f10_surface("Chaos", action_index=9)]),
+        config=FakeConfig(fuzzy_words=[]),
+    )
+
+    use_case.execute()
+
+    assert command_sink.sent == []
+    assert [action.identifier for action in dispatcher.f10_sent] == ["Action Chaos"]
+    assert dispatcher.f10_sent[0].action_index == 9
+    outcome = telemetry.outcomes[0]
+    assert outcome.destination == "vaicom_f10_action"
+    assert outcome.resolution is not None
+    assert outcome.resolution.label == "Chaos"
+
+
+def test_combined_callsign_rejection_never_falls_back_or_dispatches():
+    command_sink = FakeCommandSink()
+    dispatcher = FakeCommandDispatcher(command_sink)
+    use_case, reporter, telemetry = _make_stop(
+        FakeRecorder(),
+        FakeSpeechToText(text="Set callsign Chaos 61"),
+        command_sink=command_sink,
+        command_dispatcher=dispatcher,
+        surface_matcher=CommandSurfaceResolver([_f10_surface("Chaos", action_index=9)]),
+        config=FakeConfig(fuzzy_words=[]),
+    )
+
+    use_case.execute()
+
+    assert command_sink.sent == []
+    assert dispatcher.f10_sent == []
+    outcome = telemetry.outcomes[0]
+    assert outcome.destination == "rejected"
+    assert outcome.dispatch is not None
+    assert outcome.dispatch.accepted is False
+    assert outcome.resolution is not None
+    assert outcome.resolution.decision == "rejected"
+    assert outcome.resolution.reason_code == "combined_callsign_unsupported"
+    assert any("rejected" in message.lower() for message in reporter.messages())
+
+
 def test_f10_surface_without_action_index_is_reported_not_accepted():
     # No live ActionIndex -> the sink cannot fire and reports it; there is no VoiceAttack
     # fallback, because an F10 item is not a VoiceAttack command.

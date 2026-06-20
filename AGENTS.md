@@ -122,7 +122,10 @@ but never anything that does I/O (sockets, files, mic, network, UI).
     embedded-label phase for realistic full radio calls: only contiguous live F10 labels
     with at least two normalized tokens qualify, the unique most-specific label wins, and
     equal specificity abstains. Single-token callsigns/numbers therefore require an exact
-    whole utterance (`DREAM 7` wins inside a clearance call; embedded `7` cannot hijack it).
+    whole utterance, except for the exact anchored grammar `Set call sign|callsign <label>`,
+    which may select a unique nonnumeric live F10 label (`Set call sign Chaos` → `Chaos`).
+    This does not admit trailing composite digits, so `DREAM 7` wins inside a clearance call
+    and an embedded `7` cannot hijack it.
     Static commands dispatch their command name through the
     VoiceAttack sink; live F10 surfaces fire DCS `missionCommands.doAction(ActionIndex)` over
     a UDP datagram (`UdpVaicomF10ActionSink` → `127.0.0.1:33491`, settings

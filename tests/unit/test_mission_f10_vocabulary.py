@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
-from vaivox.domain.commands.model import CommandResolutionDecision, VaicomF10Action
+from vaivox.domain.commands.model import (
+    CommandResolutionDecision,
+    MissionMenuEntry,
+    VaicomF10Action,
+)
 from vaivox.domain.commands.resolver import CommandSurfaceResolver
 from vaivox.infrastructure.vocabulary.mission_f10 import (
     VaicomF10MissionVocabulary,
@@ -184,7 +188,7 @@ def test_adapter_loads_the_current_mission_f10_from_the_log(tmp_path) -> None:
     # adapter was created (i.e. before a VAIVOX restart).
     snapshot = VaicomF10MissionVocabulary(str(log)).load()
 
-    assert snapshot.phrases == ("Activate SA-6 Site",)
+    assert snapshot.phrases == ()
     assert len(snapshot.surfaces) == 1
     assert snapshot.surfaces[0].label == "Activate SA-6 Site"
     target = snapshot.surfaces[0].dispatch_target
@@ -192,8 +196,10 @@ def test_adapter_loads_the_current_mission_f10_from_the_log(tmp_path) -> None:
     assert target.identifier == "Action Activate SA-6 Site"
     assert target.command_id == 20010  # retained as diagnostic metadata
     assert target.action_index is None  # historical log indices never dispatch
+    assert snapshot.surfaces[0].available is False
+    assert snapshot.display_phrases == ("Activate SA-6 Site — unavailable",)
     assert snapshot.source == str(log)
-    assert snapshot.reason == "loaded"
+    assert snapshot.reason == "no live F10 handshake"
 
 
 def test_adapter_drops_a_previous_missions_commands_when_a_new_mission_loads(tmp_path) -> None:
@@ -205,7 +211,7 @@ def test_adapter_drops_a_previous_missions_commands_when_a_new_mission_loads(tmp
     )
     adapter = VaicomF10MissionVocabulary(str(log))
 
-    assert adapter.load().phrases == ("OLD COMMAND",)
+    assert adapter.load().display_phrases == ("OLD COMMAND — unavailable",)
 
     # A new mission imports its own F10 menu; the previous mission's command is dropped.
     with open(log, "a", encoding="utf-8") as handle:
@@ -214,7 +220,7 @@ def test_adapter_drops_a_previous_missions_commands_when_a_new_mission_loads(tmp
             "Set menu F10 item: Action NEW COMMAND, ActionIndex: 0, Command ID: 20002\n"
         )
 
-    assert adapter.load().phrases == ("NEW COMMAND",)
+    assert adapter.load().display_phrases == ("NEW COMMAND — unavailable",)
 
 
 def test_adapter_populates_diagnostics_for_the_verbose_log(tmp_path) -> None:
@@ -242,6 +248,23 @@ def test_adapter_reports_no_install_when_auto_discovery_finds_nothing() -> None:
 
     assert snapshot.phrases == ()
     assert snapshot.reason == "no VAICOM install found"
+
+
+def test_live_menu_remains_dispatchable_when_vaicom_log_is_missing(tmp_path) -> None:
+    entry = MissionMenuEntry("Voice command assist", 6, ("AI ATC", "Options"))
+    snapshot = VaicomF10MissionVocabulary(
+        str(tmp_path / "missing.log"), live_entries=lambda: (entry,)
+    ).load()
+
+    [surface] = snapshot.surfaces
+    target = surface.dispatch_target
+
+    assert snapshot.reason == "loaded"
+    assert surface.available is True
+    assert isinstance(target, VaicomF10Action)
+    assert target.identifier == "Action Voice command assist"
+    assert target.action_index == 6
+    assert target.menu_path == ("AI ATC", "Options")
 
 
 def test_live_index_overrides_the_log_action_index(tmp_path) -> None:
@@ -272,9 +295,11 @@ def test_live_index_absent_label_rejects_the_log_fallback(tmp_path) -> None:
 
     # A live map that does not cover FLEX NORTH must not leak its historical index.
     adapter = VaicomF10MissionVocabulary(str(log), live_index=lambda: {"SOMETHING ELSE": 9})
-    [surface] = adapter.load().surfaces
+    surfaces = adapter.load().surfaces
+    flex = next(surface for surface in surfaces if surface.label == "FLEX NORTH")
 
-    assert surface.dispatch_target.action_index is None
+    assert flex.dispatch_target.action_index is None
+    assert flex.available is False
 
 
 def test_empty_or_faulty_live_source_fails_closed(tmp_path) -> None:
@@ -294,3 +319,72 @@ def test_empty_or_faulty_live_source_fails_closed(tmp_path) -> None:
         assert isinstance(target, VaicomF10Action)
         assert target.action_index is None
         assert target.command_id == 20086
+
+
+def test_live_path_and_local_vaicom_aliases_build_an_active_surface(tmp_path) -> None:
+    log = tmp_path / "VAICOMPRO.log"
+    log.write_text(
+        "Mission title: AI ATC Nellis, Menu name: Other\n"
+        "Adding new menu item: Action Request Engine Start\n",
+        encoding="utf-8",
+    )
+    entry = MissionMenuEntry(
+        label="Request Engine Start",
+        action_index=12,
+        path=("AI ATC", "Ground"),
+    )
+    adapter = VaicomF10MissionVocabulary(
+        str(log),
+        live_entries=lambda: (entry,),
+        action_aliases=lambda: {
+            "action request engine start": (
+                "Engine Start",
+                "Request To Start Engines",
+                "Requesting Start",
+            )
+        },
+    )
+
+    snapshot = adapter.load()
+    [surface] = snapshot.surfaces
+    target = surface.dispatch_target
+
+    assert surface.available is True
+    assert surface.semantic_aliases == (
+        "Engine Start",
+        "Request To Start Engines",
+        "Requesting Start",
+    )
+    assert isinstance(target, VaicomF10Action)
+    assert target.action_index == 12
+    assert target.menu_path == ("AI ATC", "Ground")
+    assert "Request To Start Engines" in snapshot.phrases
+    assert "Request Engine Start — live (AI ATC / Ground)" in snapshot.display_phrases
+
+    resolution = CommandSurfaceResolver(snapshot.surfaces).resolve(
+        "Ground Uzi 6-1 request to start engines"
+    )
+
+    assert resolution.decision is CommandResolutionDecision.RESOLVED
+    assert resolution.matched_alias == "Request To Start Engines"
+
+
+def test_inactive_dynamic_alias_is_rejected_instead_of_falling_through(tmp_path) -> None:
+    log = tmp_path / "VAICOMPRO.log"
+    log.write_text(
+        "Mission title: AI ATC Nellis, Menu name: Other\n"
+        "Adding new menu item: Action Request Takeoff\n",
+        encoding="utf-8",
+    )
+    adapter = VaicomF10MissionVocabulary(
+        str(log),
+        live_entries=lambda: (),
+        action_aliases=lambda: {"action request takeoff": ("Requesting Takeoff Clearance",)},
+    )
+
+    resolution = CommandSurfaceResolver(adapter.load().surfaces).resolve(
+        "Requesting Takeoff Clearance"
+    )
+
+    assert resolution.decision is CommandResolutionDecision.REJECTED
+    assert resolution.reason_code == "mission_action_inactive"

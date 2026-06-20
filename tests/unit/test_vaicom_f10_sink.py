@@ -10,7 +10,7 @@ import json
 
 import pytest
 
-from vaivox.domain.commands.model import DispatchTargetKind, VaicomF10Action
+from vaivox.domain.commands.model import DispatchTargetKind, MissionMenuEntry, VaicomF10Action
 from vaivox.infrastructure.voiceattack.vaicom_f10_sink import (
     DEFAULT_VAICOM_F10_PORT,
     UdpVaicomF10ActionSink,
@@ -122,3 +122,23 @@ def test_live_index_provider_error_fails_closed(
 
     assert outcome.accepted is False
     assert sent_datagrams == []
+
+
+def test_dispatch_rechecks_exact_path_when_labels_are_duplicated(
+    sent_datagrams: list[tuple[bytes, tuple[str, int]]],
+) -> None:
+    entries = (
+        MissionMenuEntry("CHECK IN", 2, ("ATC",)),
+        MissionMenuEntry("CHECK IN", 9, ("Support",)),
+    )
+    action = VaicomF10Action(
+        identifier="Action CHECK IN",
+        label="CHECK IN",
+        action_index=2,
+        menu_path=("ATC",),
+    )
+
+    outcome = UdpVaicomF10ActionSink(live_entries=lambda: entries).dispatch(action)
+
+    assert outcome.accepted is True
+    assert json.loads(sent_datagrams[0][0])["actionsequence"] == [2]

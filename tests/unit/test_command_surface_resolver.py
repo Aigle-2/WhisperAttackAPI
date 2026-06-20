@@ -50,6 +50,7 @@ def _live_like_f10_menu() -> list[CommandSurface]:
         "FLEX WEST",
         "Request Engine Start",
         "Lion",
+        "Chaos",
         *(str(digit) for digit in range(10)),
     ]
     return [_f10(label) for label in labels]
@@ -132,6 +133,64 @@ def test_bare_digit_still_resolves_as_an_exact_f10_command() -> None:
     assert resolution.decision is CommandResolutionDecision.RESOLVED
     assert resolution.surface is not None
     assert resolution.surface.label == "7"
+
+
+@pytest.mark.parametrize("query", ["Set call sign Chaos", "Set callsign Chaos"])
+def test_anchored_callsign_phrase_resolves_a_single_token_f10_label(query: str) -> None:
+    resolver = CommandSurfaceResolver(_live_like_f10_menu())
+
+    resolution = resolver.resolve(query)
+
+    assert resolution.decision is CommandResolutionDecision.RESOLVED
+    assert resolution.surface is not None
+    assert resolution.surface.label == "Chaos"
+    assert resolution.matched_alias == "Chaos"
+
+
+@pytest.mark.parametrize(
+    "query",
+    [
+        "Approach report callsign Chaos",
+    ],
+)
+def test_callsign_grammar_rejects_unanchored_phrases(query: str) -> None:
+    resolver = CommandSurfaceResolver(_live_like_f10_menu())
+
+    resolution = resolver.resolve(query)
+
+    assert resolution.decision is not CommandResolutionDecision.RESOLVED
+
+
+@pytest.mark.parametrize("query", ["Set callsign 7", "Set callsign digit seven"])
+def test_callsign_digit_grammar_resolves_an_exact_numeric_leaf(query: str) -> None:
+    resolver = CommandSurfaceResolver(_live_like_f10_menu())
+
+    resolution = resolver.resolve(query)
+
+    assert resolution.decision is CommandResolutionDecision.RESOLVED
+    assert resolution.surface is not None
+    assert resolution.surface.label == "7"
+
+
+@pytest.mark.parametrize("query", ["Set call sign Chaos 1-1", "Set callsign Chaos 11"])
+def test_combined_callsign_is_terminally_rejected(query: str) -> None:
+    resolver = CommandSurfaceResolver(_live_like_f10_menu())
+
+    resolution = resolver.resolve(query)
+
+    assert resolution.decision is CommandResolutionDecision.REJECTED
+    assert resolution.reason_code == "combined_callsign_unsupported"
+
+
+def test_anchored_callsign_phrase_abstains_on_duplicate_live_labels() -> None:
+    resolver = CommandSurfaceResolver(
+        [_f10("Chaos", "Action Chaos A"), _f10("Chaos", "Action Chaos B")]
+    )
+
+    resolution = resolver.resolve("Set call sign Chaos")
+
+    assert resolution.decision is CommandResolutionDecision.ABSTAINED
+    assert resolution.score == 100.0
 
 
 def test_digit_embedded_in_unrelated_speech_never_resolves() -> None:

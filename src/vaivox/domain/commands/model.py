@@ -39,12 +39,14 @@ class VaicomF10Action:
         label: Human-facing menu label, e.g. ``"FLEX NORTH"``.
         command_id: VAICOM's generated command id from the log, when present.
         action_index: DCS/VAICOM action index from the imported menu item, when present.
+        menu_path: Authoritative submenu path reported by the live DCS panel hook.
     """
 
     identifier: str
     label: str
     command_id: int | None = None
     action_index: int | None = None
+    menu_path: tuple[str, ...] = ()
 
     @property
     def target_kind(self) -> DispatchTargetKind:
@@ -53,6 +55,15 @@ class VaicomF10Action:
 
 
 type DispatchTarget = VoiceAttackCommand | VaicomF10Action
+
+
+@dataclass(frozen=True)
+class MissionMenuEntry:
+    """One path-aware action from the settled live DCS F10 menu."""
+
+    label: str
+    action_index: int
+    path: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -74,12 +85,31 @@ class CommandSurface:
     source: str
     scope: str
     dispatch_target: DispatchTarget
+    semantic_aliases: tuple[str, ...] = ()
+    available: bool = True
+    unavailable_reason: str | None = None
 
     def all_phrases(self) -> tuple[str, ...]:
         """Return the label plus aliases, de-duplicated in order."""
         phrases: list[str] = []
         seen: set[str] = set()
-        for phrase in (self.label, *self.aliases):
+        for phrase in (self.label, *self.aliases, *self.semantic_aliases):
+            normalized = " ".join(phrase.split()).casefold()
+            if not normalized or normalized in seen:
+                continue
+            seen.add(normalized)
+            phrases.append(phrase)
+        return tuple(phrases)
+
+    def embedded_phrases(self) -> tuple[str, ...]:
+        """Return phrases trusted inside longer utterances.
+
+        Diagnostic aliases such as VAICOM's internal ``Action ...`` identifier are
+        deliberately excluded.
+        """
+        phrases: list[str] = []
+        seen: set[str] = set()
+        for phrase in (self.label, *self.semantic_aliases):
             normalized = " ".join(phrase.split()).casefold()
             if not normalized or normalized in seen:
                 continue
@@ -93,6 +123,7 @@ class CommandResolutionDecision(StrEnum):
 
     RESOLVED = "resolved"
     ABSTAINED = "abstained"
+    REJECTED = "rejected"
     RAW = "raw"
 
 
@@ -104,6 +135,8 @@ class CommandResolution:
     surface: CommandSurface | None = None
     matched_alias: str | None = None
     score: float = 0.0
+    reason_code: str | None = None
+    reason: str | None = None
 
 
 @dataclass(frozen=True)
