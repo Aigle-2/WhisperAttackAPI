@@ -131,6 +131,20 @@ These gate the match-signal-dependent work; everything buildable without them is
   index + snapper (v1 is whole-phrase `token_sort_ratio`).
 - [ ] **Eval dataset augmentation (ADR-0008).** Add the LLM-generated tagged dataset
   alongside the human-curated golden set; consider a small real-audio smoke anchor.
+- [ ] **Confirm the CI `dotnet-plugin` job is green on first push (M4).** The C#
+  (`BuildReply` / `Decide` vs the shared golden vectors) was **not compiled or tested
+  locally** — no .NET SDK on the dev machine, only runtimes. Byte-parity with
+  `protocol.py::build_reply` is guaranteed by construction (shared
+  `tests/contract/match_protocol_vectors.json`, cross-checked in Python), but the first
+  real `dotnet build` + xUnit run is the `windows-latest` CI job added to
+  `.github/workflows/ci.yml`. Watch its first run; a C# typo would only surface there. Also
+  confirms `setup-dotnet` (SDK 8.0.x) builds/tests the `net48` target on the runner.
+- [ ] **Decide whether `SimulateUtterance` should learn/stamp (ADR-0010 ↔ ADR-0006).**
+  Simulate shares the single `route_command`, so with `voiceattack_await_result = true` +
+  `vocab_auto_learn = true` a gated `POST /reconcile/simulate` debug call can write `LEARNED`
+  entries and stamp usage in the **real** vocabulary. Intentional today (simulate dispatches
+  for real, by design), but it can pollute the vocab — decide to keep it, gate it behind a
+  flag, or pass a "don't learn" signal through `route_command` for the simulate path.
 
 ## 3. Docs / process / publication
 
@@ -142,5 +156,7 @@ These gate the match-signal-dependent work; everything buildable without them is
 
 ---
 
-_Update this file as items land (and prefer adding a new ADR over editing decisions). When
-the C# return channel ships, revisit section 1 — most of it unblocks at once._
+_Update this file as items land (and prefer adding a new ADR over editing decisions). The
+C# return channel is now **implemented** (M1–M6) but **off by default** — the rest of
+section 1 unblocks at once when the rebuilt plugin is deployed and
+`voiceattack_await_result = true` is flipped on a real install._
