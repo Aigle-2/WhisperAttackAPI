@@ -32,12 +32,16 @@ class StatusReport:
 
     Attributes:
         version: The application version.
+        protocol_version: The return-channel wire-protocol version the app speaks
+            (ADR-0006, ``MATCH_PROTOCOL_VERSION``). Exposed so an operator can confirm it
+            against the plugin's logged version when debugging a mismatch (M6 version stamp).
         recording: Whether a recording is currently in progress.
         stt_backend: The configured speech-to-text backend name.
         config: The effective configuration with secrets redacted.
     """
 
     version: str
+    protocol_version: int
     recording: bool
     stt_backend: str
     config: dict[str, str]
@@ -46,20 +50,27 @@ class StatusReport:
 class DescribeStatus:
     """Report the current runtime status (read-only)."""
 
-    def __init__(self, recorder: AudioRecorder, config: ConfigProvider) -> None:
+    def __init__(
+        self, recorder: AudioRecorder, config: ConfigProvider, protocol_version: int
+    ) -> None:
         """Wire the recorder and configuration provider.
 
         Args:
             recorder: The audio recorder port (for the recording flag).
             config: The configuration provider port.
+            protocol_version: The return-channel wire-protocol version the app speaks
+                (``MATCH_PROTOCOL_VERSION``), injected by the composition root so the
+                application layer does not import the infrastructure transport (ADR-0006).
         """
         self._recorder = recorder
         self._config = config
+        self._protocol_version = protocol_version
 
     def execute(self) -> StatusReport:
         """Return a :class:`StatusReport` snapshot."""
         return StatusReport(
             version=__version__,
+            protocol_version=self._protocol_version,
             recording=self._recorder.is_recording,
             stt_backend=self._config.get_stt_backend(),
             config=dict(self._config.get_safe_configuration()),

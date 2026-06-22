@@ -21,6 +21,7 @@ from vaivox.application.record_command import (
 from vaivox.application.shutdown import Shutdown
 from vaivox.domain.reconciliation.model import Transcription
 from vaivox.domain.reconciliation.snapper import PhraseSnapper
+from vaivox.domain.telemetry.model import MatchOutcome
 
 FUZZY_WORDS = ["Kobuleti", "Senaki", "Krymsk", "Texaco"]
 
@@ -60,11 +61,20 @@ class FakeSpeechToText:
 
 
 class FakeCommandSink:
-    def __init__(self):
+    """Records the dispatched commands and returns a scripted match outcome.
+
+    ``outcome`` defaults to ``None`` ("unknown"), matching the real sink today (no return
+    channel wired): nothing is stamped, nothing is learned. Pass a ``MatchOutcome`` to drive
+    the match-gated paths in a test (e.g. ``matched=True`` to exercise stamping).
+    """
+
+    def __init__(self, outcome=None):
         self.sent = []
+        self._outcome = outcome
 
     def send(self, command):
         self.sent.append(command)
+        return self._outcome
 
 
 class FakeKneeboardSink:
@@ -224,10 +234,11 @@ def test_kneeboard_note_is_never_snapped():
     assert telemetry.outcomes[0].snap is None  # not snapped on the kneeboard path
 
 
-def test_voiceattack_dispatch_stamps_usage_with_sent_text():
+def test_voiceattack_dispatch_stamps_usage_on_confirmed_match():
     # The VoiceAttack path credits vocabulary usage via the stamper, with the exact text
-    # sent to the sink (post-fuzzy, post-snap) — ADR-0004 governance wiring.
-    command_sink = FakeCommandSink()
+    # sent to the sink (post-fuzzy, post-snap) — ADR-0004 governance wiring — but only when
+    # the sink reports a confirmed match (ADR-0006 return channel gates the stamp).
+    command_sink = FakeCommandSink(outcome=MatchOutcome(matched=True))
     stamper = FakeStamper()
     use_case, _reporter, _telemetry = _make_stop(
         FakeRecorder(),
@@ -240,6 +251,42 @@ def test_voiceattack_dispatch_stamps_usage_with_sent_text():
 
     assert command_sink.sent == ["Kobuleti tower"]
     assert stamper.stamped == ["Kobuleti tower"]  # stamped exactly what was dispatched
+
+
+def test_voiceattack_dispatch_does_not_stamp_when_not_matched():
+    # A not-matched outcome (matched=False) is a near-miss, not a credit: the stamper is
+    # never called (ADR-0006 — stamp only on matched=True).
+    command_sink = FakeCommandSink(outcome=MatchOutcome(matched=False))
+    stamper = FakeStamper()
+    use_case, _reporter, _telemetry = _make_stop(
+        FakeRecorder(),
+        FakeSpeechToText(text="kobuletti tower"),
+        command_sink=command_sink,
+        usage_stamper=stamper,
+    )
+
+    use_case.execute()
+
+    assert command_sink.sent == ["Kobuleti tower"]
+    assert stamper.stamped == []  # not matched -> no credit
+
+
+def test_voiceattack_dispatch_does_not_stamp_on_unknown_outcome():
+    # The default sink returns None (unknown: no/garbled reply). Distinct from matched=False;
+    # neither stamps. This is the production state until the C# return channel ships.
+    command_sink = FakeCommandSink()  # outcome=None
+    stamper = FakeStamper()
+    use_case, _reporter, _telemetry = _make_stop(
+        FakeRecorder(),
+        FakeSpeechToText(text="kobuletti tower"),
+        command_sink=command_sink,
+        usage_stamper=stamper,
+    )
+
+    use_case.execute()
+
+    assert command_sink.sent == ["Kobuleti tower"]
+    assert stamper.stamped == []  # unknown -> no credit
 
 
 def test_kneeboard_note_is_never_stamped():

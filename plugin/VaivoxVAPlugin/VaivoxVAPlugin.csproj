@@ -1,0 +1,45 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    VAIVOX VoiceAttack plugin (ADR-0002, ADR-0006).
+
+    Targets .NET Framework 4.8 because VoiceAttack loads a net48 class-library DLL.
+    The plugin talks to VoiceAttack ONLY through `dynamic vaProxy`, so it needs NO
+    reference to VoiceAttack.dll to compile. The Microsoft.NETFramework.ReferenceAssemblies
+    package brings the net48 reference assemblies cross-platform, so `dotnet build`
+    works on Linux / macOS / Windows CI without the .NET Framework targeting pack or
+    VoiceAttack installed.
+
+    Output: bin/<Configuration>/net48/VaivoxVAPlugin.dll — copy into
+    <VoiceAttack>\Apps\VAIVOX\ (see plugin/README.md).
+  -->
+  <PropertyGroup>
+    <TargetFramework>net48</TargetFramework>
+    <!-- C# 7.3 is the highest the legacy net48 toolchain guarantees; `dynamic` is
+         supported since C# 4, so this is comfortably sufficient. -->
+    <LangVersion>7.3</LangVersion>
+    <AssemblyName>VaivoxVAPlugin</AssemblyName>
+    <RootNamespace>VaivoxServerCommand</RootNamespace>
+    <!-- Explicit assembly version stamp (M6). Logged at the VA_Init1 handshake alongside
+         the return-channel protocol version (ProtocolVersion == 1, mirroring Python's
+         MATCH_PROTOCOL_VERSION) so a plugin/app mismatch is visible in the VoiceAttack log.
+         Bump this when you ship a new DLL; the protocol version only changes if the wire
+         format changes (it is frozen at 1 for ADR-0006). -->
+    <Version>1.0.0</Version>
+    <AssemblyVersion>1.0.0.0</AssemblyVersion>
+    <FileVersion>1.0.0.0</FileVersion>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <GenerateAssemblyInfo>true</GenerateAssemblyInfo>
+    <!-- `dynamic` requires the Microsoft.CSharp runtime binder; it ships in the
+         net48 reference assemblies, so no extra PackageReference is needed. -->
+    <Deterministic>true</Deterministic>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Cross-platform net48 reference assemblies: lets the project build without the
+         Windows-only .NET Framework targeting pack installed. -->
+    <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies" Version="1.0.3" PrivateAssets="all" />
+  </ItemGroup>
+
+</Project>

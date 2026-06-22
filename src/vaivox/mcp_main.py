@@ -30,6 +30,7 @@ from vaivox.infrastructure.system_clock import SystemClock
 from vaivox.infrastructure.telemetry.jsonl_reader import JsonlTelemetryReader
 from vaivox.infrastructure.vocabulary.jsonl_repository import JsonlVocabularyRepository
 from vaivox.infrastructure.vocabulary.repository_provider import RepositoryVocabularyProvider
+from vaivox.infrastructure.voiceattack.protocol import MATCH_PROTOCOL_VERSION
 from vaivox.main import _ensure_src_on_path, _resolve_app_data_dir, _resolve_app_path
 
 _LOGGER = logging.getLogger(__name__)
@@ -66,7 +67,7 @@ def build_tools(app_path: str, app_data_dir: str) -> IntrospectionTools:
     repository = JsonlVocabularyRepository(app_data_dir)
     vocabulary = RepositoryVocabularyProvider(repository, SystemClock())
     return IntrospectionTools(
-        DescribeStatus(_HeadlessRecorder(), config),
+        DescribeStatus(_HeadlessRecorder(), config, MATCH_PROTOCOL_VERSION),
         DryRunReconcile(vocabulary),
         ListRecentReconciliations(JsonlTelemetryReader(app_data_dir)),
         ComputeMetrics(JsonlTelemetryReader(app_data_dir)),

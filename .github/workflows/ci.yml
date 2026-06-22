@@ -42,3 +42,33 @@ jobs:
 
       - name: Pytest (+ coverage)
         run: uv run pytest --cov=vaivox --cov-report=term-missing
+
+  # C# VoiceAttack plugin (ADR-0006, M4 / AC4). Runs on Windows because the plugin
+  # targets .NET Framework 4.8 (VoiceAttack loads a net48 DLL). It builds WITHOUT a
+  # VoiceAttack.dll reference (the plugin talks to VoiceAttack only via `dynamic
+  # vaProxy`; the net48 reference assemblies come from the
+  # Microsoft.NETFramework.ReferenceAssemblies package). The xUnit tests assert the
+  # plugin's BuildReply/Decide against the SAME shared golden vectors as the Python
+  # side (tests/contract/match_protocol_vectors.json), so the two serializers can
+  # never drift. The full VoiceAttack end-to-end (mic → PTT → DCS) stays a MANUAL
+  # pre-release step (irreducible: no VoiceAttack/DCS in CI).
+  dotnet-plugin:
+    name: C# plugin build + xUnit (golden vectors)
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Restore
+        run: dotnet restore plugin/VaivoxVAPlugin.sln
+
+      - name: Build (Release, no VoiceAttack reference)
+        run: dotnet build plugin/VaivoxVAPlugin.sln --configuration Release --no-restore
+
+      - name: Test (xUnit vs shared golden vectors)
+        run: dotnet test plugin/VaivoxVAPlugin.sln --configuration Release --no-build --verbosity normal

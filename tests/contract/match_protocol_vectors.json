@@ -1,0 +1,109 @@
+{
+  "_comment": "Golden vectors for the VoiceAttack return-channel wire protocol (ADR-0006, frozen in M1). Shared by the Python parser/serializer (src/vaivox/infrastructure/voiceattack/protocol.py) and the C# plugin (M4) so the two implementations never drift. 'round_trip' vectors are produced by build_reply AND parsed by parse_match_outcome (byte-exact serialization both sides must reproduce). 'parse_only' vectors exercise the defensive parser on degraded/forward-compat input; reply_bytes there is NOT a build_reply output. reply_bytes includes the trailing newline. expected_matched/expected_resolved describe the MatchOutcome parse_match_outcome must return; null means the parser returns None (unknown).",
+  "protocol_version": 1,
+  "round_trip": [
+    {
+      "name": "matched_with_resolved_command",
+      "matched": true,
+      "resolved_command": "Tower, request taxi",
+      "reply_bytes": "{\"v\":1,\"matched\":true,\"resolved_command\":\"Tower, request taxi\"}\n"
+    },
+    {
+      "name": "matched_without_resolved_command",
+      "matched": true,
+      "resolved_command": null,
+      "reply_bytes": "{\"v\":1,\"matched\":true,\"resolved_command\":null}\n"
+    },
+    {
+      "name": "not_matched",
+      "matched": false,
+      "resolved_command": null,
+      "reply_bytes": "{\"v\":1,\"matched\":false,\"resolved_command\":null}\n"
+    },
+    {
+      "name": "matched_with_non_ascii_resolved_command",
+      "matched": true,
+      "resolved_command": "Décollage immédiat",
+      "reply_bytes": "{\"v\":1,\"matched\":true,\"resolved_command\":\"Décollage immédiat\"}\n"
+    }
+  ],
+  "parse_only": [
+    {
+      "name": "empty_string_resolved_command",
+      "reply_bytes": "{\"v\":1,\"matched\":false,\"resolved_command\":\"\"}\n",
+      "expected_matched": false,
+      "expected_resolved": "",
+      "_note": "An empty-string resolved_command is a valid string and preserved as-is (distinct from null); the parser does not coerce it."
+    },
+    {
+      "name": "forward_compat_unknown_field",
+      "reply_bytes": "{\"v\":1,\"matched\":true,\"resolved_command\":\"RTB\",\"latency_ms\":12}\n",
+      "expected_matched": true,
+      "expected_resolved": "RTB",
+      "_note": "Unknown fields (latency_ms) are ignored; a newer plugin can add fields without breaking older readers."
+    },
+    {
+      "name": "no_trailing_newline",
+      "reply_bytes": "{\"v\":1,\"matched\":true,\"resolved_command\":\"RTB\"}",
+      "expected_matched": true,
+      "expected_resolved": "RTB",
+      "_note": "Parser tolerates a missing trailing newline (framing strips/ignores it)."
+    },
+    {
+      "name": "surrounding_whitespace",
+      "reply_bytes": "  {\"v\":1,\"matched\":false,\"resolved_command\":null}  \n",
+      "expected_matched": false,
+      "expected_resolved": null,
+      "_note": "Leading/trailing whitespace is tolerated."
+    },
+    {
+      "name": "empty",
+      "reply_bytes": "",
+      "expected_matched": null,
+      "expected_resolved": null,
+      "_note": "Empty data -> None (unknown)."
+    },
+    {
+      "name": "whitespace_only",
+      "reply_bytes": "   \n",
+      "expected_matched": null,
+      "expected_resolved": null,
+      "_note": "Whitespace-only data -> None (unknown)."
+    },
+    {
+      "name": "broken_json",
+      "reply_bytes": "{\"v\":1,\"matched\":true,\n",
+      "expected_matched": null,
+      "expected_resolved": null,
+      "_note": "Malformed JSON -> None (unknown), never raises."
+    },
+    {
+      "name": "missing_matched_field",
+      "reply_bytes": "{\"v\":1,\"resolved_command\":\"RTB\"}\n",
+      "expected_matched": null,
+      "expected_resolved": null,
+      "_note": "Missing 'matched' -> None (unknown)."
+    },
+    {
+      "name": "non_boolean_matched",
+      "reply_bytes": "{\"v\":1,\"matched\":\"true\",\"resolved_command\":null}\n",
+      "expected_matched": null,
+      "expected_resolved": null,
+      "_note": "Non-boolean 'matched' (string) -> None (unknown); the field must be a JSON boolean."
+    },
+    {
+      "name": "non_object_payload",
+      "reply_bytes": "[1,2,3]\n",
+      "expected_matched": null,
+      "expected_resolved": null,
+      "_note": "A non-object JSON payload -> None (unknown)."
+    },
+    {
+      "name": "non_string_resolved_command_coerced_to_null",
+      "reply_bytes": "{\"v\":1,\"matched\":true,\"resolved_command\":42}\n",
+      "expected_matched": true,
+      "expected_resolved": null,
+      "_note": "A non-string resolved_command is coerced to null while matched stays honored (best-effort)."
+    }
+  ]
+}

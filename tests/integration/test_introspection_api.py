@@ -140,7 +140,7 @@ def _make_server(
     telemetry = telemetry or FakeTelemetryReader()
     vocabulary = vocabulary or FakeVocabularyRepository()
     return IntrospectionServer(
-        DescribeStatus(FakeRecorder(), config),
+        DescribeStatus(FakeRecorder(), config, 1),
         DryRunReconcile(config),
         ListRecentReconciliations(telemetry),
         ComputeMetrics(telemetry),
@@ -205,6 +205,7 @@ def test_status_reports_state_with_redacted_config(server):
     assert payload["stt_backend"] == "elevenlabs"
     assert payload["config"]["elevenlabs_api_key"] == "<redacted>"
     assert "version" in payload
+    assert payload["protocol_version"] == 1
 
 
 def test_dry_run_reconcile_returns_pipeline_stages(server):

@@ -10,6 +10,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 
+from vaivox.application.learn_from_outcome import LearnFromOutcome
 from vaivox.application.ports import (
     AudioRecorder,
     Clock,
@@ -25,7 +26,7 @@ from vaivox.application.reconcile_text import ReconcileText
 from vaivox.application.usage_stamping import UsageStamper
 from vaivox.domain.reconciliation.model import ReconciliationResult
 from vaivox.domain.reconciliation.snapper import SnapResult
-from vaivox.domain.telemetry.model import ReconciliationOutcome, SnapSummary
+from vaivox.domain.telemetry.model import MatchOutcome, ReconciliationOutcome, SnapSummary
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -72,6 +73,7 @@ class StopAndReconcile:
         telemetry: TelemetrySink,
         snapper: PhraseMatcher,
         usage_stamper: UsageStamper | None = None,
+        learn_from_outcome: LearnFromOutcome | None = None,
     ) -> None:
         """Wire the ports the stop-and-reconcile flow depends on.
 
@@ -93,9 +95,12 @@ class StopAndReconcile:
                 behaviour when no generated index is present.
             usage_stamper: Optional vocabulary usage stamper (ADR-0004 governance). When
                 supplied, the VoiceAttack dispatch path credits the contributing vocabulary
-                entries (Tier 1 attribution) and stamps their recency/hits. ``None`` (the
-                default) disables stamping — used by tests and any flow that has no
-                repository to write back to.
+                entries (Tier 1 attribution) and stamps their recency/hits — now gated on a
+                confirmed match (ADR-0006). ``None`` (the default) disables stamping — used by
+                tests and any flow that has no repository to write back to.
+            learn_from_outcome: Optional vocabulary learning use case (ADR-0006). When
+                supplied, a not-matched / abstained dispatch derives a learned-mapping
+                proposal from the near-miss. ``None`` (the default) disables learning.
         """
         self._recorder = recorder
         self._stt = speech_to_text
@@ -107,6 +112,7 @@ class StopAndReconcile:
         self._telemetry = telemetry
         self._snapper = snapper
         self._usage_stamper = usage_stamper
+        self._learn_from_outcome = learn_from_outcome
 
     def execute(self) -> None:
         """Stop the current recording and route the reconciled command, if any."""
@@ -167,6 +173,7 @@ class StopAndReconcile:
             kneeboard_sink=self._kneeboard_sink,
             telemetry=self._telemetry,
             usage_stamper=self._usage_stamper,
+            learn_from_outcome=self._learn_from_outcome,
         )
 
 
@@ -194,6 +201,7 @@ def route_command(
     kneeboard_sink: KneeboardSink,
     telemetry: TelemetrySink,
     usage_stamper: UsageStamper | None = None,
+    learn_from_outcome: LearnFromOutcome | None = None,
 ) -> RouteOutcome:
     """Route a reconciled command and record telemetry (shared by PTT + simulate).
 
@@ -203,29 +211,39 @@ def route_command(
     (:class:`StopAndReconcile`) and the gated simulate action (:class:`SimulateUtterance`,
     ADR-0010) dispatch and record identically — there is exactly one routing path.
 
-    On the VoiceAttack path only, an optional :class:`UsageStamper` credits the vocabulary
-    entries whose surface form survived into the dispatched text (ADR-0004 governance,
-    Tier 1 attribution). Kneeboard notes never stamp — they are free text, not vocabulary.
-    The stamp runs **after** the command is sent so a stamping hiccup can never delay or
-    block the dispatch, and the stamper itself swallows its own errors.
+    On the VoiceAttack path the sink returns the :class:`MatchOutcome` (ADR-0006 return
+    channel): ``matched=True/False`` when the plugin replies, ``None`` when unknown
+    (best-effort: no/garbled reply). That single outcome is fanned out to three places — it
+    is recorded in telemetry, it **gates** the optional :class:`UsageStamper` (now stamped
+    only on a confirmed match, replacing the old dispatch-proxy stamping), and it drives the
+    optional :class:`LearnFromOutcome` (a not-matched / abstained dispatch proposes a learned
+    mapping from the near-miss). Both collaborators run **after** the command is sent and each
+    swallows its own errors, so neither can delay or block the dispatch.
 
-    **No real match signal:** without the C# return channel (ADR-0006) the stamp credits on
-    *dispatch*, not on a confirmed VoiceAttack match — see :class:`UsageStamper`.
+    Kneeboard notes never stamp and never learn — they are free text, not vocabulary.
+
+    **Match gating, three states (ADR-0006):** ``matched=True`` → stamp; ``matched=False`` →
+    no stamp, learn from the near-miss; ``None`` (unknown) → neither (no signal). Until the
+    C# return channel ships (M3+) the real sink always returns ``None``, so stamping and
+    learning are inert in production and the loop is exercised by the fake sink in tests.
 
     Args:
         result: The staged reconciliation result to route.
         snapper: The phrase matcher applied on the VoiceAttack path.
-        command_sink: The VoiceAttack command sink.
+        command_sink: The VoiceAttack command sink (returns the match outcome).
         kneeboard_sink: The DCS kneeboard sink.
         telemetry: The telemetry sink the outcome is recorded to.
-        usage_stamper: Optional vocabulary usage stamper invoked on the VoiceAttack path;
+        usage_stamper: Optional vocabulary usage stamper invoked on a confirmed match;
             ``None`` disables stamping (tests / flows with no repository).
+        learn_from_outcome: Optional vocabulary learning use case invoked on a not-matched /
+            abstained dispatch; ``None`` disables learning.
 
     Returns:
         The :class:`RouteOutcome` describing where the command went and the snap result.
     """
     command = result.command_text
     snap: SnapResult | None = None
+    match: MatchOutcome | None = None
     if command.lower().startswith(_KNEEBOARD_TRIGGER):
         note_text = command[len(_KNEEBOARD_TRIGGER) :].strip()
         kneeboard_sink.send(note_text)
@@ -234,10 +252,12 @@ def route_command(
         snap = snapper.snap(command)
         if snap.text != command:
             _LOGGER.info("Phrase snap: '%s' -> '%s' (%.1f)", command, snap.text, snap.score)
-        command_sink.send(snap.text)
+        match = command_sink.send(snap.text)
         destination, sent_text = "voiceattack", snap.text
-        if usage_stamper is not None:
+        if usage_stamper is not None and match is not None and match.matched:
             usage_stamper.stamp(sent_text)
+        if learn_from_outcome is not None:
+            learn_from_outcome.execute(result, snap, match)
 
     telemetry.record(
         ReconciliationOutcome(
@@ -246,6 +266,7 @@ def route_command(
             command_text=result.command_text,
             sent_text=sent_text,
             destination=destination,
+            match=match,
             snap=_snap_summary(snap),
         )
     )
@@ -271,6 +292,7 @@ class SimulateUtterance:
         telemetry: TelemetrySink,
         reporter: StatusReporter,
         usage_stamper: UsageStamper | None = None,
+        learn_from_outcome: LearnFromOutcome | None = None,
     ) -> None:
         """Wire the ports the simulate action routes through (mirrors the PTT flow).
 
@@ -283,8 +305,10 @@ class SimulateUtterance:
             telemetry: The telemetry sink the outcome is recorded to.
             reporter: The status reporter (surfaces the agent-triggered dispatch).
             usage_stamper: Optional vocabulary usage stamper. Simulate is a *real* dispatch
-                (ADR-0010), so it shares the PTT path's stamping when wired; ``None``
-                disables it.
+                (ADR-0010), so it shares the PTT path's match-gated stamping when wired;
+                ``None`` disables it.
+            learn_from_outcome: Optional vocabulary learning use case shared with the PTT path
+                (ADR-0006); ``None`` disables learning.
         """
         self._reconcile_text = reconcile_text
         self._snapper = snapper
@@ -293,6 +317,7 @@ class SimulateUtterance:
         self._telemetry = telemetry
         self._reporter = reporter
         self._usage_stamper = usage_stamper
+        self._learn_from_outcome = learn_from_outcome
 
     def execute(self, text: str) -> RouteOutcome:
         """Reconcile ``text`` and dispatch it for real, returning the route outcome.
@@ -311,6 +336,7 @@ class SimulateUtterance:
             kneeboard_sink=self._kneeboard_sink,
             telemetry=self._telemetry,
             usage_stamper=self._usage_stamper,
+            learn_from_outcome=self._learn_from_outcome,
         )
         self._reporter.report(
             f"Simulated utterance: '{text}' -> sent '{outcome.sent_text}' to {outcome.destination}",

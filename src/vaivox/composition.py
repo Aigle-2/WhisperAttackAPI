@@ -15,6 +15,7 @@ from pathlib import Path
 from threading import Event
 
 from vaivox.application.add_vocabulary import AddWordMapping
+from vaivox.application.learn_from_outcome import ApplyPolicy, LearnFromOutcome
 from vaivox.application.ports import (
     AudioRecorder,
     Clock,
@@ -65,7 +66,11 @@ from vaivox.infrastructure.vocabulary.migration import migrate_legacy_vocabulary
 from vaivox.infrastructure.vocabulary.phrase_index import load_phrase_index
 from vaivox.infrastructure.vocabulary.repository_provider import RepositoryVocabularyProvider
 from vaivox.infrastructure.vocabulary.vaicom_generator import VaicomVocabularyGenerator
-from vaivox.infrastructure.voiceattack.sink import VoiceAttackCommandSink
+from vaivox.infrastructure.voiceattack.protocol import MATCH_PROTOCOL_VERSION
+from vaivox.infrastructure.voiceattack.sink import (
+    DEFAULT_READ_TIMEOUT,
+    VoiceAttackCommandSink,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -118,8 +123,23 @@ def build(
     """
     speech_to_text = create_stt_backend(config)
     recorder = SoundDeviceRecorder()
+    # The return-channel kill-switch (ADR-0006): off by default, the sink is fire-and-forget
+    # (zero latency, returns None). Flip voiceattack_await_result = true once the replying
+    # plugin is deployed (M6) so the sink reads the match outcome best-effort.
+    await_result = config.get_bool_setting("voiceattack_await_result", False)
+    # Version stamp (M6): log the return-channel protocol version we speak so a mismatch
+    # with the plugin's logged assembly/protocol version (VA_Init1) is visible in the logs.
+    _LOGGER.info(
+        "Return channel: match protocol v%d, await_result=%s.",
+        MATCH_PROTOCOL_VERSION,
+        await_result,
+    )
     command_sink = VoiceAttackCommandSink(
-        config.get_voiceattack_host(), config.get_voiceattack_port(), reporter
+        config.get_voiceattack_host(),
+        config.get_voiceattack_port(),
+        reporter,
+        await_result=await_result,
+        read_timeout=config.get_float_setting("voiceattack_read_timeout", DEFAULT_READ_TIMEOUT),
     )
     kneeboard_sink = KneeboardSink(config.get_text_line_length, reporter)
     telemetry = build_telemetry_sink(config)
@@ -142,6 +162,12 @@ def build(
     # ships (ADR-0006) this credits on dispatch, not on a confirmed match.
     usage_stamper = build_usage_stamper(config, vocabulary_repository, clock)
 
+    # Vocabulary learning loop (ADR-0006): on a not-matched / abstained VoiceAttack dispatch,
+    # propose a learned mapping from the near-miss. Propose-only by default (human-in-the-loop)
+    # unless vocab_auto_learn is set. Inert in production until the C# return channel supplies
+    # a real match signal — the sink returns None (unknown) for now, so nothing is learned.
+    learn_from_outcome = build_learn_from_outcome(config, vocabulary_repository, clock)
+
     start_recording = StartRecording(recorder, reporter)
     stop_and_reconcile = StopAndReconcile(
         recorder,
@@ -154,6 +180,7 @@ def build(
         telemetry,
         snapper,
         usage_stamper,
+        learn_from_outcome,
     )
     shutdown = Shutdown(request_shutdown, reporter)
 
@@ -186,7 +213,7 @@ def build(
         data_dir = config.app_data_location
         telemetry_reader = JsonlTelemetryReader(data_dir)
         api_server = IntrospectionServer(
-            DescribeStatus(recorder, config),
+            DescribeStatus(recorder, config, MATCH_PROTOCOL_VERSION),
             DryRunReconcile(vocabulary),
             ListRecentReconciliations(telemetry_reader),
             ComputeMetrics(telemetry_reader),
@@ -201,6 +228,7 @@ def build(
                 telemetry,
                 reporter,
                 usage_stamper,
+                learn_from_outcome,
             ),
             host=config.get_setting("api_host", VAIVOX.api_host),
             port=config.get_int_setting("api_port", VAIVOX.api_port),
@@ -324,6 +352,40 @@ def build_usage_stamper(
         clock,
         eviction_policies=eviction_policies,
     )
+
+
+def build_learn_from_outcome(
+    config: VaivoxConfiguration,
+    repository: JsonlVocabularyRepository,
+    clock: Clock,
+) -> LearnFromOutcome:
+    """Build the vocabulary learning use case, resolving the apply policy (ADR-0006).
+
+    Learning fires on a not-matched / abstained VoiceAttack dispatch: it derives a
+    learned-mapping proposal (the spoken near-miss surface form -> the nearest valid phrase)
+    via a pure domain function. The apply policy is **propose-only by default**
+    (human-in-the-loop per ADR-0006): the proposal is logged, nothing is written. Setting
+    ``vocab_auto_learn = true`` in ``settings.cfg`` switches to auto-apply, writing the
+    proposal as a ``LEARNED`` entry the governor then governs/evicts like any learned entry.
+
+    The use case is harmless in production until the C# return channel ships (ADR-0006): the
+    sink returns ``None`` (unknown), so ``route_command`` never sees a not-matched outcome and
+    nothing is proposed. The seam is fully exercised by the in-memory learning loop test (AC2).
+
+    Args:
+        config: The effective application configuration (the ``vocab_auto_learn`` flag).
+        repository: The vocabulary repository a ``LEARNED`` entry is written through.
+        clock: The clock supplying a new entry's seed ``last_used`` (grace window).
+
+    Returns:
+        A :class:`~vaivox.application.learn_from_outcome.LearnFromOutcome` with the configured
+        apply policy (propose-only unless ``vocab_auto_learn`` is set).
+    """
+    auto_learn = config.get_bool_setting("vocab_auto_learn", False)
+    policy = ApplyPolicy.AUTO_APPLY if auto_learn else ApplyPolicy.PROPOSE_ONLY
+    if auto_learn:
+        _LOGGER.info("Vocabulary auto-learn enabled: near-misses written as LEARNED entries.")
+    return LearnFromOutcome(repository, clock, policy=policy)
 
 
 def build_telemetry_sink(config: VaivoxConfiguration) -> TelemetrySink:

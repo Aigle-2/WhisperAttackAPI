@@ -2,7 +2,7 @@
 
 A living punch-list of what's left after Phases 0–5 (core). The phased narrative lives in
 [`docs/MIGRATION_PLAN.md`](docs/MIGRATION_PLAN.md); decisions are in [`docs/adr/`](docs/adr/).
-At last update the tree is green: **256 tests**, ruff / format / mypy / import-linter all
+At last update the tree is green: **336 tests**, ruff / format / mypy / import-linter all
 pass via `uv run` (see [AGENTS.md](AGENTS.md)).
 
 **Done so far (Phase 5):** A governance core (ADR-0004), C telemetry persistence
@@ -18,26 +18,32 @@ adapter** (`vaivox-mcp`) + `vaivox-debug` skill (ADR-0010).
 
 These gate the match-signal-dependent work; everything buildable without them is done.
 
-- [ ] **C# plugin return channel (ADR-0006).** After `Command.Exists`, have
-  `plugin/VaivoxVAPlugin/VaivoxVAPlugin.cs` report `{ text, matched, resolved_command }`
-  back on the same socket; read it in `infrastructure/voiceattack/` and populate
-  `ReconciliationOutcome.match`. **This is the key unblocker** for the three items below.
-- [~] **Live usage stamping / recency (ADR-0004).** *Wired — but credits on dispatch, not on
-  a confirmed match.* The `UsageStamper` (`application/usage_stamping.py`) runs Tier 1
-  attribution (`VocabularyGovernor.attribute_tier1` over `sent_text.split()` vs `{id:
-  tokens(term+aliases)}`) and calls `VocabularyRepository.mark_used(credited, now)` on the
-  VoiceAttack path of the shared `route_command` (PTT + simulate; kneeboard never stamped;
-  best-effort so a failed write never breaks dispatch). **Remaining (needs the channel
-  above):** condition `mark_used` on `matched == True` so a *sent-but-unmatched* command
-  stops crediting vocabulary, and refine to Tier 2.
-- [ ] **Near-miss capture (ADR-0006 §3).** When the snap abstains / no match, record the
-  top-N nearest phrases. The snapper already emits near-misses into telemetry; this is the
-  match-signal-gated review/report side.
+- [x] **C# plugin return channel (ADR-0006).** Implemented end-to-end (M1–M6, see
+  [`docs/RETURN_CHANNEL_PLAN.md`](docs/RETURN_CHANNEL_PLAN.md)): frozen wire protocol +
+  shared golden vectors, `plugin/VaivoxVAPlugin/VaivoxVAPlugin.cs` replies
+  `{ v, matched, resolved_command }` on the same socket, and
+  `infrastructure/voiceattack/sink.py` reads it best-effort into `ReconciliationOutcome.match`.
+  **Off by default** (`voiceattack_await_result = false`); remaining = deploy the rebuilt
+  plugin + flip the flag + the real-install E2E ([runbook](docs/RETURN_CHANNEL_E2E_RUNBOOK.md), AC5).
+- [x] **Live usage stamping / recency (ADR-0004).** The `UsageStamper`
+  (`application/usage_stamping.py`) runs Tier 1 attribution
+  (`VocabularyGovernor.attribute_tier1` over `sent_text.split()` vs `{id: tokens(term+aliases)}`)
+  and calls `VocabularyRepository.mark_used(credited, now)` on the VoiceAttack path of the
+  shared `route_command` — now **conditioned on `matched == True`** (a *sent-but-unmatched*
+  command no longer credits vocabulary; `None`/unknown credits nothing). Kneeboard never
+  stamped; best-effort so a failed write never breaks dispatch. *Inert in production until
+  the channel is enabled* (above). Tier 2 below.
+- [x] **Near-miss capture (ADR-0006 §3).** `application/learn_from_outcome.py`
+  (`LearnFromOutcome`) + the pure `domain/vocabulary/learning.py`: on a confirmed not-match
+  or a snap abstain, it proposes a mapping from the nearest valid phrases and, per the
+  `vocab_auto_learn` policy (default off / human-in-the-loop), writes a `LEARNED` entry.
 - [ ] **Tier 2 counterfactual attribution (ADR-0004).** Pipeline-replay + phrase-index
-  oracle on ambiguous matches. Larger; needs the match signal.
-- [ ] **C# `dotnet` build + bundled `.vap` re-point (ADR-0002).** Build the plugin DLL
-  (no `.csproj` is committed — it depends on the local VoiceAttack SDK path) and re-point
-  the commands in `VAIVOX - VA Profile.vap` to the new plugin GUID inside VoiceAttack.
+  oracle on ambiguous matches. Larger; refines Tier 1 now that the match signal exists.
+- [x] **C# `dotnet` build + bundled `.vap` (ADR-0002/M4/M6).** `plugin/VaivoxVAPlugin.csproj`
+  + `.sln` are committed (net48, no VoiceAttack reference needed — `dynamic`); `build_exe.ps1`
+  bundles the built DLL + `.vap` under `Apps/VAIVOX/` in the release. *Manual remainder:*
+  re-point the `.vap` commands to the new plugin GUID inside VoiceAttack on the target install
+  (one-time). The C# unit tests run in the CI `dotnet` job (Windows), unverified until its first run.
 - [ ] **Generator end-to-end (ADR-0005).** Run `python tools/generate_vaicom_keyterms.py`
   against a real VAICOM install; verify the emitted `%LOCALAPPDATA%\VAIVOX\vaicom_keyterms.txt`
   + `phrase_index.txt` shape (the phrase index must line up with VoiceAttack's actual

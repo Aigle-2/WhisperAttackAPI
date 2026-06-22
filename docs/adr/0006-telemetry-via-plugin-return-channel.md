@@ -129,7 +129,10 @@ in-project constraint, Option A is the cleaner fit.
 
 ## Action Items
 
-1. [ ] Define the result message format (text, matched, resolved command).
+1. [x] Define the result message format (matched, resolved command) — frozen in M1:
+   `{"v":1,"matched":<bool>,"resolved_command":<str|null>}` + `\n`. Reference impl
+   `src/vaivox/infrastructure/voiceattack/protocol.py`; golden vectors
+   `tests/contract/match_protocol_vectors.json`. See `docs/RETURN_CHANNEL_PLAN.md`.
 2. [ ] Emit the result from the plugin after the match attempt.
 3. [ ] Add a `TelemetrySink` port + JSONL adapter in `%LOCALAPPDATA%\VAIVOX`.
 4. [ ] Build the offline review report (frequent not-founds, suggested mappings).

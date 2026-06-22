@@ -45,6 +45,8 @@ whisper_server.exe
 .vs/
 VoiceAttackPlugin/**/bin/
 VoiceAttackPlugin/**/obj/
+plugin/**/bin/
+plugin/**/obj/
 *.user
 *.suo
 *.userosscache

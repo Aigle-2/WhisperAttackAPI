@@ -20,7 +20,7 @@ from typing import Protocol, runtime_checkable
 
 from vaivox.domain.reconciliation.model import Transcription
 from vaivox.domain.reconciliation.snapper import SnapResult
-from vaivox.domain.telemetry.model import ReconciliationOutcome
+from vaivox.domain.telemetry.model import MatchOutcome, ReconciliationOutcome
 from vaivox.domain.vocabulary.model import GovernedEntry, VocabularyEntry, VocabularyKind
 
 
@@ -60,10 +60,31 @@ class AudioRecorder(Protocol):
 
 @runtime_checkable
 class CommandSink(Protocol):
-    """Driven port: dispatch a recognized command to VoiceAttack."""
+    """Driven port: dispatch a recognized command to VoiceAttack and report the match.
 
-    def send(self, command: str) -> None:
-        """Send ``command`` to VoiceAttack for matching and dispatch."""
+    The reply re-enters the application **through this port** as a
+    :class:`~vaivox.domain.telemetry.model.MatchOutcome` (ADR-0006 return channel): the
+    adapter is pure transport (send bytes, read the reply, parse) — no learning logic lives
+    in it. This is the seam that makes the learning loop testable with in-memory fakes (no
+    socket, no Windows): a fake sink simply returns scripted outcomes.
+
+    Three return states are distinct and carry different meaning to the learning loop:
+
+    - ``MatchOutcome(matched=True)`` — VoiceAttack matched and dispatched a command; usage is
+      stamped (the contributing entries earned credit).
+    - ``MatchOutcome(matched=False)`` — VoiceAttack did **not** match (a usable *near-miss*
+      signal the loop can learn from); nothing is stamped.
+    - ``None`` — *unknown*: no/garbled/late reply (best-effort). Telemetry still records, but
+      the loop neither stamps nor learns. Distinct from ``matched=False``.
+    """
+
+    def send(self, command: str) -> MatchOutcome | None:
+        """Send ``command`` to VoiceAttack and return its match outcome.
+
+        Returns:
+            ``MatchOutcome(matched=True/False)`` when the plugin reports a result, or
+            ``None`` when the outcome is unknown (no/garbled/late reply — best-effort).
+        """
 
 
 @runtime_checkable

@@ -33,6 +33,8 @@ _SAFE_CONFIG_KEYS = frozenset(
         "theme",
         "voiceattack_host",
         "voiceattack_port",
+        "voiceattack_await_result",
+        "voiceattack_read_timeout",
         "text_line_length",
         "telemetry_enabled",
         "api_enabled",

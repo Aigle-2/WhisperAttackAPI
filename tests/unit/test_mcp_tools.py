@@ -85,7 +85,7 @@ def _tools(telemetry=None, vocabulary=None):
     telemetry = telemetry or FakeTelemetryReader()
     vocabulary = vocabulary or FakeVocabularyRepository()
     return IntrospectionTools(
-        DescribeStatus(FakeRecorder(), config),
+        DescribeStatus(FakeRecorder(), config, 1),
         DryRunReconcile(config),
         ListRecentReconciliations(telemetry),
         ComputeMetrics(telemetry),
@@ -100,6 +100,7 @@ def test_status_tool_returns_redacted_config():
     assert payload["stt_backend"] == "elevenlabs"
     assert payload["config"]["elevenlabs_api_key"] == "<redacted>"
     assert "version" in payload
+    assert payload["protocol_version"] == 1
 
 
 def test_dry_run_tool_runs_the_pipeline():

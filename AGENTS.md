@@ -84,11 +84,15 @@ but never anything that does I/O (sockets, files, mic, network, UI).
     means nothing is evicted, and `DEFAULT` seeds are protected regardless — so eviction only
     ever touches `LEARNED` entries. `composition.build_usage_stamper` enables it only when
     `vocab_max_entries` (+ optional `vocab_grace_days`) is set in `settings.cfg`.
-    *Blocked on the C# return channel (ADR-0006):* there is **no real match signal** yet, so
-    stamping credits on **dispatch** (a proxy), not on a confirmed VoiceAttack match — when
-    the channel lands, `mark_used` must be conditioned on `matched == True` and the
-    attribution refined (Tier 2). Eviction stays *de facto* inert until `LEARNED` entries
-    exist (near-miss capture is also return-channel-gated).
+    **Return channel (ADR-0006) now implemented (M1–M6, see
+    [`docs/RETURN_CHANNEL_PLAN.md`](docs/RETURN_CHANNEL_PLAN.md)):** the match signal flows
+    back through the `CommandSink` port (`send -> MatchOutcome | None`), so `route_command`
+    conditions `mark_used` on `matched == True` (no longer a dispatch proxy) and fans the
+    outcome to the `LearnFromOutcome` use case (near-miss → `LEARNED`). It is **off by
+    default** (`voiceattack_await_result = false`): the sink stays fire-and-forget and
+    returns `None` (unknown) until the rebuilt C# plugin (which now replies) is deployed and
+    the flag is flipped — so stamping/learning are inert in production today. *Remaining:*
+    Tier 2 counterfactual attribution and the real-install E2E (AC5).
   - **C — Telemetry** (ADR-0006) ✅ §1: `JsonlTelemetrySink` appends each
     `ReconciliationOutcome` to `%LOCALAPPDATA%\VAIVOX`, config-gated (`telemetry_enabled`,
     default on). **Privacy:** the local-only (no-network) log persists the transcribed
@@ -132,9 +136,16 @@ but never anything that does I/O (sockets, files, mic, network, UI).
     `vaivox-mcp` console script) serves the *same read query use cases* as FastMCP stdio
     tools — `mcp` is an optional extra, imported lazily so the gate stays dep-light. *Scope:*
     the MCP server is a read-only reader process; mutating actions stay on the HTTP API.
-  - **Cross-cutting blocker:** the C# plugin **return channel** (ADR-0006) gates the
-    match-signal-dependent work — live usage stamping (`mark_used`/recency), near-miss
-    capture, Tier 2 attribution — and needs a Windows/VoiceAttack build (not CI-testable).
+  - **Return channel** (ADR-0006) ✅ **implemented & CI-tested, off by default:** the wire
+    protocol is frozen with shared golden vectors (`infrastructure/voiceattack/protocol.py`,
+    `tests/contract/match_protocol_vectors.json`); the learning loop (match-gated stamping,
+    near-miss → `LEARNED`, eviction) has an in-memory end-to-end test with no socket
+    (`tests/integration/test_learning_loop.py`, AC2); the sink↔plugin plumbing is tested over
+    TCP against a fake plugin (AC3); and the rebuilt C# plugin replies (`plugin/`, xUnit vs
+    the same vectors + a CI `dotnet` job on Windows, AC4). Enable with
+    `voiceattack_await_result = true` once the plugin is deployed; the real-install E2E (AC5,
+    [runbook](docs/RETURN_CHANNEL_E2E_RUNBOOK.md)) and Tier 2 attribution remain. Plan:
+    [`docs/RETURN_CHANNEL_PLAN.md`](docs/RETURN_CHANNEL_PLAN.md).
 
 The only legacy top-level module left is the launcher **shim** `whisper_attack.py`, which
 just launches `vaivox.main` (kept so `python whisper_attack.py` keeps working as a
