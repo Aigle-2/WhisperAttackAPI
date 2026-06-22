@@ -48,7 +48,7 @@ class OpenAIBackend:
         self.prompt_keyterm_char_budget = config.get_provider_int(
             "openai", "prompt_keyterm_char_budget", 6000
         )
-        self.keyterms = config.get_budgeted_stt_keyterms(
+        self.keyterms = config.keyterms.get_budgeted_stt_keyterms(
             self.provider_name,
             max_terms=self.max_prompt_keyterms,
             max_total_chars=self.prompt_keyterm_char_budget,

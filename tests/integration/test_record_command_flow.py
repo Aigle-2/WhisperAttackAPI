@@ -12,6 +12,7 @@ from datetime import datetime
 import pytest
 
 from vaivox.application.ports import SpeechToTextError, StatusLevel
+from vaivox.application.reconcile_text import ReconcileText
 from vaivox.application.record_command import (
     SimulateUtterance,
     StartRecording,
@@ -110,7 +111,25 @@ class FakeTelemetry:
         self.outcomes.append(outcome)
 
 
-def _make_stop(recorder, stt, command_sink=None, kneeboard_sink=None, config=None, snapper=None):
+class FakeStamper:
+    """Captures the text the routing path asks to stamp (VoiceAttack path only)."""
+
+    def __init__(self):
+        self.stamped = []
+
+    def stamp(self, sent_text):
+        self.stamped.append(sent_text)
+
+
+def _make_stop(
+    recorder,
+    stt,
+    command_sink=None,
+    kneeboard_sink=None,
+    config=None,
+    snapper=None,
+    usage_stamper=None,
+):
     reporter = FakeReporter()
     telemetry = FakeTelemetry()
     use_case = StopAndReconcile(
@@ -118,13 +137,14 @@ def _make_stop(recorder, stt, command_sink=None, kneeboard_sink=None, config=Non
         stt,
         command_sink or FakeCommandSink(),
         kneeboard_sink or FakeKneeboardSink(),
-        config or FakeConfig(),
+        ReconcileText(config or FakeConfig()),
         reporter,
         FakeClock(),
         telemetry,
         # An empty index makes the snapper a no-op, matching production with no generated
         # phrase index (behaviour parity). Tests that exercise snapping pass their own.
         snapper or PhraseSnapper([]),
+        usage_stamper,
     )
     return use_case, reporter, telemetry
 
@@ -202,6 +222,41 @@ def test_kneeboard_note_is_never_snapped():
     assert kneeboard.sent == ["texaco request rejon"]  # unsnapped free text, verbatim
     assert telemetry.outcomes[0].destination == "kneeboard"
     assert telemetry.outcomes[0].snap is None  # not snapped on the kneeboard path
+
+
+def test_voiceattack_dispatch_stamps_usage_with_sent_text():
+    # The VoiceAttack path credits vocabulary usage via the stamper, with the exact text
+    # sent to the sink (post-fuzzy, post-snap) — ADR-0004 governance wiring.
+    command_sink = FakeCommandSink()
+    stamper = FakeStamper()
+    use_case, _reporter, _telemetry = _make_stop(
+        FakeRecorder(),
+        FakeSpeechToText(text="kobuletti tower"),
+        command_sink=command_sink,
+        usage_stamper=stamper,
+    )
+
+    use_case.execute()
+
+    assert command_sink.sent == ["Kobuleti tower"]
+    assert stamper.stamped == ["Kobuleti tower"]  # stamped exactly what was dispatched
+
+
+def test_kneeboard_note_is_never_stamped():
+    # Kneeboard notes are free text, not vocabulary — the stamper must not be called.
+    kneeboard = FakeKneeboardSink()
+    stamper = FakeStamper()
+    use_case, _reporter, _telemetry = _make_stop(
+        FakeRecorder(),
+        FakeSpeechToText(text="note request startup"),
+        kneeboard_sink=kneeboard,
+        usage_stamper=stamper,
+    )
+
+    use_case.execute()
+
+    assert kneeboard.sent == ["request startup"]
+    assert stamper.stamped == []  # no usage credit on the kneeboard path
 
 
 def test_note_prefix_routes_to_kneeboard_with_trigger_stripped():
@@ -310,7 +365,12 @@ def test_simulate_utterance_dispatches_fuzzy_corrected_command_to_voiceattack():
     telemetry = FakeTelemetry()
     reporter = FakeReporter()
     use_case = SimulateUtterance(
-        FakeConfig(), PhraseSnapper([]), command_sink, FakeKneeboardSink(), telemetry, reporter
+        ReconcileText(FakeConfig()),
+        PhraseSnapper([]),
+        command_sink,
+        FakeKneeboardSink(),
+        telemetry,
+        reporter,
     )
 
     outcome = use_case.execute("kobuletti tower")
@@ -326,7 +386,7 @@ def test_simulate_utterance_routes_note_to_kneeboard():
     kneeboard = FakeKneeboardSink()
     command_sink = FakeCommandSink()
     use_case = SimulateUtterance(
-        FakeConfig(fuzzy_words=[]),
+        ReconcileText(FakeConfig(fuzzy_words=[])),
         PhraseSnapper([]),
         command_sink,
         kneeboard,

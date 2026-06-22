@@ -146,6 +146,30 @@ class TelemetryReader(Protocol):
 
 
 @runtime_checkable
+class VocabularyProvider(Protocol):
+    """Driven port: the reconciliation vocabulary the pipeline reads each utterance.
+
+    The single read seam over the vocabulary the reconciliation pipeline consumes — the
+    ``word_mappings`` (alias-to-replacement) and ``fuzzy_words`` it cleans and fuzzy-corrects
+    against. ADR-0004 makes the :class:`VocabularyRepository` (the JSONL source) the single
+    source of truth, so the production adapter projects the structured entries down to these
+    flat shapes; the introspection ``GET /vocabulary`` reads the same repository, so the
+    engine and the API never diverge.
+
+    Read **live** (not snapshotted): a mapping added through the UI while the app runs is
+    visible on the next utterance, mirroring the legacy behaviour. It is split out from
+    :class:`ConfigProvider` (which keeps the non-vocabulary settings) so the use cases depend
+    on exactly the vocabulary surface they use.
+    """
+
+    def get_word_mappings(self) -> Mapping[str, str]:
+        """Return the effective alias-to-replacement word mappings."""
+
+    def get_fuzzy_words(self) -> Sequence[str]:
+        """Return the candidate words for fuzzy correction."""
+
+
+@runtime_checkable
 class VocabularyRepository(Protocol):
     """Driven port: the structured-vocabulary store (ADR-0004, Axis A).
 
@@ -241,17 +265,13 @@ class Clock(Protocol):
 
 @runtime_checkable
 class ConfigProvider(Protocol):
-    """Driven port: read effective configuration the use cases need at runtime.
+    """Driven port: read effective non-vocabulary configuration at runtime.
 
-    Read live (not snapshotted) because word mappings can be added while the app
-    runs, mirroring the legacy behaviour.
+    The reconciliation vocabulary (word mappings, fuzzy words) is **not** here — it moved
+    to :class:`VocabularyProvider` (ADR-0004) so the engine and the introspection API read
+    it from the single :class:`VocabularyRepository` source of truth. This port keeps the
+    remaining runtime settings the use cases need.
     """
-
-    def get_word_mappings(self) -> Mapping[str, str]:
-        """Return the effective alias-to-replacement word mappings."""
-
-    def get_fuzzy_words(self) -> Sequence[str]:
-        """Return the candidate words for fuzzy correction."""
 
     def get_safe_configuration(self) -> Mapping[str, str]:
         """Return the effective configuration with secrets redacted."""

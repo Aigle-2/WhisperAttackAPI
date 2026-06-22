@@ -9,20 +9,47 @@ from __future__ import annotations
 
 import logging
 import os
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Mapping, Sequence
 
-from vaivox.domain.vocabulary.keyterms import (
-    DEFAULT_DCS_KEYTERMS,
-    DEFAULT_STT_KEYTERM_SOURCES,
-    PHONETIC_ALPHABET,
-    BudgetedKeyterms,
-    KeytermBudget,
-    apply_keyterm_budget,
-)
 from vaivox.infrastructure.config.identity import VAIVOX
-from vaivox.infrastructure.vocabulary.vaicom_keyterms import load_vaicom_keyterms
+from vaivox.infrastructure.config.keyterms import KeytermService
 
 _DEFAULT_THEME = "default"
+
+#: Config keys whose *values* are safe to expose in clear (``GET /status``, startup logs).
+#: This is an **allowlist**: everything not listed here is redacted by default, so a
+#: secret named in an unanticipated way (e.g. ``deepgram_key``, ``auth``) can never leak.
+#: The entries are exactly the non-sensitive settings the app reads through the getters
+#: below (and the ``KeytermService``); deliberately excluded are ``api_token``, every
+#: ``snap_*`` calibration knob, and the ``*_max_keyterms`` / ``*_char`` budgets — when in
+#: doubt a key is left out and therefore redacted.
+_SAFE_CONFIG_KEYS = frozenset(
+    {
+        "stt_backend",
+        "stt_language",
+        "stt_prompt",
+        "stt_keyterm_sources",
+        "stt_timeout_seconds",
+        "theme",
+        "voiceattack_host",
+        "voiceattack_port",
+        "text_line_length",
+        "telemetry_enabled",
+        "api_enabled",
+        "api_host",
+        "api_port",
+        "api_actions_enabled",
+    }
+)
+
+#: Prefixes whose keys are uniformly non-sensitive (e.g. ``whisper_model`` /
+#: ``whisper_device`` / ``whisper_compute_type`` / ``whisper_core_type``). Kept as a
+#: prefix rather than enumerated so the local-Whisper tuning knobs stay visible in
+#: ``/status`` without a new entry per knob.
+_SAFE_CONFIG_PREFIXES = ("whisper_",)
+
+#: The redaction placeholder substituted for every value not on the allowlist.
+_REDACTED = "<redacted>"
 
 
 class ConfigurationError(Exception):
@@ -59,6 +86,11 @@ class VaivoxConfiguration:
         default_fuzzy_words = self.load_fuzzy_words(app_location)
         custom_fuzzy_words = self.load_fuzzy_words(app_data_location, False)
         self.fuzzy_words = [*default_fuzzy_words, *custom_fuzzy_words]
+
+        # STT keyterm selection/budgeting is delegated to a dedicated service so this
+        # class stays a plain configuration reader (the service reads back through the
+        # generic getters and the loaded vocabulary above).
+        self.keyterms = KeytermService(self)
 
     def load_configuration(self, location: str, default: bool = True) -> dict[str, str]:
         """Load configuration settings from ``settings.cfg``.
@@ -216,22 +248,36 @@ class VaivoxConfiguration:
         return self.config
 
     def get_safe_configuration(self) -> dict[str, str]:
-        """Return configuration values with sensitive local settings redacted."""
+        """Return configuration values, redacting everything not on the safe allowlist.
+
+        Redaction is **allowlist-driven** (not a denylist of known secret substrings): a
+        value is only shown in clear when its key is an explicitly safe setting (see
+        :data:`_SAFE_CONFIG_KEYS` / :data:`_SAFE_CONFIG_PREFIXES`) or names an environment
+        variable (a ``*_env`` key, which holds the *name* of the variable that carries the
+        secret, never the secret itself). Every other value — including any unanticipated
+        credential such as ``deepgram_key`` or ``auth`` — is replaced with
+        ``<redacted>``. This is what the introspection ``/status`` endpoint and the startup
+        log render.
+
+        Returns:
+            The configuration with all non-allowlisted values redacted.
+        """
         safe_config: dict[str, str] = {}
         for key, value in self.config.items():
-            lower_key = key.lower()
-            if lower_key.endswith("_env"):
-                safe_config[key] = value
-            elif (
-                "api_key" in lower_key
-                or "secret" in lower_key
-                or "token" in lower_key
-                or "password" in lower_key
-            ):
-                safe_config[key] = "<redacted>"
-            else:
-                safe_config[key] = value
+            safe_config[key] = value if self._is_safe_config_key(key) else _REDACTED
         return safe_config
+
+    @staticmethod
+    def _is_safe_config_key(key: str) -> bool:
+        """Return whether ``key``'s value may be exposed in clear (allowlist check)."""
+        lower_key = key.lower()
+        if lower_key.endswith("_env"):
+            # ``*_env`` keys carry an environment-variable *name*, not its value; the
+            # secret stays in the environment, so the name is safe to surface.
+            return True
+        if lower_key in _SAFE_CONFIG_KEYS:
+            return True
+        return any(lower_key.startswith(prefix) for prefix in _SAFE_CONFIG_PREFIXES)
 
     def get_setting(self, key: str, default: str = "") -> str:
         """Return a raw string configuration setting."""
@@ -308,145 +354,6 @@ class VaivoxConfiguration:
         """Return an optional prompt for backends that support textual context."""
         return self.config.get("stt_prompt", "").strip()
 
-    def get_stt_keyterm_sources(self) -> list[str]:
-        """Return the configured sources used to build provider keyterms."""
-        sources = self.config.get("stt_keyterm_sources", ",".join(DEFAULT_STT_KEYTERM_SOURCES))
-        return [source.strip().lower() for source in sources.split(",") if source.strip()]
-
-    def get_stt_keyterms(self) -> list[str]:
-        """Return keyterms used by STT backends that support provider-side biasing."""
-        keyterms: list[str] = []
-        for source in self.get_stt_keyterm_sources():
-            keyterms.extend(self._keyterms_for_source(source))
-        return self._dedupe_keyterms(keyterms)
-
-    def get_stt_keyterm_source_counts(self) -> dict[str, int]:
-        """Return per-source keyterm counts for startup diagnostics."""
-        counts: dict[str, int] = {}
-        for source in self.get_stt_keyterm_sources():
-            counts[source] = len(
-                self._dedupe_keyterms(self._keyterms_for_source(source, warn_unknown=False))
-            )
-        return counts
-
-    def get_provider_stt_keyterm_budget(self, provider: str) -> KeytermBudget:
-        """Return the configured keyterm budget for ``provider``."""
-        provider = provider.strip().lower()
-        if provider == "elevenlabs":
-            return KeytermBudget(
-                max_terms=self.get_provider_int("elevenlabs", "max_keyterms", 900),
-                max_term_chars=self.get_provider_int("elevenlabs", "max_keyterm_chars", 50),
-            )
-        if provider == "deepgram":
-            return KeytermBudget(
-                max_terms=self.get_provider_int("deepgram", "max_keyterms", 100),
-            )
-        if provider == "openai":
-            return KeytermBudget(
-                max_terms=self.get_provider_int("openai", "max_prompt_keyterms", 300),
-                max_total_chars=self.get_provider_int("openai", "prompt_keyterm_char_budget", 6000),
-            )
-        return KeytermBudget()
-
-    def get_provider_budgeted_stt_keyterm_details(
-        self,
-        provider: str,
-        log_result: bool = True,
-    ) -> BudgetedKeyterms:
-        """Return generated keyterms constrained to this provider's configured limits."""
-        budget = self.get_provider_stt_keyterm_budget(provider)
-        return self.get_budgeted_stt_keyterm_details(
-            provider,
-            max_terms=budget.max_terms,
-            max_term_chars=budget.max_term_chars,
-            max_total_chars=budget.max_total_chars,
-            log_result=log_result,
-        )
-
-    def get_budgeted_stt_keyterms(
-        self,
-        provider: str,
-        max_terms: int | None = None,
-        max_term_chars: int | None = None,
-        max_total_chars: int | None = None,
-    ) -> list[str]:
-        """Return generated keyterms constrained to provider-specific limits."""
-        return self.get_budgeted_stt_keyterm_details(
-            provider,
-            max_terms=max_terms,
-            max_term_chars=max_term_chars,
-            max_total_chars=max_total_chars,
-        ).keyterms
-
-    def get_budgeted_stt_keyterm_details(
-        self,
-        provider: str,
-        max_terms: int | None = None,
-        max_term_chars: int | None = None,
-        max_total_chars: int | None = None,
-        log_result: bool = True,
-    ) -> BudgetedKeyterms:
-        """Return keyterm budgeting details for diagnostics and backend setup."""
-        budget = KeytermBudget(
-            max_terms=max_terms,
-            max_term_chars=max_term_chars,
-            max_total_chars=max_total_chars,
-        )
-        result = apply_keyterm_budget(self.get_stt_keyterms(), budget)
-        if log_result and (
-            result.skipped_too_long or result.omitted_by_term_limit or result.omitted_by_char_limit
-        ):
-            logging.info(
-                "Budgeted %s STT keyterms to %s terms "
-                "(skipped_too_long=%s, omitted_by_term_limit=%s, omitted_by_char_limit=%s).",
-                provider,
-                len(result.keyterms),
-                result.skipped_too_long,
-                result.omitted_by_term_limit,
-                result.omitted_by_char_limit,
-            )
-        return result
-
-    def _keyterms_for_source(self, source: str, warn_unknown: bool = True) -> list[str]:
-        if source == "phonetic_alphabet":
-            return list(PHONETIC_ALPHABET)
-        if source == "fuzzy_words":
-            return list(self.fuzzy_words)
-        if source in ("word_mapping_replacements", "word_mappings"):
-            return list(self.word_mappings.values())
-        if source == "word_mapping_aliases":
-            return list(self.word_mappings.keys())
-        if source in ("dcs_default", "dcs_defaults"):
-            return list(DEFAULT_DCS_KEYTERMS)
-        if source == "vaicom":
-            return load_vaicom_keyterms(self._app_data_location)
-        if source in ("custom", "settings"):
-            return [
-                *self._parse_keyterm_setting("stt_keyterms"),
-                *self._parse_keyterm_setting("stt_keyterms_extra"),
-            ]
-        if warn_unknown:
-            logging.warning("Unknown stt_keyterm_sources entry '%s'.", source)
-        return []
-
-    def _parse_keyterm_setting(self, key: str) -> list[str]:
-        keyterms = self.config.get(key, "")
-        return [keyterm.strip() for keyterm in keyterms.split(",") if keyterm.strip()]
-
-    def _dedupe_keyterms(self, keyterms: Iterable[str]) -> list[str]:
-        deduped: list[str] = []
-        seen: set[str] = set()
-        for keyterm in keyterms:
-            normalized_keyterm = keyterm.strip()
-            if not normalized_keyterm:
-                continue
-            lower_keyterm = normalized_keyterm.lower()
-            if lower_keyterm in seen:
-                continue
-            seen.add(lower_keyterm)
-            deduped.append(normalized_keyterm)
-        return deduped
-
     def get_stt_timeout_seconds(self) -> int:
         """Return the timeout for API-backed transcription requests."""
         return self.get_int_setting("stt_timeout_seconds", 30)
@@ -486,10 +393,8 @@ class VaivoxConfiguration:
 
     def get_voiceattack_port(self) -> int:
         """Return the port to connect to for VoiceAttack (default from ProductIdentity)."""
-        voiceattack_port = self.config.get("voiceattack_port", VAIVOX.voiceattack_port)
-        return int(voiceattack_port)
+        return self.get_int_setting("voiceattack_port", VAIVOX.voiceattack_port)
 
     def get_text_line_length(self) -> int:
         """Return the line length for wrapping kneeboard note text (default 53)."""
-        line_length = self.config.get("text_line_length", 53)
-        return int(line_length)
+        return self.get_int_setting("text_line_length", 53)

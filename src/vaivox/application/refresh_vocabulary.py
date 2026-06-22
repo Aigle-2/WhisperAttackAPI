@@ -16,6 +16,7 @@ takes effect on the next launch; only the phrase index is hot-applied in the liv
 from __future__ import annotations
 
 import logging
+import threading
 from collections.abc import Callable
 from dataclasses import dataclass
 
@@ -51,9 +52,23 @@ class RefreshVocabulary:
         self._generator = generator
         self._reporter = reporter
         self._apply_phrase_index = apply_phrase_index
+        # Serializes ``execute`` so the two callers that share one instance — the startup
+        # background thread (``ui.app``) and the ``POST /vocabulary/generate`` API thread —
+        # never generate concurrently and clobber each other's output files (ADR-0005). A
+        # plain instance ``Lock`` is the right tool here: this is in-process coordination of
+        # this use case's own re-entrancy, not external I/O, so it leaks no infrastructure
+        # (the generator/reporter behind the ports stay the only I/O seam). The staleness
+        # check is taken *inside* the lock so a second caller re-evaluates after the first
+        # finishes — with ``force=False`` it then sees fresh output and no-ops "up to date".
+        self._lock = threading.Lock()
 
     def execute(self, force: bool = False) -> VocabularyGenerationResult:
         """Refresh the vocabulary if it is stale (or ``force``), reporting the outcome.
+
+        Serialized by an instance lock: a second concurrent call blocks until the first
+        returns, then re-evaluates staleness. Generation is short, so a standard blocking
+        lock is acceptable; ``force=True`` keeps its "always regenerate" semantics (once it
+        holds the lock).
 
         Args:
             force: Regenerate even if the vocabulary looks up to date (the UI "Refresh"
@@ -63,6 +78,11 @@ class RefreshVocabulary:
             The :class:`~vaivox.application.ports.VocabularyGenerationResult` — quietly
             reporting ``generated=False`` when up to date or no install was found.
         """
+        with self._lock:
+            return self._execute_locked(force)
+
+    def _execute_locked(self, force: bool) -> VocabularyGenerationResult:
+        """Run the refresh while holding ``self._lock`` (see :meth:`execute`)."""
         if not force and not self._generator.is_stale():
             _LOGGER.debug("VAICOM vocabulary is up to date; skipping generation.")
             return VocabularyGenerationResult(generated=False, reason="up to date")

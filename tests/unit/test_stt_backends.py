@@ -3,16 +3,16 @@ import tempfile
 import unittest
 from urllib import parse
 
-from configuration import WhisperAttackConfiguration
-from stt_backends.base import SpeechToTextBackendError
-from stt_backends.deepgram_backend import DeepgramBackend
-from stt_backends.elevenlabs_backend import ElevenLabsBackend
-from stt_backends.factory import create_stt_backend
-from stt_backends.openai_backend import OpenAIBackend
+from vaivox.application.ports import SpeechToTextError
+from vaivox.infrastructure.config.settings import VaivoxConfiguration
+from vaivox.infrastructure.stt.deepgram import DeepgramBackend
+from vaivox.infrastructure.stt.elevenlabs import ElevenLabsBackend
+from vaivox.infrastructure.stt.factory import create_stt_backend
+from vaivox.infrastructure.stt.openai import OpenAIBackend
 
 
 class SttBackendTests(unittest.TestCase):
-    def create_config(self, settings: str) -> WhisperAttackConfiguration:
+    def create_config(self, settings: str) -> VaivoxConfiguration:
         self.temp_dir = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp_dir.cleanup)
         app_dir = os.path.join(self.temp_dir.name, "app")
@@ -25,7 +25,7 @@ class SttBackendTests(unittest.TestCase):
             word_mappings_file.write("")
         with open(os.path.join(app_dir, "fuzzy_words.txt"), "w", encoding="utf-8") as fuzzy_words_file:
             fuzzy_words_file.write("")
-        return WhisperAttackConfiguration(app_dir, data_dir)
+        return VaivoxConfiguration(app_dir, data_dir)
 
     def test_factory_creates_elevenlabs_backend(self):
         config = self.create_config("stt_backend=elevenlabs\n")
@@ -57,7 +57,7 @@ class SttBackendTests(unittest.TestCase):
         )
         backend = ElevenLabsBackend(config)
 
-        with self.assertRaises(SpeechToTextBackendError):
+        with self.assertRaises(SpeechToTextError):
             backend.load()
 
     def test_elevenlabs_extracts_single_channel_text(self):
@@ -126,7 +126,7 @@ class SttBackendTests(unittest.TestCase):
         )
         backend = OpenAIBackend(config)
 
-        with self.assertRaises(SpeechToTextBackendError):
+        with self.assertRaises(SpeechToTextError):
             backend.load()
 
     def test_openai_load_rejects_unsupported_response_format_for_default_model(self):
@@ -142,7 +142,7 @@ class SttBackendTests(unittest.TestCase):
         )
         backend = OpenAIBackend(config)
 
-        with self.assertRaisesRegex(SpeechToTextBackendError, "does not support response_format"):
+        with self.assertRaisesRegex(SpeechToTextError, "does not support response_format"):
             backend.load()
 
     def test_openai_prompt_includes_generated_keyterms(self):
@@ -198,7 +198,7 @@ class SttBackendTests(unittest.TestCase):
         )
         backend = DeepgramBackend(config)
 
-        with self.assertRaises(SpeechToTextBackendError):
+        with self.assertRaises(SpeechToTextError):
             backend.load()
 
     def test_deepgram_url_uses_repeated_keyterm_parameters(self):

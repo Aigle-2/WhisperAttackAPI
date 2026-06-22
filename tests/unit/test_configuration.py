@@ -2,12 +2,12 @@ import os
 import tempfile
 import unittest
 
-from configuration import WhisperAttackConfiguration
-from stt_backends.keyterms import KeytermBudget, apply_keyterm_budget
+from vaivox.domain.vocabulary.keyterms import KeytermBudget, apply_keyterm_budget
+from vaivox.infrastructure.config.settings import VaivoxConfiguration
 
 
 class WhisperAttackConfigurationTests(unittest.TestCase):
-    def create_config(self, settings: str) -> WhisperAttackConfiguration:
+    def create_config(self, settings: str) -> VaivoxConfiguration:
         self.temp_dir = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp_dir.cleanup)
         app_dir = os.path.join(self.temp_dir.name, "app")
@@ -20,7 +20,7 @@ class WhisperAttackConfigurationTests(unittest.TestCase):
             word_mappings_file.write("inter=Enter\n")
         with open(os.path.join(app_dir, "fuzzy_words.txt"), "w", encoding="utf-8") as fuzzy_words_file:
             fuzzy_words_file.write("Kobuleti\n")
-        return WhisperAttackConfiguration(app_dir, data_dir)
+        return VaivoxConfiguration(app_dir, data_dir)
 
     def test_stt_settings_are_parsed(self):
         config = self.create_config(
@@ -37,7 +37,9 @@ class WhisperAttackConfigurationTests(unittest.TestCase):
         self.assertEqual(config.get_stt_backend(), "elevenlabs")
         self.assertEqual(config.get_stt_language(), "en")
         self.assertEqual(config.get_stt_timeout_seconds(), 42)
-        self.assertEqual(config.get_stt_keyterms(), ["Texaco", "Overlord", "request startup"])
+        self.assertEqual(
+            config.keyterms.get_stt_keyterms(), ["Texaco", "Overlord", "request startup"]
+        )
         self.assertTrue(config.get_provider_bool("elevenlabs", "no_verbatim", False))
 
     def test_stt_keyterms_are_built_from_configured_sources(self):
@@ -48,7 +50,7 @@ class WhisperAttackConfigurationTests(unittest.TestCase):
             ])
         )
 
-        keyterms = config.get_stt_keyterms()
+        keyterms = config.keyterms.get_stt_keyterms()
 
         self.assertIn("Alpha", keyterms)
         self.assertIn("Kobuleti", keyterms)
@@ -65,7 +67,7 @@ class WhisperAttackConfigurationTests(unittest.TestCase):
             ])
         )
 
-        keyterms = config.get_budgeted_stt_keyterms("test", max_terms=2, max_term_chars=7)
+        keyterms = config.keyterms.get_budgeted_stt_keyterms("test", max_terms=2, max_term_chars=7)
 
         self.assertEqual(keyterms, ["Alpha", "Bravo"])
 
@@ -79,7 +81,9 @@ class WhisperAttackConfigurationTests(unittest.TestCase):
             ])
         )
 
-        result = config.get_provider_budgeted_stt_keyterm_details("elevenlabs", log_result=False)
+        result = config.keyterms.get_provider_budgeted_stt_keyterm_details(
+            "elevenlabs", log_result=False
+        )
 
         self.assertEqual(result.keyterms, ["Alpha", "Bravo"])
         self.assertEqual(result.skipped_too_long, 1)
@@ -93,7 +97,7 @@ class WhisperAttackConfigurationTests(unittest.TestCase):
             ])
         )
 
-        counts = config.get_stt_keyterm_source_counts()
+        counts = config.keyterms.get_stt_keyterm_source_counts()
 
         self.assertEqual(counts["phonetic_alphabet"], 26)
         self.assertEqual(counts["fuzzy_words"], 1)
@@ -122,6 +126,62 @@ class WhisperAttackConfigurationTests(unittest.TestCase):
 
         self.assertEqual(safe_config["elevenlabs_api_key_env"], "ELEVENLABS_API_KEY")
         self.assertEqual(safe_config["example_api_key"], "<redacted>")
+
+    def test_safe_configuration_exposes_allowlisted_settings(self):
+        config = self.create_config(
+            "\n".join([
+                "stt_backend=elevenlabs",
+                "stt_language=en",
+                "stt_prompt=DCS radio",
+                "stt_keyterm_sources=phonetic_alphabet",
+                "stt_timeout_seconds=42",
+                "whisper_model=small.en",
+                "whisper_device=GPU",
+                "theme=dark",
+                "voiceattack_host=127.0.0.1",
+                "voiceattack_port=65433",
+                "text_line_length=53",
+                "telemetry_enabled=true",
+                "api_enabled=true",
+                "api_host=127.0.0.1",
+                "api_port=8765",
+                "api_actions_enabled=false",
+            ])
+        )
+
+        safe_config = config.get_safe_configuration()
+
+        self.assertEqual(safe_config["stt_backend"], "elevenlabs")
+        self.assertEqual(safe_config["stt_prompt"], "DCS radio")
+        self.assertEqual(safe_config["whisper_model"], "small.en")
+        self.assertEqual(safe_config["whisper_device"], "GPU")
+        self.assertEqual(safe_config["voiceattack_port"], "65433")
+        self.assertEqual(safe_config["text_line_length"], "53")
+        self.assertEqual(safe_config["telemetry_enabled"], "true")
+        self.assertEqual(safe_config["api_enabled"], "true")
+        self.assertEqual(safe_config["api_host"], "127.0.0.1")
+        self.assertEqual(safe_config["api_actions_enabled"], "false")
+
+    def test_safe_configuration_redacts_arbitrarily_named_secrets_by_default(self):
+        # An allowlist is the whole point: a secret named in an unanticipated way (none of
+        # api_key/secret/token/password) must still be redacted because it is not allowed.
+        config = self.create_config(
+            "\n".join([
+                "deepgram_key=super-secret-value",
+                "auth=hunter2",
+                "api_token=bearer-xyz",
+                "snap_high=0.92",
+                "elevenlabs_max_keyterms=900",
+            ])
+        )
+
+        safe_config = config.get_safe_configuration()
+
+        self.assertEqual(safe_config["deepgram_key"], "<redacted>")
+        self.assertEqual(safe_config["auth"], "<redacted>")
+        self.assertEqual(safe_config["api_token"], "<redacted>")
+        self.assertEqual(safe_config["snap_high"], "<redacted>")
+        self.assertEqual(safe_config["elevenlabs_max_keyterms"], "<redacted>")
 
 
 if __name__ == "__main__":

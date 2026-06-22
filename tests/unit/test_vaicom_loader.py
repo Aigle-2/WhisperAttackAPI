@@ -50,4 +50,4 @@ def test_config_vaicom_source_reads_generated_file(tmp_path) -> None:
 
     config = VaivoxConfiguration(str(app_dir), str(data_dir))
 
-    assert config.get_stt_keyterms() == ["Texaco", "Overlord"]
+    assert config.keyterms.get_stt_keyterms() == ["Texaco", "Overlord"]

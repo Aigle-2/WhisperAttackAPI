@@ -126,14 +126,14 @@ extend-exclude = [
     # Legacy application modules — refactored in Phase 2+, not yet held to the
     # new standard. Excluding them keeps lint/format green without churn. As modules
     # are fully migrated they are deleted and drop off this list (the Phase 5 cleanup
-    # removed whisper_server.py / writer.py / theme.py / word_mappings.py).
+    # removed whisper_server.py / writer.py / theme.py / word_mappings.py, then the
+    # legacy-shim cleanup removed configuration.py / transcription_postprocess.py /
+    # stt_backends/ and their shim-only tests).
     "whisper_attack.py",
-    "stt_backends",
     "tools",
     # Legacy tests moved verbatim under tests/unit/ (kept runnable, not reformatted).
     "tests/unit/test_configuration.py",
     "tests/unit/test_stt_backends.py",
-    "tests/unit/test_transcription_postprocess.py",
 ]
 
 [tool.ruff.lint]
@@ -176,7 +176,6 @@ pretty = true
 [[tool.mypy.overrides]]
 module = [
     "whisper_attack",
-    "stt_backends.*",
     "tools",
     "tools.*",
 ]

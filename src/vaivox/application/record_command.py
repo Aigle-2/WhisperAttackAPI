@@ -14,7 +14,6 @@ from vaivox.application.ports import (
     AudioRecorder,
     Clock,
     CommandSink,
-    ConfigProvider,
     KneeboardSink,
     PhraseMatcher,
     SpeechToText,
@@ -22,17 +21,16 @@ from vaivox.application.ports import (
     StatusReporter,
     TelemetrySink,
 )
+from vaivox.application.reconcile_text import ReconcileText
+from vaivox.application.usage_stamping import UsageStamper
 from vaivox.domain.reconciliation.model import ReconciliationResult
-from vaivox.domain.reconciliation.pipeline import reconcile
 from vaivox.domain.reconciliation.snapper import SnapResult
 from vaivox.domain.telemetry.model import ReconciliationOutcome, SnapSummary
-from vaivox.domain.vocabulary.keyterms import PHONETIC_ALPHABET
 
 _LOGGER = logging.getLogger(__name__)
 
 _KNEEBOARD_TRIGGER = "note "
 _BLANK_MARKERS = ("[BLANK_AUDIO]", "")
-_FUZZY_THRESHOLD = 85
 
 
 class StartRecording:
@@ -68,11 +66,12 @@ class StopAndReconcile:
         speech_to_text: SpeechToText,
         command_sink: CommandSink,
         kneeboard_sink: KneeboardSink,
-        config: ConfigProvider,
+        reconcile_text: ReconcileText,
         reporter: StatusReporter,
         clock: Clock,
         telemetry: TelemetrySink,
         snapper: PhraseMatcher,
+        usage_stamper: UsageStamper | None = None,
     ) -> None:
         """Wire the ports the stop-and-reconcile flow depends on.
 
@@ -81,7 +80,9 @@ class StopAndReconcile:
             speech_to_text: The speech-to-text provider port.
             command_sink: The VoiceAttack command sink port.
             kneeboard_sink: The DCS kneeboard sink port.
-            config: The configuration provider port (read live each utterance).
+            reconcile_text: The single reconciliation entry point (ADR-0004); reads the
+                vocabulary live each utterance and runs the domain pipeline (phonetic
+                alphabet + the domain-default fuzzy threshold).
             reporter: The user-facing status reporter port.
             clock: The clock port (transcription timing).
             telemetry: The telemetry sink port.
@@ -90,16 +91,22 @@ class StopAndReconcile:
                 the idle-hot-reloadable adapter (ADR-0009), behind the same port. With an
                 empty phrase index it is a no-op (every command is sent raw), preserving
                 behaviour when no generated index is present.
+            usage_stamper: Optional vocabulary usage stamper (ADR-0004 governance). When
+                supplied, the VoiceAttack dispatch path credits the contributing vocabulary
+                entries (Tier 1 attribution) and stamps their recency/hits. ``None`` (the
+                default) disables stamping — used by tests and any flow that has no
+                repository to write back to.
         """
         self._recorder = recorder
         self._stt = speech_to_text
         self._command_sink = command_sink
         self._kneeboard_sink = kneeboard_sink
-        self._config = config
+        self._reconcile_text = reconcile_text
         self._reporter = reporter
         self._clock = clock
         self._telemetry = telemetry
         self._snapper = snapper
+        self._usage_stamper = usage_stamper
 
     def execute(self) -> None:
         """Stop the current recording and route the reconciled command, if any."""
@@ -140,14 +147,7 @@ class StopAndReconcile:
             if raw_text.strip() in _BLANK_MARKERS:
                 return None
 
-            result = reconcile(
-                raw_text,
-                self._config.get_word_mappings(),
-                self._config.get_fuzzy_words(),
-                PHONETIC_ALPHABET,
-                _FUZZY_THRESHOLD,
-                _FUZZY_THRESHOLD,
-            )
+            result = self._reconcile_text.execute(raw_text)
             _LOGGER.info("Cleaned transcription: %s", result.cleaned_text)
             _LOGGER.info("Fuzzy-corrected transcription: %s", result.command_text)
             return result
@@ -166,6 +166,7 @@ class StopAndReconcile:
             command_sink=self._command_sink,
             kneeboard_sink=self._kneeboard_sink,
             telemetry=self._telemetry,
+            usage_stamper=self._usage_stamper,
         )
 
 
@@ -192,6 +193,7 @@ def route_command(
     command_sink: CommandSink,
     kneeboard_sink: KneeboardSink,
     telemetry: TelemetrySink,
+    usage_stamper: UsageStamper | None = None,
 ) -> RouteOutcome:
     """Route a reconciled command and record telemetry (shared by PTT + simulate).
 
@@ -201,12 +203,23 @@ def route_command(
     (:class:`StopAndReconcile`) and the gated simulate action (:class:`SimulateUtterance`,
     ADR-0010) dispatch and record identically — there is exactly one routing path.
 
+    On the VoiceAttack path only, an optional :class:`UsageStamper` credits the vocabulary
+    entries whose surface form survived into the dispatched text (ADR-0004 governance,
+    Tier 1 attribution). Kneeboard notes never stamp — they are free text, not vocabulary.
+    The stamp runs **after** the command is sent so a stamping hiccup can never delay or
+    block the dispatch, and the stamper itself swallows its own errors.
+
+    **No real match signal:** without the C# return channel (ADR-0006) the stamp credits on
+    *dispatch*, not on a confirmed VoiceAttack match — see :class:`UsageStamper`.
+
     Args:
         result: The staged reconciliation result to route.
         snapper: The phrase matcher applied on the VoiceAttack path.
         command_sink: The VoiceAttack command sink.
         kneeboard_sink: The DCS kneeboard sink.
         telemetry: The telemetry sink the outcome is recorded to.
+        usage_stamper: Optional vocabulary usage stamper invoked on the VoiceAttack path;
+            ``None`` disables stamping (tests / flows with no repository).
 
     Returns:
         The :class:`RouteOutcome` describing where the command went and the snap result.
@@ -223,6 +236,8 @@ def route_command(
             _LOGGER.info("Phrase snap: '%s' -> '%s' (%.1f)", command, snap.text, snap.score)
         command_sink.send(snap.text)
         destination, sent_text = "voiceattack", snap.text
+        if usage_stamper is not None:
+            usage_stamper.stamp(sent_text)
 
     telemetry.record(
         ReconciliationOutcome(
@@ -249,29 +264,35 @@ class SimulateUtterance:
 
     def __init__(
         self,
-        config: ConfigProvider,
+        reconcile_text: ReconcileText,
         snapper: PhraseMatcher,
         command_sink: CommandSink,
         kneeboard_sink: KneeboardSink,
         telemetry: TelemetrySink,
         reporter: StatusReporter,
+        usage_stamper: UsageStamper | None = None,
     ) -> None:
         """Wire the ports the simulate action routes through (mirrors the PTT flow).
 
         Args:
-            config: The configuration provider (word mappings / fuzzy words, read live).
+            reconcile_text: The single reconciliation entry point (ADR-0004); reads the
+                vocabulary live and runs the same pipeline as the PTT path.
             snapper: The phrase matcher applied on the VoiceAttack path.
             command_sink: The VoiceAttack command sink.
             kneeboard_sink: The DCS kneeboard sink.
             telemetry: The telemetry sink the outcome is recorded to.
             reporter: The status reporter (surfaces the agent-triggered dispatch).
+            usage_stamper: Optional vocabulary usage stamper. Simulate is a *real* dispatch
+                (ADR-0010), so it shares the PTT path's stamping when wired; ``None``
+                disables it.
         """
-        self._config = config
+        self._reconcile_text = reconcile_text
         self._snapper = snapper
         self._command_sink = command_sink
         self._kneeboard_sink = kneeboard_sink
         self._telemetry = telemetry
         self._reporter = reporter
+        self._usage_stamper = usage_stamper
 
     def execute(self, text: str) -> RouteOutcome:
         """Reconcile ``text`` and dispatch it for real, returning the route outcome.
@@ -282,20 +303,14 @@ class SimulateUtterance:
         Returns:
             The :class:`RouteOutcome` for the dispatched command.
         """
-        result = reconcile(
-            text,
-            self._config.get_word_mappings(),
-            self._config.get_fuzzy_words(),
-            PHONETIC_ALPHABET,
-            _FUZZY_THRESHOLD,
-            _FUZZY_THRESHOLD,
-        )
+        result = self._reconcile_text.execute(text)
         outcome = route_command(
             result,
             snapper=self._snapper,
             command_sink=self._command_sink,
             kneeboard_sink=self._kneeboard_sink,
             telemetry=self._telemetry,
+            usage_stamper=self._usage_stamper,
         )
         self._reporter.report(
             f"Simulated utterance: '{text}' -> sent '{outcome.sent_text}' to {outcome.destination}",

@@ -15,15 +15,13 @@ from vaivox.application.ports import (
     AudioRecorder,
     ConfigProvider,
     TelemetryReader,
+    VocabularyProvider,
     VocabularyRepository,
 )
+from vaivox.application.reconcile_text import ReconcileText
 from vaivox.domain.reconciliation.model import ReconciliationResult
-from vaivox.domain.reconciliation.pipeline import reconcile
 from vaivox.domain.telemetry.model import MatchOutcome, ReconciliationOutcome
-from vaivox.domain.vocabulary.keyterms import PHONETIC_ALPHABET
 from vaivox.domain.vocabulary.model import VocabularyKind
-
-_FUZZY_THRESHOLD = 85
 
 DEFAULT_RECENT_LIMIT = 20
 
@@ -71,13 +69,17 @@ class DescribeStatus:
 class DryRunReconcile:
     """Run text through the full reconciliation pipeline without any I/O."""
 
-    def __init__(self, config: ConfigProvider) -> None:
-        """Wire the configuration provider (read live for word mappings/fuzzy words).
+    def __init__(self, vocabulary: VocabularyProvider) -> None:
+        """Wire the vocabulary provider (read live for word mappings/fuzzy words).
 
         Args:
-            config: The configuration provider port.
+            vocabulary: The vocabulary provider port (the repository-backed projection in
+                production), so the dry-run sees the exact vocabulary the engine uses. It is
+                wrapped in the shared :class:`~vaivox.application.reconcile_text.ReconcileText`
+                so the dry-run goes through the same single entry point as the PTT and
+                simulate flows (identical alphabet + threshold).
         """
-        self._config = config
+        self._reconcile_text = ReconcileText(vocabulary)
 
     def execute(self, text: str) -> ReconciliationResult:
         """Reconcile ``text`` and return the staged transformations.
@@ -88,14 +90,7 @@ class DryRunReconcile:
         Returns:
             The staged raw -> cleaned -> command result.
         """
-        return reconcile(
-            text,
-            self._config.get_word_mappings(),
-            self._config.get_fuzzy_words(),
-            PHONETIC_ALPHABET,
-            _FUZZY_THRESHOLD,
-            _FUZZY_THRESHOLD,
-        )
+        return self._reconcile_text.execute(text)
 
 
 @dataclass(frozen=True)

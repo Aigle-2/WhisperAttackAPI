@@ -8,9 +8,13 @@ stable ``id``, ``aliases``, ``origin``. This module converts the in-memory legac
 into :class:`~vaivox.domain.vocabulary.model.VocabularyEntry` records and seeds them through
 the repository.
 
-It is a one-shot utility (run via ``tools/migrate_vocabulary.py``); the live pipeline still
-reads vocabulary from config until it is migrated onto the repository (a separate ADR-0009
-follow-up), so this only populates the structured source the governance / API surfaces read.
+The same conversion now also runs as the **auto-seed** in the composition root
+(:func:`vaivox.composition.build_vocabulary_repository`) on first launch, since the live
+pipeline reads its vocabulary from the repository through the
+:class:`~vaivox.application.ports.VocabularyProvider` projection (ADR-0004). The standalone
+``tools/migrate_vocabulary.py`` CLI remains for an explicit one-shot seed; both paths are
+idempotent (entries are skipped by id), so the structured source the engine, governance, and
+API surfaces all read stays the single source of truth.
 """
 
 from __future__ import annotations

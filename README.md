@@ -157,6 +157,11 @@ The default values should cover most cases but can be changed:
   - `default` - this will use the current theme you have set for Windows
   - `dark` - dark mode
   - `light` - light mode
+- `telemetry_enabled` - Records each utterance's reconciliation provenance to a local
+  `telemetry.jsonl` log in `%LOCALAPPDATA%\VAIVOX` for offline debugging. Defaults to `true`.
+  - **Privacy:** the log keeps your **transcribed speech (`raw_text`) in clear text**,
+    along with the cleaned and dispatched text. It is **local-only** — VAIVOX never sends
+    it over the network. Set `telemetry_enabled=false` to opt out and stop all recording.
 
 ### API key setup
 

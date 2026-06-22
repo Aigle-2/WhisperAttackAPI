@@ -7,6 +7,8 @@ real VAICOM install (the adapter's own discovery/staleness lives in its test).
 
 from __future__ import annotations
 
+import threading
+
 from vaivox.application.ports import StatusLevel, VocabularyGenerationResult
 from vaivox.application.refresh_vocabulary import (
     RefreshVocabulary,
@@ -98,6 +100,58 @@ def test_force_bypasses_the_staleness_check():
 
     assert generator.generate_calls == 1
     assert applied == [True]
+
+
+def test_concurrent_executions_are_serialized():
+    # A generator that flips itself "fresh" the moment it generates and asserts no two
+    # generations overlap. The second concurrent caller must wait for the first, then -
+    # because force=False and the first just generated - re-evaluate is_stale() to False
+    # and no-op "up to date" (one generation total).
+    class SerializingGenerator:
+        def __init__(self) -> None:
+            self._stale = True
+            self.generate_calls = 0
+            self._inside = False
+            self.overlap_detected = False
+            self._barrier = threading.Event()
+
+        def is_stale(self) -> bool:
+            return self._stale
+
+        def generate(self) -> VocabularyGenerationResult:
+            if self._inside:
+                self.overlap_detected = True
+            self._inside = True
+            # Hold inside generate long enough that a truly-concurrent second caller would
+            # overlap if the lock were absent.
+            self._barrier.wait(timeout=1.0)
+            self.generate_calls += 1
+            self._stale = False  # the install is now fresh
+            self._inside = False
+            return VocabularyGenerationResult(generated=True, reason="generated", phrase_count=7)
+
+    generator = SerializingGenerator()
+    reporter = FakeReporter()
+    use_case = RefreshVocabulary(generator, reporter, lambda: 0)
+
+    results: list[VocabularyGenerationResult] = []
+
+    def run() -> None:
+        results.append(use_case.execute())
+
+    first = threading.Thread(target=run)
+    second = threading.Thread(target=run)
+    first.start()
+    second.start()
+    # Release the first generation so it can complete; the second is blocked on the lock.
+    generator._barrier.set()
+    first.join(timeout=2.0)
+    second.join(timeout=2.0)
+
+    assert generator.overlap_detected is False  # the lock prevented concurrent generation
+    assert generator.generate_calls == 1  # the second caller re-checked staleness and no-op'd
+    reasons = sorted(result.reason for result in results)
+    assert reasons == ["generated", "up to date"]
 
 
 def test_reload_vocabulary_applies_from_disk_and_reports_count():

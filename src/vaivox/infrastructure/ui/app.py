@@ -17,7 +17,7 @@ from typing import TYPE_CHECKING, Any
 
 from vaivox import composition
 from vaivox.infrastructure.config.identity import VAIVOX
-from vaivox.infrastructure.config.settings import ConfigurationError, VaivoxConfiguration
+from vaivox.infrastructure.config.settings import VaivoxConfiguration
 from vaivox.infrastructure.ui.theme import (
     TAG_BLUE,
     TAG_GREY,
@@ -112,6 +112,7 @@ class VaivoxApp:
         self.control_server = wired.control_server
         self.api_server = wired.api_server
         self.refresh_vocabulary = wired.refresh_vocabulary
+        self.add_word_mapping_use_case = wired.add_word_mapping
         if self.api_server is not None:
             self.api_server.start()
 
@@ -162,10 +163,12 @@ class VaivoxApp:
     def write_stt_keyterm_context(self) -> None:
         """Write the effective STT keyterm context without dumping the whole list."""
         provider = self.config.get_stt_backend()
-        source_counts = self.config.get_stt_keyterm_source_counts()
-        all_keyterms = self.config.get_stt_keyterms()
-        budget = self.config.get_provider_stt_keyterm_budget(provider)
-        budgeted = self.config.get_provider_budgeted_stt_keyterm_details(provider, log_result=False)
+        source_counts = self.config.keyterms.get_stt_keyterm_source_counts()
+        all_keyterms = self.config.keyterms.get_stt_keyterms()
+        budget = self.config.keyterms.get_provider_stt_keyterm_budget(provider)
+        budgeted = self.config.keyterms.get_provider_budgeted_stt_keyterm_details(
+            provider, log_result=False
+        )
 
         source_summary = (
             ", ".join(f"{source}={count}" for source, count in source_counts.items()) or "none"
@@ -218,14 +221,15 @@ class VaivoxApp:
         return ", ".join(limits)
 
     def add_word_mapping(self) -> None:
-        """Open the modal dialog to add word mappings."""
+        """Open the modal dialog to add word mappings (written to the repository, ADR-0004)."""
 
         def update_word_mapping(aliases: str, replacement: str) -> None:
             try:
-                self.config.add_word_mapping(self.app_data_dir, aliases, replacement)
+                self.add_word_mapping_use_case.execute(aliases, replacement)
                 self.writer.write("Added new word mapping:", TAG_BLUE)
                 self.writer.write(f"{aliases}: {replacement}", TAG_GREY)
-            except ConfigurationError as error:
+            except Exception as error:
+                # Surface any write failure to the user rather than crashing the UI thread.
                 self.writer.write(str(error), TAG_RED)
 
         VaivoxWordMappings(self.window, update_word_mapping)

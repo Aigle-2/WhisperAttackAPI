@@ -54,15 +54,46 @@ but never anything that does I/O (sockets, files, mic, network, UI).
   Phase 5; the button is a thin `RefreshVocabulary.execute(force=True)` call); and the C#
   `dotnet` build / `.vap` re-point (verified by hand, not in CI).
 - **Phase 5** 🚧 (in progress) the reconciliation features, on clean seams:
-  - **A — Governance** (ADR-0004) ✅ core: `domain/vocabulary/` `VocabularyEntry` +
-    `VocabularyGovernor` (rank by recency/hits, LRU eviction with DEFAULT protection +
-    grace window, Tier 1 token-provenance attribution), the `VocabularyRepository` port,
-    and a JSONL source + usage-sidecar adapter. A one-shot migration
-    (`infrastructure/vocabulary/migration.py` + `tools/migrate_vocabulary.py`) seeds the
-    JSONL source from the legacy `fuzzy_words.txt` / `word_mappings.txt`.
+  - **A — Governance** (ADR-0004) ✅ core **+ wired as the read source of truth**:
+    `domain/vocabulary/` `VocabularyEntry` + `VocabularyGovernor` (rank by recency/hits, LRU
+    eviction with DEFAULT protection + grace window, Tier 1 token-provenance attribution),
+    the `VocabularyRepository` port, and a JSONL source + usage-sidecar adapter. The
+    reconciliation pipeline now **reads its vocabulary from the repository**, not the flat
+    files: the new `application.ports.VocabularyProvider` port (the two flat reads
+    `word_mappings` / `fuzzy_words`) is satisfied in production by
+    `infrastructure/vocabulary/repository_provider.py` `RepositoryVocabularyProvider`, which
+    projects the structured entries back down (the inverse of the migration) and is read
+    live each utterance (a tiny sub-second TTL cache avoids re-parsing without going stale).
+    `StopAndReconcile`, `DryRunReconcile`, and `SimulateUtterance` all take the provider, so
+    the engine and the introspection `GET /vocabulary` share one store and can never diverge.
+    The UI "Add word mapping" writes through the `AddWordMapping` use case
+    (`application/add_vocabulary.py`) into the repository (merging aliases by replacement);
+    `composition.build_vocabulary_repository` **auto-seeds** the JSONL source from the legacy
+    `fuzzy_words.txt` / `word_mappings.txt` on first launch (idempotent, skipped once a source
+    exists) — the "auto-run on first launch waits on the composition" follow-up ADR-0004
+    deferred. The standalone migration (`infrastructure/vocabulary/migration.py` +
+    `tools/migrate_vocabulary.py`) remains for an explicit one-shot seed.
+    **Governance is now wired into production** via the `UsageStamper`
+    (`application/usage_stamping.py`): on the VoiceAttack dispatch path of the single shared
+    `route_command` (PTT + simulate), it runs `VocabularyGovernor.attribute_tier1` over the
+    sent text — `matched_tokens = sent_text.split()`, `edit_output_tokens = {id: tokens(term
+    + aliases)}` from the live repo — then `VocabularyRepository.mark_used(credited, now)`.
+    Kneeboard notes are never stamped; stamping is best-effort (its own errors are swallowed,
+    so a sidecar write can never break dispatch). The LRU eviction pass (`govern` +
+    `replace_entries`) is wired through the same stamper but **inert by default**: no cap
+    means nothing is evicted, and `DEFAULT` seeds are protected regardless — so eviction only
+    ever touches `LEARNED` entries. `composition.build_usage_stamper` enables it only when
+    `vocab_max_entries` (+ optional `vocab_grace_days`) is set in `settings.cfg`.
+    *Blocked on the C# return channel (ADR-0006):* there is **no real match signal** yet, so
+    stamping credits on **dispatch** (a proxy), not on a confirmed VoiceAttack match — when
+    the channel lands, `mark_used` must be conditioned on `matched == True` and the
+    attribution refined (Tier 2). Eviction stays *de facto* inert until `LEARNED` entries
+    exist (near-miss capture is also return-channel-gated).
   - **C — Telemetry** (ADR-0006) ✅ §1: `JsonlTelemetrySink` appends each
     `ReconciliationOutcome` to `%LOCALAPPDATA%\VAIVOX`, config-gated (`telemetry_enabled`,
-    default on).
+    default on). **Privacy:** the local-only (no-network) log persists the transcribed
+    speech — `raw_text` — in clear text by default; opt out with `telemetry_enabled = false`
+    in `settings.cfg` (see ADR-0006 "Privacy / data handling").
   - **Eval harness** (ADR-0008) ✅: `tests/eval/` — VAICOM match-oracle mock, a curated
     golden dataset, metrics (match / wrong-match / abstain) + a committed baseline gate;
     the decisive guard is `wrong_match == 0`.
@@ -105,13 +136,17 @@ but never anything that does I/O (sockets, files, mic, network, UI).
     match-signal-dependent work — live usage stamping (`mark_used`/recency), near-miss
     capture, Tier 2 attribution — and needs a Windows/VoiceAttack build (not CI-testable).
 
-During the migration the remaining legacy top-level modules (`whisper_attack.py`,
-`configuration.py`, `transcription_postprocess.py`, `stt_backends/`) are thin
-re-export/launcher **shims that delegate into `src/vaivox/`** (the single source of truth).
-`whisper_attack.py` now just launches `vaivox.main`. The fully-migrated god-module and UI
-modules (`whisper_server.py`, `writer.py`, `theme.py`, `word_mappings.py`) were **deleted**
-in the Phase 5 cleanup — their behavior lives in `infrastructure/ui/` + the use cases. New
-behavior goes in `src/vaivox/`.
+The only legacy top-level module left is the launcher **shim** `whisper_attack.py`, which
+just launches `vaivox.main` (kept so `python whisper_attack.py` keeps working as a
+documented from-source entry point; the PyInstaller build targets `src/vaivox/main.py`
+directly). The re-export shims `configuration.py`, `transcription_postprocess.py`, and
+`stt_backends/` had no non-test consumers and were **deleted** in the legacy-shim cleanup —
+their behavior already lives in `infrastructure/config/settings.py`,
+`domain/reconciliation/spelled_codes.py`, and `infrastructure/stt/` respectively, and the
+ported tests now import the new modules. The fully-migrated god-module and UI modules
+(`whisper_server.py`, `writer.py`, `theme.py`, `word_mappings.py`) were **deleted** in the
+Phase 5 cleanup — their behavior lives in `infrastructure/ui/` + the use cases. New behavior
+goes in `src/vaivox/`.
 
 ## Quality gates (ADR-0007)
 

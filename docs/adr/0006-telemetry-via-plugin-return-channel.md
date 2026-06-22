@@ -70,6 +70,27 @@ abstain + near-miss`, `score < low → send raw`.
   `unknown`, telemetry records it, no usage stamp, and the app continues. The user
   is never blocked.
 
+## Privacy / data handling
+
+The telemetry log is a **local debugging aid**, and the team has deliberately chosen to
+keep it on by default. The implications are stated here so the trade-off is explicit:
+
+- **What is written.** Each utterance is appended as one JSON line (`asdict` of
+  `ReconciliationOutcome`) to `telemetry.jsonl` under `%LOCALAPPDATA%\VAIVOX`. The record
+  contains the full reconciliation chain — most notably **`raw_text`, which is your
+  transcribed speech in clear text** (the transcript exactly as returned by the STT
+  provider) — together with `cleaned_text`, the fuzzy-corrected `command_text`, the
+  dispatched `sent_text`, the `destination`, and (once the return channel lands) the
+  `match` / `snap` provenance. No audio is stored; only the transcribed text.
+- **Local-only, no network.** `JsonlTelemetrySink` is stdlib-only (`json` + `pathlib`):
+  it only appends to a file on the user's machine. **VAIVOX never transmits the telemetry
+  log off the machine** — there is no upload, no remote sink, no network path.
+- **Default: on.** `telemetry_enabled` defaults to `true` (the config default and the
+  composition default agree); telemetry is recorded out of the box.
+- **Opt-out.** Set `telemetry_enabled = false` in the per-user `settings.cfg` to disable
+  all telemetry recording (the composition then wires a null sink and nothing is written).
+  The log file is plain JSONL and may be deleted at any time.
+
 ## Options Considered
 
 ### Option A: Plugin return channel (chosen)

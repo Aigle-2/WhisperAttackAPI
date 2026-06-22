@@ -2,7 +2,7 @@
 
 A living punch-list of what's left after Phases 0–5 (core). The phased narrative lives in
 [`docs/MIGRATION_PLAN.md`](docs/MIGRATION_PLAN.md); decisions are in [`docs/adr/`](docs/adr/).
-At last update the tree is green: **243 tests**, ruff / format / mypy / import-linter all
+At last update the tree is green: **256 tests**, ruff / format / mypy / import-linter all
 pass via `uv run` (see [AGENTS.md](AGENTS.md)).
 
 **Done so far (Phase 5):** A governance core (ADR-0004), C telemetry persistence
@@ -22,10 +22,14 @@ These gate the match-signal-dependent work; everything buildable without them is
   `plugin/VaivoxVAPlugin/VaivoxVAPlugin.cs` report `{ text, matched, resolved_command }`
   back on the same socket; read it in `infrastructure/voiceattack/` and populate
   `ReconciliationOutcome.match`. **This is the key unblocker** for the three items below.
-- [ ] **Live usage stamping / recency (ADR-0004).** On a matched outcome, run Tier 1
-  attribution and call `VocabularyRepository.mark_used(credited_ids, now)` from
-  `StopAndReconcile`. Seam is in place (`attribute_tier1` → `credited_ids` → `mark_used`);
-  it just needs the `matched` signal above.
+- [~] **Live usage stamping / recency (ADR-0004).** *Wired — but credits on dispatch, not on
+  a confirmed match.* The `UsageStamper` (`application/usage_stamping.py`) runs Tier 1
+  attribution (`VocabularyGovernor.attribute_tier1` over `sent_text.split()` vs `{id:
+  tokens(term+aliases)}`) and calls `VocabularyRepository.mark_used(credited, now)` on the
+  VoiceAttack path of the shared `route_command` (PTT + simulate; kneeboard never stamped;
+  best-effort so a failed write never breaks dispatch). **Remaining (needs the channel
+  above):** condition `mark_used` on `matched == True` so a *sent-but-unmatched* command
+  stops crediting vocabulary, and refine to Tier 2.
 - [ ] **Near-miss capture (ADR-0006 §3).** When the snap abstains / no match, record the
   top-N nearest phrases. The snapper already emits near-misses into telemetry; this is the
   match-signal-gated review/report side.
@@ -80,21 +84,39 @@ These gate the match-signal-dependent work; everything buildable without them is
   phrases". The snapper is wired through it (`build_phrase_snapper`) behind the new
   `PhraseMatcher` port and exposed on `WiredApp.phrase_snapper` for a reload trigger to
   call (#3 background-gen / the #4 reload action). The eval still builds a frozen
-  `PhraseSnapper`, so nothing leaks into the metrics. *Remaining:* extend the swap to the
-  vocabulary once the pipeline reads word-mappings/fuzzy from `VocabularyRepository`
-  (today it reads them from `config`), the LRU maintenance pass, and the optional JSONL
-  file-watch (ADR-0009 action item 3).
-- [ ] **Governance maintenance wiring (ADR-0004).** Wire `VocabularyGovernor.govern`
-  (eviction) into a maintenance pass + `VocabularyRepository.replace_entries`. Meaningful
-  only once usage data exists (depends on live stamping above).
+  `PhraseSnapper`, so nothing leaks into the metrics. *Remaining:* the LRU maintenance pass
+  and the optional JSONL file-watch (ADR-0009 action item 3). The pipeline now reads
+  word-mappings/fuzzy from the repository (via `VocabularyProvider`, read live each utterance
+  with a sub-second cache), so a hot vocab swap is the cache TTL, not a dedicated `IdleGatedSwap`.
+- [~] **Governance maintenance wiring (ADR-0004).** *Wired but inert by default.* The
+  `UsageStamper` runs the LRU pass (`VocabularyGovernor.govern` + `replace_entries`) per
+  kind after stamping, gated on a configured cap: `composition.build_usage_stamper` builds
+  per-kind `EvictionPolicy` only when `vocab_max_entries` (+ optional `vocab_grace_days`) is
+  set in `settings.cfg`; with no cap (the default) nothing is evicted, and `DEFAULT` seeds
+  are protected regardless — so eviction can only ever touch `LEARNED` entries. *De facto
+  inert until `LEARNED` entries exist* (near-miss capture is return-channel-gated above);
+  the scaffolding activates automatically once they do.
 - [x] **`.txt → JSONL` vocab migration (ADR-0004 action item).** `migrate_legacy_vocabulary`
   + the pure `legacy_to_entries` (`infrastructure/vocabulary/migration.py`) convert the
   merged `fuzzy_words.txt` / `word_mappings.txt` into structured `VocabularyEntry` records
   (aliases grouped by replacement, slug ids, `DEFAULT` origin) and seed them through the
   repository; one-shot CLI `tools/migrate_vocabulary.py`, idempotent by id. Tested (converter
   + a real repo round-trip) and validated end-to-end on the repo defaults (21 fuzzy + 48
-  mappings). *Follow-up:* auto-run on first launch waits on the pipeline reading vocab from
-  the repository (today the live pipeline still reads from `config`).
+  mappings). *Follow-up done:* the same migration now **auto-seeds** on first launch from
+  `composition.build_vocabulary_repository` (gated on the JSONL source being absent), and the
+  pipeline reads vocab from the repository via the `VocabularyProvider` projection — see
+  "Vocabulary source unification" below.
+- [x] **Vocabulary source unification (ADR-0004).** The reconciliation pipeline and the
+  introspection `GET /vocabulary` now read from **one** store — the JSONL repository. New
+  `application.ports.VocabularyProvider` port (the two flat reads); production adapter
+  `infrastructure/vocabulary/repository_provider.py` `RepositoryVocabularyProvider` projects
+  the structured entries back to `word_mappings` / `fuzzy_words` (inverse of the migration),
+  read live each utterance behind a sub-second TTL cache. `StopAndReconcile`,
+  `DryRunReconcile`, and `SimulateUtterance` take the provider (the vocab methods left
+  `ConfigProvider`). The UI "Add word mapping" writes through the `AddWordMapping` use case
+  (`application/add_vocabulary.py`) into the repository; `build_vocabulary_repository`
+  auto-seeds on first launch. Tested: provider projection + TTL + liveness, `AddWordMapping`
+  add/merge/no-op, and the composition seed + parity-with-flat-files.
 - [ ] **Phrase-snap follow-ups (ADR-0011)** — *thresholds-in-settings ✅; recipient
   segmentation deferred.* The `HIGH` / `LOW` / `MARGIN` thresholds are now overridable in
   `settings.cfg` (`snap_high` / `snap_low` / `snap_margin`, defaults = the eval-calibrated
