@@ -12,6 +12,7 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from threading import Event, Lock
 
+from vaivox.application.learn_from_outcome import ApplyPolicy, LearnFromOutcome
 from vaivox.application.ports import (
     AudioRecorder,
     MissionVocabularySnapshot,
@@ -225,7 +226,11 @@ def build(
     stt_keyterms = SttKeyterms(config, reconciliation_vocabulary, get_mission_keyterms)
     speech_to_text = create_stt_backend(config, stt_keyterms)
     command_sink = VoiceAttackCommandSink(
-        config.get_voiceattack_host(), config.get_voiceattack_port(), reporter
+        config.get_voiceattack_host(),
+        config.get_voiceattack_port(),
+        reporter,
+        await_result=config.get_bool_setting("voiceattack_await_result", True),
+        read_timeout=config.get_float_setting("voiceattack_read_timeout", 0.5),
     )
     vaicom_f10_sink = UdpVaicomF10ActionSink(
         config.get_vaicom_f10_host(),
@@ -240,6 +245,17 @@ def build(
     snapper = build_phrase_snapper(config, recorder, reporter)
     surface_resolver = build_command_surface_resolver(config)
     add_word_mapping = AddWordMapping(vocabulary_repository, clock)
+    # The vocabulary learning loop (ADR-0006): on a confirmed not-matched / snap-abstained
+    # VoiceAttack dispatch, derive a learned mapping proposal. Reuses the same repository +
+    # clock wired for governance/usage stamping. Propose-only by default (human-in-the-loop);
+    # ``vocab_auto_learn`` opts into writing LEARNED entries.
+    learn_from_outcome = LearnFromOutcome(
+        vocabulary_repository,
+        clock,
+        policy=ApplyPolicy.AUTO_APPLY
+        if config.get_bool_setting("vocab_auto_learn", False)
+        else ApplyPolicy.PROPOSE_ONLY,
+    )
 
     start_recording = StartRecording(recorder, reporter)
     stop_and_reconcile = StopAndReconcile(
@@ -254,6 +270,7 @@ def build(
         surface_resolver,
         snapper,
         vocabulary_repository,
+        learn_from_outcome,
     )
     shutdown = Shutdown(request_shutdown, reporter)
 
@@ -344,6 +361,7 @@ def build(
                 reporter,
                 vocabulary_repository,
                 clock,
+                learn_from_outcome,
             ),
             host=config.get_api_host(),
             port=config.get_api_port(),

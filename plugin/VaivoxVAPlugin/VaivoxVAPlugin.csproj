@@ -3,12 +3,12 @@
   <!--
     VAIVOX VoiceAttack plugin (ADR-0002 / ADR-0006).
 
-    VoiceAttack 2 hosts plugins as .NET 8 class libraries and loads them by file name, so
-    the assembly name is pinned to VaivoxVAPlugin.dll. The plugin talks to VoiceAttack only
-    through the late-bound `dynamic vaProxy` API, so VoiceAttack.dll is not a compile-time
-    dependency.
+    VoiceAttack 2 (2.1.8+) hosts plugins as .NET 8 class libraries and loads them by file
+    name, so the assembly name is pinned to VaivoxVAPlugin.dll. The plugin talks to
+    VoiceAttack only through the late-bound `dynamic vaProxy` API, so VoiceAttack.dll is
+    not a compile-time dependency.
 
-    Build (on a machine with VoiceAttack installed):
+    Build (works cross-platform on the .NET 8 SDK; no VoiceAttack install needed):
         dotnet build -c Release
     Then copy bin\Release\net8.0\VaivoxVAPlugin.dll into
     %APPDATA%\VoiceAttack2\Apps\VAIVOX\.
@@ -22,6 +22,16 @@
     <LangVersion>latest</LangVersion>
     <Nullable>disable</Nullable>
     <GenerateAssemblyInfo>true</GenerateAssemblyInfo>
+    <!-- Explicit assembly version stamp (M6). Logged at the VA_Init1 handshake alongside
+         the return-channel protocol version (MatchProtocolVersion == 1, mirroring Python's
+         MATCH_PROTOCOL_VERSION) so a plugin/app mismatch is visible in the VoiceAttack log.
+         Bump this when you ship a new DLL; the protocol version only changes if the wire
+         format changes (it is frozen at 1 for ADR-0006). -->
+    <Version>1.0.0</Version>
+    <AssemblyVersion>1.0.0.0</AssemblyVersion>
+    <FileVersion>1.0.0.0</FileVersion>
+    <!-- Reproducible builds: identical inputs produce a byte-identical DLL. -->
+    <Deterministic>true</Deterministic>
   </PropertyGroup>
 
 </Project>

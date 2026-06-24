@@ -1,10 +1,17 @@
 """Unit tests for the VoiceAttack command sink return channel (ADR-0006).
 
-Two layers: the pure reply parser (``_parse_match_outcome``) over crafted bytes, and the
-adapter end to end against a real one-shot localhost TCP server that replies, closes early
-(a pre-return-channel plugin), replies garbage, or stalls. The decisive property is
-**backward compatibility**: anything but a well-formed reply degrades to ``None`` (unknown)
-without raising, so an un-rebuilt plugin behaves exactly as before.
+The sink is **pure transport**: it opens the socket, sends the command, reads the plugin's
+reply (when ``await_result`` is on), and **surfaces the outcome to the user**. Parsing is
+delegated to :func:`~vaivox.infrastructure.voiceattack.protocol.parse_match_outcome` (the
+single source of truth, exercised against the golden vectors in
+``tests/unit/test_match_protocol.py``), so these tests focus on the adapter end to end over a
+real one-shot localhost TCP server plus the **v1 UI surfacing** the merged sink must keep:
+"VoiceAttack matched: …", "VoiceAttack has no command for: …", and the legacy
+"Sent text to VoiceAttack: …".
+
+The decisive property is **backward compatibility**: anything but a well-formed reply
+(EOF, garbage, timeout, fire-and-forget) degrades to ``None`` (unknown) without raising, so
+an un-rebuilt plugin behaves exactly as before.
 """
 
 from __future__ import annotations
@@ -14,7 +21,8 @@ import threading
 
 from vaivox.application.ports import StatusLevel
 from vaivox.domain.telemetry.model import MatchOutcome
-from vaivox.infrastructure.voiceattack.sink import VoiceAttackCommandSink, _parse_match_outcome
+from vaivox.infrastructure.voiceattack import protocol
+from vaivox.infrastructure.voiceattack.sink import VoiceAttackCommandSink
 
 
 class FakeReporter:
@@ -26,6 +34,9 @@ class FakeReporter:
 
     def levels(self):
         return [level for _message, level in self.lines]
+
+    def messages(self):
+        return [message for message, _level in self.lines]
 
 
 class _OneShotServer:
@@ -60,60 +71,13 @@ class _OneShotServer:
         self._thread.join(timeout=2)
 
 
-# -- pure parser ---------------------------------------------------------------------
-
-
-def test_parse_valid_matched_reply():
-    line = b'{"text": "Kobuleti tower", "matched": true, "resolved_command": "Kobuleti tower"}\n'
-
-    assert _parse_match_outcome(line) == MatchOutcome(
-        matched=True, resolved_command="Kobuleti tower"
-    )
-
-
-def test_parse_valid_not_matched_reply():
-    reply = b'{"text": "nope", "matched": false, "resolved_command": null}'
-
-    assert _parse_match_outcome(reply) == MatchOutcome(matched=False, resolved_command=None)
-
-
-def test_parse_reads_only_the_first_line():
-    # Only the first newline-terminated record is consumed; trailing bytes are ignored.
-    line = b'{"matched": true, "resolved_command": "go"}\ntrailing garbage'
-
-    assert _parse_match_outcome(line) == MatchOutcome(matched=True, resolved_command="go")
-
-
-def test_parse_empty_is_unknown():
-    assert _parse_match_outcome(b"") is None
-    assert _parse_match_outcome(b"   \n") is None
-
-
-def test_parse_malformed_json_is_unknown():
-    assert _parse_match_outcome(b"not json at all\n") is None
-
-
-def test_parse_non_object_is_unknown():
-    assert _parse_match_outcome(b"[1, 2, 3]\n") is None
-
-
-def test_parse_missing_or_mistyped_matched_is_unknown():
-    assert _parse_match_outcome(b'{"resolved_command": "go"}') is None
-    assert _parse_match_outcome(b'{"matched": "true"}') is None  # string, not bool
-
-
-def test_parse_non_string_resolved_command_falls_back_to_none():
-    assert _parse_match_outcome(b'{"matched": true, "resolved_command": 7}') == MatchOutcome(
-        matched=True, resolved_command=None
-    )
-
-
 # -- adapter over a real socket ------------------------------------------------------
 
 
 def test_send_returns_parsed_outcome_and_reports_success():
+    # The fake plugin emits the contract bytes via build_reply so it matches the parser.
     def handler(conn, _received):
-        conn.sendall(b'{"text":"go","matched":true,"resolved_command":"go"}\n')
+        conn.sendall(protocol.build_reply(True, "go"))
 
     server = _OneShotServer(handler)
     reporter = FakeReporter()
@@ -126,6 +90,28 @@ def test_send_returns_parsed_outcome_and_reports_success():
     assert outcome == MatchOutcome(matched=True, resolved_command="go")
     assert server.received == b"go"  # the command actually reached the plugin
     assert StatusLevel.SUCCESS in reporter.levels()  # existing status reporting preserved
+
+
+def test_send_surfaces_resolved_command_when_it_differs():
+    # v1 UI surfacing: "VoiceAttack matched: <spoken> → <resolved>" when the plugin
+    # resolved a different command than the one we sent.
+    def handler(conn, _received):
+        conn.sendall(protocol.build_reply(True, "Kobuleti tower"))
+
+    server = _OneShotServer(handler)
+    reporter = FakeReporter()
+    sink = VoiceAttackCommandSink(server.host, server.port, reporter)
+    try:
+        outcome = sink.send("kobuleti")
+    finally:
+        server.close()
+
+    assert outcome == MatchOutcome(matched=True, resolved_command="Kobuleti tower")
+    assert StatusLevel.SUCCESS in reporter.levels()
+    assert any(
+        "VoiceAttack matched: kobuleti → Kobuleti tower" in message
+        for message in reporter.messages()
+    )
 
 
 def test_send_against_plugin_that_closes_without_replying_is_unknown():
@@ -141,11 +127,12 @@ def test_send_against_plugin_that_closes_without_replying_is_unknown():
     assert outcome is None
     assert StatusLevel.SUCCESS in reporter.levels()  # still reported as sent
     assert StatusLevel.ERROR not in reporter.levels()  # EOF is not an error
+    assert any("Sent text to VoiceAttack: go" in message for message in reporter.messages())
 
 
 def test_send_reports_a_warning_when_voiceattack_has_no_matching_command():
     def handler(conn, _received):
-        conn.sendall(b'{"text":"Action Lion","matched":false,"resolved_command":null}\n')
+        conn.sendall(protocol.build_reply(False, None))
 
     server = _OneShotServer(handler)
     reporter = FakeReporter()
@@ -158,6 +145,9 @@ def test_send_reports_a_warning_when_voiceattack_has_no_matching_command():
     assert outcome == MatchOutcome(matched=False, resolved_command=None)
     # The unrecognized command is surfaced (was silent before), so a wrong phrasing is obvious.
     assert StatusLevel.WARNING in reporter.levels()
+    assert any(
+        "VoiceAttack has no command for: Action Lion" in message for message in reporter.messages()
+    )
 
 
 def test_send_with_malformed_reply_is_unknown():
@@ -181,7 +171,7 @@ def test_send_times_out_when_plugin_never_replies():
 
     server = _OneShotServer(handler)
     reporter = FakeReporter()
-    sink = VoiceAttackCommandSink(server.host, server.port, reporter, reply_timeout=0.05)
+    sink = VoiceAttackCommandSink(server.host, server.port, reporter, read_timeout=0.05)
     try:
         outcome = sink.send("go")
         assert outcome is None
@@ -189,6 +179,26 @@ def test_send_times_out_when_plugin_never_replies():
     finally:
         release.set()
         server.close()
+
+
+def test_send_fire_and_forget_does_not_read_reply_and_reports_success():
+    # await_result=False: the plugin would reply "matched", but the sink must NOT read it,
+    # must return None, and must still report success (legacy behaviour, zero added latency).
+    def handler(conn, _received):
+        conn.sendall(protocol.build_reply(True, "go"))
+
+    server = _OneShotServer(handler)
+    reporter = FakeReporter()
+    sink = VoiceAttackCommandSink(server.host, server.port, reporter, await_result=False)
+    try:
+        outcome = sink.send("go")
+    finally:
+        server.close()
+
+    assert outcome is None
+    assert server.received == b"go"  # the command was still sent
+    assert StatusLevel.SUCCESS in reporter.levels()
+    assert StatusLevel.ERROR not in reporter.levels()
 
 
 def test_send_reports_error_and_returns_none_when_unreachable():

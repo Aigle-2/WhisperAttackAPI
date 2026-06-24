@@ -10,6 +10,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 
+from vaivox.application.learn_from_outcome import LearnFromOutcome
 from vaivox.application.ports import (
     AudioRecorder,
     Clock,
@@ -99,6 +100,7 @@ class StopAndReconcile:
         surface_matcher: CommandSurfaceMatcher,
         snapper: PhraseMatcher,
         repository: VocabularyRepository,
+        learn_from_outcome: LearnFromOutcome | None = None,
     ) -> None:
         """Wire the ports the stop-and-reconcile flow depends on.
 
@@ -119,6 +121,10 @@ class StopAndReconcile:
                 behaviour when no generated index is present.
             repository: The vocabulary repository port, stamped with usage on a matched
                 command (ADR-0006 §2). A repository with no seeded entries is a clean no-op.
+            learn_from_outcome: The vocabulary learning use case (ADR-0006), or ``None`` to
+                disable learning. When wired, a confirmed not-matched / snap-abstained
+                VoiceAttack dispatch derives a learned mapping proposal (propose-only by
+                default). Best-effort and never fatal to dispatch.
         """
         self._recorder = recorder
         self._stt = speech_to_text
@@ -131,6 +137,7 @@ class StopAndReconcile:
         self._surface_matcher = surface_matcher
         self._snapper = snapper
         self._repository = repository
+        self._learn_from_outcome = learn_from_outcome
 
     def execute(self) -> None:
         """Stop the current recording and route the reconciled command, if any."""
@@ -201,6 +208,7 @@ class StopAndReconcile:
             repository=self._repository,
             clock=self._clock,
             reporter=self._reporter,
+            learn_from_outcome=self._learn_from_outcome,
         )
 
 
@@ -236,6 +244,7 @@ def route_command(
     repository: VocabularyRepository,
     clock: Clock,
     reporter: StatusReporter | None = None,
+    learn_from_outcome: LearnFromOutcome | None = None,
 ) -> RouteOutcome:
     """Route a reconciled command, record telemetry, and stamp usage (PTT + simulate).
 
@@ -263,6 +272,10 @@ def route_command(
         repository: The vocabulary repository stamped with usage on a match.
         clock: The clock supplying the usage-stamp time.
         reporter: Optional user-facing reporter for phrase-snap diagnostics.
+        learn_from_outcome: Optional vocabulary learning use case (ADR-0006). On the
+            VoiceAttack branch only, a confirmed not-matched / snap-abstained outcome is
+            turned into a learned mapping proposal (propose-only by default). Best-effort;
+            it swallows its own errors and never affects dispatch. ``None`` disables it.
 
     Returns:
         The :class:`RouteOutcome` describing where the command went, the snap result, and
@@ -333,6 +346,13 @@ def route_command(
             # Only a positive match stamps usage; the submitted profile phrase carries the
             # surviving tokens used by Tier 1 attribution.
             _stamp_matched_usage(match.resolved_command or sent_text, repository, clock)
+        if learn_from_outcome is not None:
+            # VoiceAttack branch only: ``match`` is known here (F10 leaves it ``None`` and the
+            # learner treats that as no signal), and the snap near-misses are the candidate
+            # phrases. Best-effort — the learner swallows its own errors and never affects
+            # dispatch. A confirmed not-matched / snap-abstained outcome yields a proposal
+            # (propose-only by default; auto-apply writes a LEARNED mapping, ADR-0006).
+            learn_from_outcome.execute(result, snap, match)
 
     telemetry.record(
         ReconciliationOutcome(
@@ -378,6 +398,7 @@ class SimulateUtterance:
         reporter: StatusReporter,
         repository: VocabularyRepository,
         clock: Clock,
+        learn_from_outcome: LearnFromOutcome | None = None,
     ) -> None:
         """Wire the ports the simulate action routes through (mirrors the PTT flow).
 
@@ -391,6 +412,9 @@ class SimulateUtterance:
             reporter: The status reporter (surfaces the agent-triggered dispatch).
             repository: The vocabulary repository stamped with usage on a match (ADR-0006).
             clock: The clock supplying the usage-stamp time.
+            learn_from_outcome: The vocabulary learning use case (ADR-0006), or ``None`` to
+                disable learning. Routed through the shared ``route_command`` so simulate
+                learns identically to the PTT flow (VoiceAttack branch only).
         """
         self._vocabulary = vocabulary
         self._surface_matcher = surface_matcher
@@ -401,6 +425,7 @@ class SimulateUtterance:
         self._reporter = reporter
         self._repository = repository
         self._clock = clock
+        self._learn_from_outcome = learn_from_outcome
 
     def execute(self, text: str) -> RouteOutcome:
         """Reconcile ``text`` and dispatch it for real, returning the route outcome.
@@ -429,6 +454,7 @@ class SimulateUtterance:
             repository=self._repository,
             clock=self._clock,
             reporter=self._reporter,
+            learn_from_outcome=self._learn_from_outcome,
         )
         self._reporter.report(
             f"Simulated utterance: '{text}' -> sent '{outcome.sent_text}' to {outcome.destination}",

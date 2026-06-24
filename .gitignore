@@ -68,3 +68,6 @@ temp/
 # Editor settings
 .idea/
 .vscode/
+
+# Hands-off plan harness (local orchestration artifacts)
+.handsoff/

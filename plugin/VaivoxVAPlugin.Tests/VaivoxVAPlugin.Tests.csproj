@@ -1,0 +1,36 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    xUnit tests for the VAIVOX plugin's pure return-channel logic (ADR-0006, AC4).
+
+    Asserts BuildReply produces bytes byte-identical to the shared golden vectors
+    (tests/contract/match_protocol_vectors.json) and that Decide drives an
+    ICommandProbe correctly. No VoiceAttack, no socket.
+
+    Targets net8.0 to match the plugin it references (VaivoxVAPlugin is a net8.0 class
+    library, the framework VoiceAttack 2.1.8 loads). System.Text.Json ships in the net8.0
+    BCL, so no extra package is needed to load the golden vectors.
+  -->
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.11.1" />
+    <PackageReference Include="xunit" Version="2.9.2" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="2.8.2">
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+      <PrivateAssets>all</PrivateAssets>
+    </PackageReference>
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\VaivoxVAPlugin\VaivoxVAPlugin.csproj" />
+  </ItemGroup>
+
+</Project>

@@ -1,38 +1,48 @@
-"""VoiceAttack command sink: send recognized text over a TCP socket (ADR-0006).
+r"""VoiceAttack command sink: send recognized text over a TCP socket (ADR-0006).
 
 The sink dispatches the reconciled command to our C# VoiceAttack plugin and then reads a
 **synchronous reply on the same connection** — one JSON line
-``{ "text", "matched", "resolved_command" }`` the plugin writes right after
+``{"v":1,"matched":...,"resolved_command":...}`` the plugin writes right after
 ``Command.Exists`` (before the in-game radio call finishes), so the round-trip adds
 negligible latency. The reply closes the reconciliation loop: the routing use case records
 the :class:`~vaivox.domain.telemetry.model.MatchOutcome` in telemetry and stamps vocabulary
-usage on a match (ADR-0004).
+usage on a match (ADR-0004). The reply is framed and parsed by the single source of truth,
+:func:`~vaivox.infrastructure.voiceattack.protocol.parse_match_outcome`; this module is pure
+transport (open the socket, send, read, surface the outcome) — no parsing or learning logic.
+
+**``await_result`` kill-switch:** reading the reply is gated by ``await_result``
+(``voiceattack_await_result`` in ``settings.cfg``). With it **on** (the default on this
+branch) the sink reads the reply best-effort under a short ``read_timeout`` and returns the
+parsed outcome; any shortfall — timeout, EOF, garbage, non-UTF-8 — degrades to ``None``
+("unknown"), never an exception. With it **off** the sink is fire-and-forget: it never reads
+the reply and always returns ``None`` (zero added latency), exactly the legacy behaviour.
 
 **Backward compatibility:** a pre-return-channel plugin sends no reply and just closes the
-socket. The read uses a short timeout and treats EOF / timeout / a malformed line as an
-*unknown* outcome (``None``), so behaviour is unchanged against an un-rebuilt plugin — the
-command still fires, telemetry records ``unknown``, and no usage is stamped.
+socket. With ``await_result`` on, the read uses a short timeout and treats EOF / timeout / a
+malformed line as an *unknown* outcome (``None``), so behaviour is unchanged against an
+un-rebuilt plugin — the command still fires, telemetry records ``unknown``, and no usage is
+stamped.
 """
 
 from __future__ import annotations
 
-import json
 import logging
 import socket
 
 from vaivox.application.ports import StatusLevel, StatusReporter
 from vaivox.domain.telemetry.model import MatchOutcome
+from vaivox.infrastructure.voiceattack import protocol
 
 _LOGGER = logging.getLogger(__name__)
 
-#: Seconds to wait for the plugin's reply before treating the outcome as unknown. Short by
+#: Default short read timeout (seconds) for the best-effort reply read (ADR-0006). Short by
 #: design: the plugin replies right after the match decision, so a real reply lands almost
-#: immediately and an un-rebuilt plugin (no reply) costs at most this on the Python side.
-_DEFAULT_REPLY_TIMEOUT_SECONDS = 0.5
+#: immediately and a missing/slow reply never adds perceptible latency to dispatch.
+_DEFAULT_READ_TIMEOUT_SECONDS = 0.5
 
-#: Read-buffer size and an overall cap for the reply (one small JSON line); the cap guards
+#: Read chunk size and an overall cap for the reply (one small JSON line); the cap guards
 #: against a misbehaving peer streaming unboundedly on the response socket.
-_REPLY_BUFFER_BYTES = 4096
+_RECV_CHUNK_BYTES = 4096
 _REPLY_MAX_BYTES = 64 * 1024
 
 
@@ -44,42 +54,62 @@ class VoiceAttackCommandSink:
         host: str,
         port: int,
         reporter: StatusReporter,
-        reply_timeout: float = _DEFAULT_REPLY_TIMEOUT_SECONDS,
+        *,
+        await_result: bool = True,
+        read_timeout: float = _DEFAULT_READ_TIMEOUT_SECONDS,
     ) -> None:
-        """Configure the VoiceAttack endpoint.
+        """Configure the VoiceAttack endpoint and the best-effort reply read.
 
         Args:
             host: The VoiceAttack plugin host (usually localhost).
             port: The VoiceAttack plugin port.
             reporter: The user-facing status reporter port.
-            reply_timeout: Seconds to wait for the plugin's match reply before treating the
-                outcome as unknown (defaults to a short, near-instant window).
+            await_result: The ``voiceattack_await_result`` kill-switch (ADR-0006). When
+                ``True`` (the default on this branch) the sink reads the plugin's reply
+                best-effort and returns the parsed :class:`MatchOutcome`. When ``False`` it
+                is fire-and-forget — it never reads the reply and always returns ``None``
+                (zero added latency, legacy behaviour).
+            read_timeout: The short read timeout (seconds) for the reply, applied only when
+                ``await_result`` is ``True``.
         """
         self._host = host
         self._port = port
         self._reporter = reporter
-        self._reply_timeout = reply_timeout
+        self._await_result = await_result
+        self._read_timeout = read_timeout
 
     def send(self, command: str) -> MatchOutcome | None:
-        """Send ``command`` to VoiceAttack and return its match outcome (ADR-0006).
+        r"""Send ``command`` to VoiceAttack and return its match outcome (ADR-0006).
 
-        Reports success or failure to the user exactly as before; the returned outcome is
-        the plugin's reply, or ``None`` when unknown (no reply, timeout, or malformed line).
+        Reports success or failure to the user; surfaces whether VoiceAttack actually had a
+        command for the text (the plugin return channel) so a wrong phrasing is obvious
+        rather than silent. The returned outcome is the plugin's reply, or ``None`` when
+        unknown (fire-and-forget, no reply, timeout, EOF, or a malformed line). Every
+        degraded reply path degrades to ``None`` via
+        :func:`~vaivox.infrastructure.voiceattack.protocol.parse_match_outcome`, which never
+        raises; a genuine network failure (connection refused, reset) is logged, reported,
+        and also yields ``None`` — the error is never propagated and the user is never
+        blocked.
 
         Args:
-            command: The reconciled command text to dispatch.
+            command: The reconciled command text to dispatch, sent UTF-8 encoded.
 
         Returns:
-            The parsed :class:`MatchOutcome`, or ``None`` when the outcome is unknown.
+            The parsed :class:`MatchOutcome` when ``await_result`` is enabled and the plugin
+            sent a well-formed reply; otherwise ``None`` ("unknown") — including always when
+            ``await_result`` is disabled (fire-and-forget) and on any error.
         """
         try:
             with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as client_socket:
                 client_socket.connect((self._host, self._port))
                 client_socket.sendall(command.encode())
-                # ADR-0006: read the plugin's MatchOutcome reply on this same socket before
-                # the `with` closes it. Self-contained error handling -> never raises here.
-                outcome = self._read_match_outcome(client_socket)
+                reply = b""
+                if self._await_result:
+                    # ADR-0006: best-effort read of the plugin's reply on this same socket,
+                    # before the `with` closes it. Self-contained -> never raises here.
+                    reply = self._read_reply(client_socket)
             _LOGGER.info("Sent text to VoiceAttack: %s", command)
+            outcome = protocol.parse_match_outcome(reply)
             self._report_outcome(command, outcome)
             return outcome
         except Exception as error:
@@ -92,8 +122,8 @@ class VoiceAttackCommandSink:
 
         ``matched`` comes from the plugin return channel (ADR-0006). Surfacing it makes an
         unrecognized command (e.g. a wrong F10 phrasing) obvious instead of silent — the
-        rebuilt plugin replies, while an un-rebuilt one yields ``None`` and the original
-        "Sent text" message, preserving parity.
+        rebuilt plugin replies, while an un-rebuilt one (or fire-and-forget) yields ``None``
+        and the original "Sent text" message, preserving parity.
         """
         if outcome is None:
             self._reporter.report(f"Sent text to VoiceAttack: {command}", StatusLevel.SUCCESS)
@@ -107,62 +137,49 @@ class VoiceAttackCommandSink:
         else:
             self._reporter.report(f"VoiceAttack matched: {command}", StatusLevel.SUCCESS)
 
-    def _read_match_outcome(self, client_socket: socket.socket) -> MatchOutcome | None:
-        """Read and parse the plugin's reply, degrading to ``None`` on any shortfall.
+    def _read_reply(self, client_socket: socket.socket) -> bytes:
+        r"""Read the plugin's reply line best-effort, accumulating until ``\n`` or EOF.
+
+        Frames the reply per the wire protocol: the plugin's reply is one ``\n``-terminated
+        line, but TCP may split or coalesce it, so this loops over :meth:`socket.socket.recv`
+        rather than assuming a single read holds the whole line. The accumulated buffer (with
+        or without the trailing newline) is handed to
+        :func:`~vaivox.infrastructure.voiceattack.protocol.parse_match_outcome`, which
+        tolerates a missing newline and surrounding whitespace.
+
+        Best-effort: a read timeout or a peer that closes without sending (EOF, ``recv``
+        returning ``b""``) simply ends the loop and returns whatever was accumulated so far
+        (possibly empty). The parser maps empty/partial/garbage bytes to ``None``
+        ("unknown"), so the caller never has to distinguish those cases here.
 
         Args:
-            client_socket: The connected socket the command was sent on.
+            client_socket: The connected socket the command was just sent on (read on the
+                same connection). Its read timeout is set to ``read_timeout`` here.
 
         Returns:
-            The parsed :class:`MatchOutcome`, or ``None`` for EOF (a plugin that closed
-            without replying), a timeout, a socket error, or a malformed reply.
+            The bytes read up to and including the first ``\n`` (or all bytes received before
+            EOF/timeout). Empty when the peer sent nothing before closing or timing out.
         """
-        client_socket.settimeout(self._reply_timeout)
-        chunks = bytearray()
-        try:
-            while b"\n" not in chunks and len(chunks) < _REPLY_MAX_BYTES:
-                chunk = client_socket.recv(_REPLY_BUFFER_BYTES)
-                if not chunk:  # EOF: a pre-return-channel plugin closed without replying.
-                    break
-                chunks.extend(chunk)
-        except TimeoutError:
-            _LOGGER.debug(
-                "VoiceAttack sent no match reply within %ss; outcome unknown.",
-                self._reply_timeout,
-            )
-            return None
-        except OSError as error:
-            _LOGGER.debug("Error reading VoiceAttack match reply: %s; outcome unknown.", error)
-            return None
-        return _parse_match_outcome(chunks)
-
-
-def _parse_match_outcome(data: bytes | bytearray) -> MatchOutcome | None:
-    """Parse the plugin's reply bytes into a :class:`MatchOutcome` (lenient, never raises).
-
-    The reply is one JSON object ``{ "text", "matched", "resolved_command" }`` terminated by
-    a newline; only the first line is read. Anything missing, mistyped, or unparseable yields
-    ``None`` (an unknown outcome) so a malformed plugin can never crash the routing flow.
-
-    Args:
-        data: The raw bytes read from the reply socket (may be empty).
-
-    Returns:
-        The parsed outcome, or ``None`` when the reply is absent or malformed.
-    """
-    line = bytes(data).split(b"\n", 1)[0].strip()
-    if not line:
-        return None
-    try:
-        record = json.loads(line)
-    except (json.JSONDecodeError, UnicodeDecodeError):
-        _LOGGER.warning("Malformed VoiceAttack match reply: %r", line[:200])
-        return None
-    if not isinstance(record, dict):
-        return None
-    matched = record.get("matched")
-    if not isinstance(matched, bool):
-        return None
-    resolved = record.get("resolved_command")
-    resolved_command = resolved if isinstance(resolved, str) else None
-    return MatchOutcome(matched=matched, resolved_command=resolved_command)
+        client_socket.settimeout(self._read_timeout)
+        buffer = bytearray()
+        while b"\n" not in buffer and len(buffer) < _REPLY_MAX_BYTES:
+            try:
+                chunk = client_socket.recv(_RECV_CHUNK_BYTES)
+            except TimeoutError:
+                _LOGGER.debug(
+                    "VoiceAttack sent no match reply within %ss; outcome unknown.",
+                    self._read_timeout,
+                )
+                break
+            except OSError as error:
+                _LOGGER.debug("Error reading VoiceAttack match reply: %s; outcome unknown.", error)
+                break
+            if not chunk:  # EOF: a pre-return-channel plugin closed without replying.
+                break
+            buffer.extend(chunk)
+        # Frame to the first line: a single ``recv`` can deliver the reply line AND trailing
+        # bytes together, so hand the parser only the first ``\n``-terminated line — trailing
+        # data never degrades a valid reply to ``None`` (matches v1's first-line semantics).
+        framed = bytes(buffer)
+        newline_index = framed.find(b"\n")
+        return framed if newline_index == -1 else framed[: newline_index + 1]

@@ -62,8 +62,8 @@ class LearnFromOutcome:
 
     Called on the shared routing path (VoiceAttack branch only) after the command is sent
     and its :class:`MatchOutcome` is known. It is best-effort and never fatal to dispatch:
-    any failure is logged and swallowed (mirroring :class:`~vaivox.application.usage_stamping.\
-UsageStamper`), so a learning hiccup can never break a command.
+    any failure is logged and swallowed (best-effort, exactly like the inline usage
+    stamping), so a learning hiccup can never break a command.
     """
 
     def __init__(
