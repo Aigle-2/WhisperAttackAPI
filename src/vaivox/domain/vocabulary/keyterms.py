@@ -86,11 +86,13 @@ class KeytermBudget:
     Attributes:
         max_terms: Maximum number of keyterms, or ``None`` for unlimited.
         max_term_chars: Maximum length of a single keyterm, or ``None``.
+        max_term_spaces: Maximum number of spaces in a single keyterm, or ``None``.
         max_total_chars: Maximum combined length of all keyterms, or ``None``.
     """
 
     max_terms: int | None = None
     max_term_chars: int | None = None
+    max_term_spaces: int | None = None
     max_total_chars: int | None = None
 
 
@@ -101,12 +103,14 @@ class BudgetedKeyterms:
     Attributes:
         keyterms: The selected keyterms in caller priority order.
         skipped_too_long: Count of keyterms dropped for exceeding ``max_term_chars``.
+        skipped_too_many_spaces: Count dropped for exceeding ``max_term_spaces``.
         omitted_by_term_limit: Count dropped after reaching ``max_terms``.
         omitted_by_char_limit: Count dropped after reaching ``max_total_chars``.
     """
 
     keyterms: list[str]
     skipped_too_long: int = 0
+    skipped_too_many_spaces: int = 0
     omitted_by_term_limit: int = 0
     omitted_by_char_limit: int = 0
 
@@ -123,6 +127,7 @@ def apply_keyterm_budget(keyterms: Iterable[str], budget: KeytermBudget) -> Budg
     """
     selected: list[str] = []
     skipped_too_long = 0
+    skipped_too_many_spaces = 0
     omitted_by_term_limit = 0
     omitted_by_char_limit = 0
     total_chars = 0
@@ -134,6 +139,13 @@ def apply_keyterm_budget(keyterms: Iterable[str], budget: KeytermBudget) -> Budg
 
         if budget.max_term_chars is not None and len(normalized_keyterm) > budget.max_term_chars:
             skipped_too_long += 1
+            continue
+
+        if (
+            budget.max_term_spaces is not None
+            and normalized_keyterm.count(" ") > budget.max_term_spaces
+        ):
+            skipped_too_many_spaces += 1
             continue
 
         if budget.max_terms is not None and len(selected) >= budget.max_terms:
@@ -153,6 +165,7 @@ def apply_keyterm_budget(keyterms: Iterable[str], budget: KeytermBudget) -> Budg
     return BudgetedKeyterms(
         keyterms=selected,
         skipped_too_long=skipped_too_long,
+        skipped_too_many_spaces=skipped_too_many_spaces,
         omitted_by_term_limit=omitted_by_term_limit,
         omitted_by_char_limit=omitted_by_char_limit,
     )

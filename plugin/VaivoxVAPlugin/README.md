@@ -1,9 +1,10 @@
 # VAIVOX VoiceAttack plugin
 
 The C# VoiceAttack plugin that bridges VoiceAttack ⇄ the VAIVOX Python server. It
-sends `start` / `stop` / `shutdown` to the server's control socket and runs a small
-listener that executes the command text VAIVOX sends back, replying with the match
-outcome so the server can close the reconciliation loop (ADR-0006).
+sends `start` / `stop` to the server's control socket and runs a small listener that
+executes the command text VAIVOX sends back, replying with the match outcome so the
+server can close the reconciliation loop (ADR-0006). Closing VoiceAttack stops only the
+plugin listener; VAIVOX keeps running so VoiceAttack can reconnect after a restart.
 
 ## Identity (ADR-0002)
 
@@ -53,8 +54,9 @@ dotnet build plugin\VaivoxVAPlugin\VaivoxVAPlugin.csproj -c Release
 
 Release users can run `Install VAIVOX VoiceAttack Plugin.exe` from the extracted VAIVOX
 release folder. It copies the bundled DLL into `%APPDATA%\VoiceAttack2\Apps\VAIVOX\`,
-the VoiceAttack 2.1.8+ preferred third-party plugin folder, and also updates the detected
-VoiceAttack install's `<VoiceAttack>\Apps\VAIVOX\` folder when available.
+the VoiceAttack 2.1.8+ preferred third-party plugin folder. It also removes older
+`<VoiceAttack>\Apps\VAIVOX\` copies when detected, so VoiceAttack does not load multiple
+VAIVOX plugin instances.
 
 For manual development installs, copy
 `plugin\VaivoxVAPlugin\bin\Release\net8.0\VaivoxVAPlugin.dll` into

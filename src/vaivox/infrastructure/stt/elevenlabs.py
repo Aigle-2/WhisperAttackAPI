@@ -49,6 +49,7 @@ class ElevenLabsBackend:
         self.temperature = config.get_provider_setting("elevenlabs", "temperature", "")
         self.max_keyterms = config.get_provider_int("elevenlabs", "max_keyterms", 900)
         self.max_keyterm_chars = config.get_provider_int("elevenlabs", "max_keyterm_chars", 50)
+        self.max_keyterm_spaces = config.get_provider_int("elevenlabs", "max_keyterm_spaces", 4)
         self._keyterms = keyterms
         self.api_key = ""
 
@@ -149,6 +150,7 @@ class ElevenLabsBackend:
             self.provider_name,
             max_terms=self.max_keyterms,
             max_term_chars=self.max_keyterm_chars,
+            max_term_spaces=self.max_keyterm_spaces,
         )
 
     def _bool_value(self, value: bool) -> str:

@@ -56,14 +56,21 @@ Manual release checks that require the real user stack:
 
 - Import `VoiceAttack\VAIVOX - VA Profile.vap`.
 - Run `Install VAIVOX VoiceAttack Plugin.exe` and confirm it installs
-  `%APPDATA%\VoiceAttack2\Apps\VAIVOX\VaivoxVAPlugin.dll` and, when detected,
-  `Apps\VAIVOX\VaivoxVAPlugin.dll` under the real VoiceAttack folder.
+  `%APPDATA%\VoiceAttack2\Apps\VAIVOX\VaivoxVAPlugin.dll` and removes any stale
+  duplicate `Apps\VAIVOX\VaivoxVAPlugin.dll` under the real VoiceAttack install folder.
 - Confirm `Start VAIVOX Recording` and `Stop VAIVOX Recording` point to the VAIVOX
   plugin.
 - Run a known VAICOM command in DCS and confirm in-game action, `matched=true`,
   telemetry, and usage stamping.
 - Run an unknown command and confirm `matched=false`, near-miss telemetry, and no usage
   stamp.
-- Verify VAICOM vocabulary generation against a real VAICOM install.
+- Verify VAICOM vocabulary generation against a real VAICOM install:
+  - VAICOM Config points at the active Saved Games profile (`DCS.openbeta` for OpenBeta).
+  - VAICOM Editor -> FINISH has exported `Export\keywords.txt` or `Export\keywords.html`.
+  - The FINISH clipboard payload has been pasted into VoiceAttack's `AI Communications`
+    command (`Keyword Collections` -> `When I Say`; identifiable by the leading keywords
+    `*AAA*; *Abort Inbound*; *Abort Refuel*; ...`) and the profile has been saved.
+  - VAIVOX refresh imports module-specific phrases such as `Ground Air Connect Left`.
+  - Speaking one imported phrase does not produce `Command '<phrase>' not found`.
 
 VAICOM-derived data is generated locally and must not be redistributed in the release ZIP.

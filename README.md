@@ -30,7 +30,8 @@ In short, SeaTechNerd83 and I combined the two scripts to run voice commands thr
   - Supports Deepgram Nova-3 via API.
 
 - **VoiceAttack Command Plugin**
-  - Sends "start", "stop", or "shutdown" commands to the server directly through VoiceAttack.
+  - Sends "start" / "stop" recording commands through VoiceAttack and reconnects cleanly
+    after VoiceAttack restarts.
 
 - **Advantages:**
   - API-backed STT avoids using GPU resources needed by DCS.
@@ -205,21 +206,65 @@ generic, non-VAICOM seed (the phonetic alphabet plus widely-documented DCS calls
 ATC vocabulary), so recognition is biased toward DCS terms immediately.
 
 To bias recognition toward *your* actual VAICOM install, generate the vocabulary locally.
-The generator **auto-discovers** the VAICOM install (it checks `VAICOMPRO_DIR` and the
-common VoiceAttack `Apps` locations under Program Files / Steam) and writes two files into
-`%LOCALAPPDATA%\VAIVOX`:
+The generator **auto-discovers** the VAICOM install (it checks `VAICOMPRO_DIR`, per-user
+VoiceAttack `Apps` folders, Program Files installs, and Steam libraries from
+`libraryfolders.vdf`) and writes two files into `%LOCALAPPDATA%\VAIVOX`:
 
 - `vaicom_keyterms.txt` — STT keyterms (the `vaicom` keyterm source loads it; override the
   path with `VAIVOX_VAICOM_KEYTERMS`).
 - `phrase_index.txt` — the valid command phrases the Axis B phrase snapper matches against
   (override with `VAIVOX_PHRASE_INDEX`).
 
+Before refreshing VAIVOX, make sure VAICOM has exported its full keyword database. In the
+VAICOM UI, set the correct DCS variant in **Config** so the log points at the active Saved
+Games profile. For example, an OpenBeta install should show:
+
+```text
+SavedGamesFolder: C:\Users\<you>\Saved Games\DCS.openbeta
+dcsprogramfolder: E:\DCS World OpenBeta
+```
+
+If VAICOM is set to its `STEAM` profile while the real DCS profile is `DCS.openbeta`,
+VAICOM may write into `Saved Games\DCS` and VAIVOX will miss the enriched data. In that
+case, use VAICOM **Config** -> `Use custom path`, select the DCS install root, and set the
+variant to OpenBeta. Then open VAICOM **Editor** and click **FINISH**. This exports
+VAICOM's enriched keyword files and copies the full keyword list to the clipboard; the
+Config export/reset writes DCS-side Lua files, but it does not necessarily create
+`Export\keywords.txt` / `Export\keywords.html`.
+
+After pressing **FINISH**, also update the active VoiceAttack profile as VAICOM requests:
+open VoiceAttack's profile editor, double-click **AI Communications** in the **Keyword
+Collections** category, clear the existing **When I Say** field, paste the clipboard
+contents, then apply/save the profile. If the command label is hard to spot, look for the
+large keyword-collection command whose **When I Say** field starts like:
+
+```text
+*AAA*; *Abort Inbound*; *Abort Refuel*; ...
+```
+
+If this VoiceAttack profile step is skipped, VAIVOX may recognize a phrase from
+`keywords.html` but VoiceAttack will still answer `Command '<phrase>' not found`.
+
+Useful checks:
+
+```powershell
+Test-Path "$env:USERPROFILE\Saved Games\DCS.openbeta\Scripts\Export.lua"
+Test-Path "<VoiceAttack Apps>\VAICOMPRO\Export\keywords.txt"
+Test-Path "<VoiceAttack Apps>\VAICOMPRO\Export\keywords.html"
+```
+
+After that, press **Refresh VAICOM vocabulary** in VAIVOX, or restart VAIVOX and let the
+background refresh run. VAIVOX reads `keywords.txt`, `keywords.html`, VAICOM profiles, and
+WSO/RIO caches when present; this is what brings in module-specific phrases such as
+`Ground Air Connect Left`.
+
 ```console
 python tools\generate_vaicom_keyterms.py
 ```
 
-Pass `--vaicom-root` / `--saved-games` if auto-discovery misses a non-standard install,
-and `--data-dir` to write elsewhere.
+Pass `--vaicom-root` / `--saved-games` if auto-discovery misses a non-standard install or
+Saved Games profile, and `--data-dir` to write elsewhere. The packaged app also honors the
+`VAICOMPRO_DIR` and `DCS_SAVED_GAMES` environment variables.
 
 The generated list is post-processed into unique words: composed phrases, numeric tokens,
 low-value UI words, and code-only terms such as ICAO identifiers are removed. Technical
@@ -400,8 +445,10 @@ Go to **Options → General → Enable Plugin Support**.
 ### 3. Place Plugin in VoiceAttack Apps folder
 
 From the release ZIP, double-click `Install VAIVOX VoiceAttack Plugin.exe`. It copies the
-bundled plugin into `%APPDATA%\VoiceAttack2\Apps\VAIVOX` and also updates a detected
-VoiceAttack / VoiceAttack 2 install, including Program Files and Steam library locations.
+bundled plugin into `%APPDATA%\VoiceAttack2\Apps\VAIVOX`, the VoiceAttack 2 per-user
+plugin folder. If the installer detects older `Apps\VAIVOX` copies under a VoiceAttack
+install folder, it removes those stale duplicates so VoiceAttack does not load VAIVOX
+twice.
 
 If automatic detection fails, copy the contents of `VoiceAttack\Apps\VAIVOX` into
 `%APPDATA%\VoiceAttack2\Apps\VAIVOX` manually. Maintainers can rebuild the plugin with

@@ -15,6 +15,7 @@ import json
 import os
 import re
 import unicodedata
+from html.parser import HTMLParser
 from pathlib import Path
 
 DEFAULT_DCS_SAVED_GAMES = Path.home() / "Saved Games" / "DCS"
@@ -689,6 +690,49 @@ def parse_keywords_txt(vaicom_root: Path, terms: list[str]) -> None:
         add_term(terms, part)
 
 
+class _KeywordsHtmlParser(HTMLParser):
+    """Tolerant reader for VAICOM's generated ``Export/keywords.html`` alias table."""
+
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.aliases: list[str] = []
+        self._in_alias_cell = False
+        self._alias_parts: list[str] | None = None
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        classes = set((dict(attrs).get("class") or "").split())
+        if tag == "td" and "aliases" in classes:
+            self._in_alias_cell = True
+        elif self._in_alias_cell and tag == "span" and "alias-item" in classes:
+            self._alias_parts = []
+
+    def handle_data(self, data: str) -> None:
+        if self._alias_parts is not None:
+            self._alias_parts.append(data)
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag == "span" and self._alias_parts is not None:
+            alias = " ".join("".join(self._alias_parts).split())
+            if alias:
+                self.aliases.append(alias)
+            self._alias_parts = None
+        elif tag == "td":
+            self._in_alias_cell = False
+            self._alias_parts = None
+
+
+def parse_keywords_html(vaicom_root: Path, terms: list[str]) -> None:
+    path = vaicom_root / "Export" / "keywords.html"
+    if not path.is_file():
+        return
+
+    text = path.read_text(encoding="utf-8", errors="ignore")
+    parser = _KeywordsHtmlParser()
+    parser.feed(text)
+    for alias in parser.aliases:
+        add_term(terms, alias)
+
+
 def parse_voiceattack_profiles(vaicom_root: Path, terms: list[str]) -> None:
     profile_paths = [
         *sorted((vaicom_root / "Profiles").glob("*.vap")),
@@ -853,6 +897,7 @@ def generate_keyterms(
 ) -> list[str]:
     terms: list[str] = []
     parse_keywords_txt(vaicom_root, terms)
+    parse_keywords_html(vaicom_root, terms)
     parse_voiceattack_profiles(vaicom_root, terms)
     parse_icao_overrides(saved_games, terms)
     parse_wso_caches(vaicom_root, terms)
@@ -888,7 +933,7 @@ def _discovery_candidates() -> list[Path]:
     """Return candidate VAICOM install roots in priority order (ADR-0005).
 
     The ``VAICOMPRO_DIR`` env override comes first, then ``VAICOM*`` folders found under
-    the common VoiceAttack ``Apps`` locations (standalone + Steam).
+    the common VoiceAttack ``Apps`` locations (per-user, standalone, and Steam libraries).
     """
     candidates: list[Path] = []
     env_override = os.getenv("VAICOMPRO_DIR")
@@ -896,21 +941,102 @@ def _discovery_candidates() -> list[Path]:
         candidates.append(Path(env_override))
 
     bases = [
-        os.getenv("PROGRAMFILES"),
-        os.getenv("PROGRAMFILES(X86)"),
-        os.getenv("PROGRAMW6432"),
-        r"C:\Program Files (x86)\Steam\steamapps\common",
-        r"C:\Program Files\Steam\steamapps\common",
+        *_appdata_roots(),
+        *_program_files_roots(),
+        *_steam_common_roots(),
     ]
-    app_suffixes = [Path("VoiceAttack 2") / "Apps", Path("VoiceAttack") / "Apps", Path("Apps")]
+    app_suffixes = [
+        Path("VoiceAttack2") / "Apps",
+        Path("VoiceAttack 2") / "Apps",
+        Path("VoiceAttack") / "Apps",
+        Path("Apps"),
+    ]
     for base in bases:
-        if not base:
-            continue
         for suffix in app_suffixes:
             apps_dir = Path(base) / suffix
             if apps_dir.is_dir():
                 candidates.extend(sorted(apps_dir.glob("VAICOM*")))
-    return candidates
+    return _unique_paths(candidates)
+
+
+def _appdata_roots() -> list[Path]:
+    roots: list[Path] = []
+    for env_name in ("APPDATA", "LOCALAPPDATA"):
+        env_value = os.getenv(env_name)
+        if env_value:
+            roots.append(Path(env_value))
+    return _unique_paths(roots)
+
+
+def _program_files_roots() -> list[Path]:
+    roots: list[Path] = []
+    for env_name in ("PROGRAMFILES", "PROGRAMFILES(X86)", "PROGRAMW6432"):
+        env_value = os.getenv(env_name)
+        if env_value:
+            roots.append(Path(env_value))
+    return _unique_paths(roots)
+
+
+def _steam_common_roots() -> list[Path]:
+    common_roots = [
+        Path(r"C:\Program Files (x86)\Steam") / "steamapps" / "common",
+        Path(r"C:\Program Files\Steam") / "steamapps" / "common",
+    ]
+    for steam_root in _steam_roots():
+        for library_root in _steam_library_roots(steam_root):
+            common_roots.append(library_root / "steamapps" / "common")
+    return _unique_paths(common_roots)
+
+
+def _steam_roots() -> list[Path]:
+    roots: list[Path] = []
+    try:
+        import winreg
+    except ImportError:
+        return roots
+
+    registry_locations = (
+        (winreg.HKEY_CURRENT_USER, r"SOFTWARE\Valve\Steam"),
+        (winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Valve\Steam"),
+        (winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\WOW6432Node\Valve\Steam"),
+    )
+    for hive, key_path in registry_locations:
+        try:
+            with winreg.OpenKey(hive, key_path) as key:
+                for value_name in ("SteamPath", "InstallPath"):
+                    try:
+                        value, _kind = winreg.QueryValueEx(key, value_name)
+                    except OSError:
+                        continue
+                    if isinstance(value, str) and value:
+                        roots.append(Path(value))
+        except OSError:
+            continue
+    return _unique_existing_paths(roots)
+
+
+def _steam_library_roots(steam_root: Path) -> list[Path]:
+    libraries = [steam_root]
+    vdf_path = steam_root / "steamapps" / "libraryfolders.vdf"
+    try:
+        text = vdf_path.read_text(encoding="utf-8", errors="ignore")
+    except OSError:
+        return _unique_existing_paths(libraries)
+
+    for match in re.finditer(r'"path"\s+"([^"]+)"', text):
+        libraries.append(Path(match.group(1).replace(r"\\", "\\")))
+    return _unique_existing_paths(libraries)
+
+
+def _unique_paths(paths: list[Path]) -> list[Path]:
+    unique: dict[str, Path] = {}
+    for path in paths:
+        unique.setdefault(str(path).lower(), path)
+    return list(unique.values())
+
+
+def _unique_existing_paths(paths: list[Path]) -> list[Path]:
+    return _unique_paths([path for path in paths if path.is_dir()])
 
 
 def _looks_like_vaicom_root(path: Path) -> bool:
@@ -982,6 +1108,14 @@ def collect_phrases(vaicom_root: Path, saved_games: Path) -> list[str]:
         for chunk in re.findall(r"\[([^\[\]]*)\]", text):
             for part in chunk.split(";"):
                 phrases.append(clean_term(part))
+
+    keywords_html_path = vaicom_root / "Export" / "keywords.html"
+    if keywords_html_path.is_file():
+        text = keywords_html_path.read_text(encoding="utf-8", errors="ignore")
+        parser = _KeywordsHtmlParser()
+        parser.feed(text)
+        for alias in parser.aliases:
+            phrases.append(clean_term(alias))
 
     return phrases
 

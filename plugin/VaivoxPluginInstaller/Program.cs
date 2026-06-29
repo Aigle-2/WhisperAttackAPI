@@ -51,17 +51,23 @@ namespace VaivoxPluginInstaller
                 {
                     GetAppDataPluginDir()
                 };
+                List<string> staleInstallDirs = candidates
+                    .Select(candidate => Path.Combine(candidate.Path, "Apps", AppFolderName))
+                    .ToList();
 
                 if (voiceAttackDir != null)
                 {
-                    targetDirs.Add(Path.Combine(voiceAttackDir, "Apps", AppFolderName));
+                    staleInstallDirs.Add(Path.Combine(voiceAttackDir, "Apps", AppFolderName));
+                    Console.WriteLine("Detected VoiceAttack install will be checked for stale duplicate plugin copies:");
+                    Console.WriteLine("  " + voiceAttackDir);
+                    Console.WriteLine();
                 }
                 else
                 {
                     Console.ForegroundColor = ConsoleColor.Yellow;
                     Console.WriteLine("No VoiceAttack installation was selected.");
                     Console.ResetColor();
-                    Console.WriteLine("Installing to the per-user VoiceAttack 2 Apps folder only.");
+                    Console.WriteLine("Installing to the per-user VoiceAttack 2 Apps folder.");
                     Console.WriteLine();
                 }
 
@@ -73,6 +79,11 @@ namespace VaivoxPluginInstaller
                         string.Join(Environment.NewLine, copyResult.Failures));
                 }
 
+                CleanupResult cleanupResult = RemoveStaleInstallTargets(
+                    sourcePlugin,
+                    copyResult.InstalledTargets,
+                    staleInstallDirs);
+
                 Console.ForegroundColor = ConsoleColor.Green;
                 Console.WriteLine("Installed VAIVOX VoiceAttack plugin successfully.");
                 Console.ResetColor();
@@ -82,6 +93,16 @@ namespace VaivoxPluginInstaller
                     Console.WriteLine("  " + target);
                 }
 
+                if (cleanupResult.RemovedTargets.Count > 0)
+                {
+                    Console.WriteLine();
+                    Console.WriteLine("Removed stale duplicate plugin files:");
+                    foreach (string removed in cleanupResult.RemovedTargets)
+                    {
+                        Console.WriteLine("  " + removed);
+                    }
+                }
+
                 if (copyResult.Failures.Count > 0)
                 {
                     Console.WriteLine();
@@ -89,6 +110,18 @@ namespace VaivoxPluginInstaller
                     Console.WriteLine("Some optional targets could not be updated:");
                     Console.ResetColor();
                     foreach (string failure in copyResult.Failures)
+                    {
+                        Console.WriteLine("  " + failure);
+                    }
+                }
+
+                if (cleanupResult.Failures.Count > 0)
+                {
+                    Console.WriteLine();
+                    Console.ForegroundColor = ConsoleColor.Yellow;
+                    Console.WriteLine("Some stale duplicate plugin files could not be removed:");
+                    Console.ResetColor();
+                    foreach (string failure in cleanupResult.Failures)
                     {
                         Console.WriteLine("  " + failure);
                     }
@@ -469,6 +502,91 @@ namespace VaivoxPluginInstaller
             return result;
         }
 
+        private static CleanupResult RemoveStaleInstallTargets(
+            string sourcePlugin,
+            IEnumerable<string> installedTargets,
+            IEnumerable<string> staleInstallDirs)
+        {
+            CleanupResult result = new CleanupResult();
+            string sourceDir = Path.GetDirectoryName(Path.GetFullPath(sourcePlugin));
+            HashSet<string> protectedDirs = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            if (sourceDir != null)
+            {
+                protectedDirs.Add(NormalizeKey(sourceDir));
+            }
+
+            foreach (string installedTarget in installedTargets)
+            {
+                string installedDir = Path.GetDirectoryName(Path.GetFullPath(installedTarget));
+                if (installedDir != null)
+                {
+                    protectedDirs.Add(NormalizeKey(installedDir));
+                }
+            }
+
+            foreach (string staleDir in UniqueDirectories(staleInstallDirs))
+            {
+                if (protectedDirs.Contains(NormalizeKey(staleDir)))
+                {
+                    continue;
+                }
+
+                RemoveStaleFile(staleDir, PluginDllName, result);
+                RemoveStaleFile(staleDir, PluginDepsName, result);
+                TryRemoveEmptyDirectory(staleDir, result);
+            }
+
+            return result;
+        }
+
+        private static void RemoveStaleFile(string directory, string fileName, CleanupResult result)
+        {
+            string path = Path.Combine(directory, fileName);
+            if (!File.Exists(path))
+            {
+                return;
+            }
+
+            try
+            {
+                File.Delete(path);
+                result.RemovedTargets.Add(path);
+            }
+            catch (UnauthorizedAccessException ex)
+            {
+                result.Failures.Add(path + " - access denied: " + ex.Message);
+            }
+            catch (IOException ex)
+            {
+                result.Failures.Add(path + " - delete failed: " + ex.Message);
+            }
+        }
+
+        private static void TryRemoveEmptyDirectory(string directory, CleanupResult result)
+        {
+            if (!Directory.Exists(directory))
+            {
+                return;
+            }
+
+            try
+            {
+                if (!Directory.EnumerateFileSystemEntries(directory).Any())
+                {
+                    Directory.Delete(directory);
+                    result.RemovedTargets.Add(directory);
+                }
+            }
+            catch (UnauthorizedAccessException ex)
+            {
+                result.Failures.Add(directory + " - access denied: " + ex.Message);
+            }
+            catch (IOException ex)
+            {
+                result.Failures.Add(directory + " - delete failed: " + ex.Message);
+            }
+        }
+
         private static void CopyOptionalSidecar(
             string sourcePlugin, string targetDir, string sidecarName, List<string> failures)
         {
@@ -678,6 +796,19 @@ namespace VaivoxPluginInstaller
             }
 
             public List<string> InstalledTargets { get; }
+
+            public List<string> Failures { get; }
+        }
+
+        private sealed class CleanupResult
+        {
+            public CleanupResult()
+            {
+                RemovedTargets = new List<string>();
+                Failures = new List<string>();
+            }
+
+            public List<string> RemovedTargets { get; }
 
             public List<string> Failures { get; }
         }

@@ -164,21 +164,7 @@ namespace VaivoxServerCommand
             }
             catch (ObjectDisposedException)
             {
-                // Listener is already closed; shutdown is intentionally best-effort.
-            }
-
-            try
-            {
-                using (TcpClient client = new TcpClient(Server, ControlPort))
-                using (NetworkStream stream = client.GetStream())
-                {
-                    byte[] data = Encoding.ASCII.GetBytes("shutdown");
-                    stream.Write(data, 0, data.Length);
-                }
-            }
-            catch (Exception ex)
-            {
-                vaProxy.WriteToLog($"VAIVOX server was not available during shutdown: {ex.Message}", "grey");
+                // Listener is already closed; VoiceAttack exit should not tear down VAIVOX.
             }
         }
 

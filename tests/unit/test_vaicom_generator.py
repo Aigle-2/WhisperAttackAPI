@@ -17,8 +17,7 @@ from vaivox.infrastructure.vocabulary.vaicom_generator_core import (
 )
 
 
-def _make_vaicom_root(tmp_path):
-    root = tmp_path / "VAICOMPRO"
+def _make_vaicom_root_at(root):
     (root / "Export").mkdir(parents=True)
     (root / "Profiles").mkdir()
     (root / "Export" / "keywords.txt").write_text(
@@ -31,6 +30,10 @@ def _make_vaicom_root(tmp_path):
     )
     (root / "Profiles" / "test.vap").write_text(vap, encoding="utf-8")
     return root
+
+
+def _make_vaicom_root(tmp_path):
+    return _make_vaicom_root_at(tmp_path / "VAICOMPRO")
 
 
 def test_generate_keyterms_emits_single_words(tmp_path):
@@ -98,6 +101,30 @@ def test_generate_phrase_index_does_not_fragment_bracketed_alternation(tmp_path)
     assert not any(phrase.startswith("]") or phrase.endswith("[") for phrase in index)
 
 
+def test_generate_phrase_index_reads_keywords_html_when_txt_is_missing(tmp_path):
+    root = tmp_path / "VAICOMPRO"
+    (root / "Export").mkdir(parents=True)
+    (root / "Profiles").mkdir()
+    (root / "Export" / "keywords.html").write_text(
+        """
+        <table>
+          <tr>
+            <td class="action">WSO Ground Connect Air Left</td>
+            <td class="group"><div>F-4E AI WSO | Ground Crew</div></td>
+            <td class="aliases">
+              <span class="alias-item">Ground Air Connect Left</span>
+            </td>
+          </tr>
+        </table>
+        """,
+        encoding="utf-8",
+    )
+
+    index = generate_phrase_index(root, tmp_path / "saved")
+
+    assert "Ground Air Connect Left" in index
+
+
 def test_clean_term_unwraps_a_single_bracket_group_but_not_a_multi_slot_phrase():
     assert generator.clean_term("[Channel]") == "Channel"
     assert generator.clean_term("[Radio] [Channel] [1..18]") == "[Radio] [Channel] [1..18]"
@@ -118,6 +145,39 @@ def test_phrase_index_round_trips_through_the_app_loader(tmp_path):
 def test_discover_vaicom_root_via_env_override(tmp_path, monkeypatch):
     root = _make_vaicom_root(tmp_path)
     monkeypatch.setenv("VAICOMPRO_DIR", str(root))
+
+    assert discover_vaicom_root() == root
+
+
+def test_discover_vaicom_root_from_user_voiceattack2_apps(tmp_path, monkeypatch):
+    appdata = tmp_path / "Roaming"
+    root = _make_vaicom_root_at(appdata / "VoiceAttack2" / "Apps" / "VAICOMPRO")
+    monkeypatch.delenv("VAICOMPRO_DIR", raising=False)
+    monkeypatch.setenv("APPDATA", str(appdata))
+    monkeypatch.delenv("LOCALAPPDATA", raising=False)
+    monkeypatch.setattr(generator, "_program_files_roots", list)
+    monkeypatch.setattr(generator, "_steam_common_roots", list)
+
+    assert discover_vaicom_root() == root
+
+
+def test_discover_vaicom_root_from_custom_steam_library(tmp_path, monkeypatch):
+    steam_root = tmp_path / "Steam"
+    library_root = tmp_path / "DCS STEAM"
+    steamapps = steam_root / "steamapps"
+    steamapps.mkdir(parents=True)
+    escaped_library = str(library_root).replace("\\", "\\\\")
+    (steamapps / "libraryfolders.vdf").write_text(
+        f'"libraryfolders"\n{{\n  "1"\n  {{\n    "path" "{escaped_library}"\n  }}\n}}\n',
+        encoding="utf-8",
+    )
+    root = _make_vaicom_root_at(
+        library_root / "steamapps" / "common" / "VoiceAttack 2" / "Apps" / "VAICOMPRO"
+    )
+    monkeypatch.delenv("VAICOMPRO_DIR", raising=False)
+    monkeypatch.setattr(generator, "_appdata_roots", list)
+    monkeypatch.setattr(generator, "_program_files_roots", list)
+    monkeypatch.setattr(generator, "_steam_roots", lambda: [steam_root])
 
     assert discover_vaicom_root() == root
 

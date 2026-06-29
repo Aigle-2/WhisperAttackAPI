@@ -38,6 +38,21 @@ def test_budget_reports_per_reason_omissions() -> None:
     assert result.omitted_by_term_limit == 1
 
 
+def test_space_budget_skips_overlong_phrase_before_term_limit() -> None:
+    result = apply_keyterm_budget(
+        [
+            "Alpha Bravo Charlie Delta Echo",
+            "Alpha Bravo Charlie Delta Echo Foxtrot",
+            "Texaco",
+        ],
+        KeytermBudget(max_terms=2, max_term_spaces=4),
+    )
+
+    assert result.keyterms == ["Alpha Bravo Charlie Delta Echo", "Texaco"]
+    assert result.skipped_too_many_spaces == 1
+    assert result.omitted_by_term_limit == 0
+
+
 def test_total_char_budget_includes_separators() -> None:
     # "Alpha"(5) + ", "(2) + "Bravo"(5) = 12; "Charlie" would push past the limit.
     result = apply_keyterm_budget(["Alpha", "Bravo", "Charlie"], KeytermBudget(max_total_chars=12))

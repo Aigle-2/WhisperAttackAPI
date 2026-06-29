@@ -70,6 +70,9 @@ class SttKeyterms:
             return KeytermBudget(
                 max_terms=self._config.get_provider_int("elevenlabs", "max_keyterms", 900),
                 max_term_chars=self._config.get_provider_int("elevenlabs", "max_keyterm_chars", 50),
+                max_term_spaces=self._config.get_provider_int(
+                    "elevenlabs", "max_keyterm_spaces", 4
+                ),
             )
         if provider == "deepgram":
             return KeytermBudget(
@@ -95,6 +98,7 @@ class SttKeyterms:
             provider,
             max_terms=budget.max_terms,
             max_term_chars=budget.max_term_chars,
+            max_term_spaces=budget.max_term_spaces,
             max_total_chars=budget.max_total_chars,
             log_result=log_result,
         )
@@ -104,6 +108,7 @@ class SttKeyterms:
         provider: str,
         max_terms: int | None = None,
         max_term_chars: int | None = None,
+        max_term_spaces: int | None = None,
         max_total_chars: int | None = None,
     ) -> list[str]:
         """Return generated keyterms constrained to provider-specific limits."""
@@ -111,6 +116,7 @@ class SttKeyterms:
             provider,
             max_terms=max_terms,
             max_term_chars=max_term_chars,
+            max_term_spaces=max_term_spaces,
             max_total_chars=max_total_chars,
         ).keyterms
 
@@ -119,6 +125,7 @@ class SttKeyterms:
         provider: str,
         max_terms: int | None = None,
         max_term_chars: int | None = None,
+        max_term_spaces: int | None = None,
         max_total_chars: int | None = None,
         log_result: bool = True,
     ) -> BudgetedKeyterms:
@@ -126,18 +133,24 @@ class SttKeyterms:
         budget = KeytermBudget(
             max_terms=max_terms,
             max_term_chars=max_term_chars,
+            max_term_spaces=max_term_spaces,
             max_total_chars=max_total_chars,
         )
         result = apply_keyterm_budget(self.get_stt_keyterms(), budget)
         if log_result and (
-            result.skipped_too_long or result.omitted_by_term_limit or result.omitted_by_char_limit
+            result.skipped_too_long
+            or result.omitted_by_term_limit
+            or result.omitted_by_char_limit
+            or result.skipped_too_many_spaces
         ):
             logging.info(
                 "Budgeted %s STT keyterms to %s terms "
-                "(skipped_too_long=%s, omitted_by_term_limit=%s, omitted_by_char_limit=%s).",
+                "(skipped_too_long=%s, skipped_too_many_spaces=%s, "
+                "omitted_by_term_limit=%s, omitted_by_char_limit=%s).",
                 provider,
                 len(result.keyterms),
                 result.skipped_too_long,
+                result.skipped_too_many_spaces,
                 result.omitted_by_term_limit,
                 result.omitted_by_char_limit,
             )

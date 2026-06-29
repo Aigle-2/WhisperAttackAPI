@@ -2,7 +2,8 @@
 
   <!--
     Small release helper for end users. It is shipped beside VAIVOX.exe and copies the
-    bundled VoiceAttack plugin DLL into the detected VoiceAttack/VoiceAttack 2 Apps folder.
+    bundled VoiceAttack plugin DLL into the VoiceAttack 2 per-user Apps folder, removing
+    older duplicate install-folder copies when it can.
   -->
 
   <PropertyGroup>

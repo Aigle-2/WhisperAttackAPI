@@ -71,6 +71,20 @@ def test_release_build_script_packages_voiceattack_assets() -> None:
     assert '"--copy-metadata", "vaivox"' in build_script
 
 
+def test_voiceattack_plugin_installer_avoids_duplicate_plugin_copies() -> None:
+    """The installer must not create the VoiceAttack "multiple instances" warning."""
+    repo_root = Path(__file__).resolve().parents[2]
+    installer_source = (repo_root / "plugin" / "VaivoxPluginInstaller" / "Program.cs").read_text(
+        encoding="utf-8"
+    )
+
+    assert "GetAppDataPluginDir()" in installer_source
+    assert "RemoveStaleInstallTargets" in installer_source
+    assert 'targetDirs.Add(Path.Combine(voiceAttackDir, "Apps", AppFolderName))' not in (
+        installer_source
+    )
+
+
 def test_voiceattack_profile_template_uses_vaivox_name() -> None:
     """The bundled profile template must not import under the old product name."""
     repo_root = Path(__file__).resolve().parents[2]
@@ -98,6 +112,18 @@ def test_voiceattack_plugin_uses_only_vaivox_context_names() -> None:
     assert "Stop VAIVOX Recording" in plugin_source
     assert "Start Whisper Recording" not in plugin_source
     assert "Stop Whisper Recording" not in plugin_source
+
+
+def test_voiceattack_plugin_exit_does_not_shutdown_vaivox() -> None:
+    """Closing VoiceAttack must leave the standalone VAIVOX app running."""
+    repo_root = Path(__file__).resolve().parents[2]
+    plugin_source = (repo_root / "plugin" / "VaivoxVAPlugin" / "VaivoxVAPlugin.cs").read_text(
+        encoding="utf-8"
+    )
+
+    assert "public static void VA_Exit1" in plugin_source
+    assert 'Encoding.ASCII.GetBytes("shutdown")' not in plugin_source
+    assert "VAIVOX server was not available during shutdown" not in plugin_source
 
 
 def test_project_version_matches_runtime_identity() -> None:

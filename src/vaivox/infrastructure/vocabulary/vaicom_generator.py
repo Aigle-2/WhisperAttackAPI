@@ -10,6 +10,7 @@ the ``vaivox`` package.
 
 from __future__ import annotations
 
+import os
 from collections.abc import Callable
 from pathlib import Path
 
@@ -21,7 +22,8 @@ from vaivox.infrastructure.vocabulary import vaicom_generator_core as generator
 KEYTERMS_FILE = generator.KEYTERMS_FILE
 PHRASE_INDEX_FILE = generator.PHRASE_INDEX_FILE
 
-_DEFAULT_SAVED_GAMES = Path.home() / "Saved Games" / "DCS"
+_DEFAULT_SAVED_GAMES_NAME = "DCS"
+_DCS_SAVED_GAMES_ENV = "DCS_SAVED_GAMES"
 
 
 class VaicomVocabularyGenerator:
@@ -30,7 +32,8 @@ class VaicomVocabularyGenerator:
     Args:
         data_dir: The per-user VAIVOX data directory to write the output files into.
         saved_games: The DCS ``Saved Games`` directory (for ICAO overrides); defaults to
-            the standard ``~/Saved Games/DCS`` location.
+            the most likely local DCS profile, preferring the active-looking profile and
+            honoring ``DCS_SAVED_GAMES`` when set.
         discover: Optional VAICOM-root discovery override (defaults to the generator's
             auto-discovery). Injected in tests to exercise staleness without a real install.
     """
@@ -43,7 +46,7 @@ class VaicomVocabularyGenerator:
     ) -> None:
         """Wire the output directory, the Saved Games path, and the discovery override."""
         self._data_dir = Path(data_dir)
-        self._saved_games = saved_games or _DEFAULT_SAVED_GAMES
+        self._saved_games = saved_games or _discover_saved_games()
         self._discover = discover
 
     @property
@@ -119,14 +122,69 @@ def _newest_source_mtime(root: Path, saved_games: Path) -> float | None:
         The newest source mtime, or ``None`` when no known source file is present.
     """
     sources: list[Path] = []
-    keywords = root / "Export" / "keywords.txt"
-    if keywords.is_file():
-        sources.append(keywords)
+    for filename in ("keywords.txt", "keywords.html"):
+        keywords = root / "Export" / filename
+        if keywords.is_file():
+            sources.append(keywords)
     for subdir in ("Profiles", "Export"):
         sources.extend((root / subdir).glob("*.vap"))
+    logs = root / "Logs"
+    for filename in ("WSO_DIALOG_CACHE_RAW.json", "WSO_ACTION_CACHE_RAW.json"):
+        cache = logs / filename
+        if cache.is_file():
+            sources.append(cache)
     icao = saved_games / "Scripts" / "VAICOMPRO" / "ICAOOverrides.lua"
     if icao.is_file():
         sources.append(icao)
 
     mtimes = [path.stat().st_mtime for path in sources if path.is_file()]
     return max(mtimes) if mtimes else None
+
+
+def _discover_saved_games(home: Path | None = None) -> Path:
+    """Return the most likely DCS Saved Games profile without creating folders.
+
+    VAICOM can be configured as Steam/release while the actual DCS profile is
+    ``DCS.openbeta``. For vocabulary generation we only read ICAO overrides, so prefer the
+    profile that looks active on disk and let ``DCS_SAVED_GAMES`` override the heuristic.
+    """
+    env_override = os.getenv(_DCS_SAVED_GAMES_ENV)
+    if env_override:
+        return Path(env_override)
+
+    saved_games_root = (home or Path.home()) / "Saved Games"
+    default_profile = saved_games_root / _DEFAULT_SAVED_GAMES_NAME
+    candidates = _dcs_saved_games_candidates(saved_games_root)
+    if not candidates:
+        return default_profile
+    return max(candidates, key=_saved_games_score)
+
+
+def _dcs_saved_games_candidates(saved_games_root: Path) -> list[Path]:
+    """Return existing DCS profile folders in deterministic preference order."""
+    preferred_names = ("DCS.openbeta", "DCS", "DCS.openbeta_server", "DCS.server")
+    preferred = [saved_games_root / name for name in preferred_names]
+    discovered = sorted(saved_games_root.glob("DCS*")) if saved_games_root.is_dir() else []
+    seen: set[Path] = set()
+    candidates: list[Path] = []
+    for path in [*preferred, *discovered]:
+        resolved = path.resolve() if path.exists() else path
+        if resolved in seen or not path.is_dir():
+            continue
+        seen.add(resolved)
+        candidates.append(path)
+    return candidates
+
+
+def _saved_games_score(path: Path) -> tuple[int, float, int]:
+    """Score a DCS profile by active files, recency, and OpenBeta preference."""
+    weighted_files = [
+        (path / "Logs" / "dcs.log", 4),
+        (path / "Scripts" / "Export.lua", 2),
+        (path / "Scripts" / "VAICOMPRO" / "ICAOOverrides.lua", 1),
+    ]
+    existing_files = [candidate for candidate, _ in weighted_files if candidate.is_file()]
+    active_score = sum(weight for candidate, weight in weighted_files if candidate.is_file())
+    newest = max((candidate.stat().st_mtime for candidate in existing_files), default=0.0)
+    openbeta_bonus = 1 if path.name.lower().startswith("dcs.openbeta") else 0
+    return active_score, newest, openbeta_bonus

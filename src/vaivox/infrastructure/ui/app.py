@@ -468,12 +468,14 @@ class VaivoxApp:
             self.writer.write(f"limits: {limit_summary}", TAG_GREY)
         if (
             budgeted.skipped_too_long
+            or budgeted.skipped_too_many_spaces
             or budgeted.omitted_by_term_limit
             or budgeted.omitted_by_char_limit
         ):
             self.writer.write(
                 "omitted by budget: "
                 f"too_long={budgeted.skipped_too_long}, "
+                f"too_many_spaces={budgeted.skipped_too_many_spaces}, "
                 f"term_limit={budgeted.omitted_by_term_limit}, "
                 f"char_limit={budgeted.omitted_by_char_limit}",
                 TAG_GREY,
@@ -489,6 +491,8 @@ class VaivoxApp:
             limits.append(f"max_terms={budget.max_terms}")
         if budget.max_term_chars is not None:
             limits.append(f"max_term_chars={budget.max_term_chars}")
+        if budget.max_term_spaces is not None:
+            limits.append(f"max_term_spaces={budget.max_term_spaces}")
         if budget.max_total_chars is not None:
             limits.append(f"max_total_chars={budget.max_total_chars}")
         return ", ".join(limits)

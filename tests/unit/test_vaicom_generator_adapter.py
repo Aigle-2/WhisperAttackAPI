@@ -14,6 +14,7 @@ from vaivox.infrastructure.vocabulary.vaicom_generator import (
     KEYTERMS_FILE,
     PHRASE_INDEX_FILE,
     VaicomVocabularyGenerator,
+    _discover_saved_games,
 )
 
 
@@ -67,6 +68,24 @@ def test_stale_when_install_source_is_newer_than_outputs(tmp_path):
     assert generator.is_stale() is True  # the install changed since the last generation
 
 
+def test_stale_when_keywords_html_source_is_newer_than_outputs(tmp_path):
+    data_dir = tmp_path / "data"
+    data_dir.mkdir()
+    _write_outputs(data_dir, mtime=1000.0)
+    install = _make_install(tmp_path / "install", vap_mtime=500.0)
+    keywords_html = install / "Export" / "keywords.html"
+    keywords_html.write_text(
+        '<span class="alias-item">Ground Air Connect Left</span>',
+        encoding="utf-8",
+    )
+    os.utime(keywords_html, (2000.0, 2000.0))
+    generator = VaicomVocabularyGenerator(
+        str(data_dir), saved_games=tmp_path / "sg", discover=lambda: install
+    )
+
+    assert generator.is_stale() is True
+
+
 def test_not_stale_when_outputs_are_newer_than_install_source(tmp_path):
     data_dir = tmp_path / "data"
     data_dir.mkdir()
@@ -102,3 +121,26 @@ def test_generate_writes_keyterms_and_phrase_index_from_packaged_generator(tmp_p
     assert (data_dir / PHRASE_INDEX_FILE).is_file()
     assert "Texaco" in (data_dir / KEYTERMS_FILE).read_text(encoding="utf-8")
     assert "Texaco request rejoin" in (data_dir / PHRASE_INDEX_FILE).read_text(encoding="utf-8")
+
+
+def test_discover_saved_games_honors_env_override(tmp_path, monkeypatch):
+    override = tmp_path / "CustomDCS"
+    monkeypatch.setenv("DCS_SAVED_GAMES", str(override))
+
+    assert _discover_saved_games(tmp_path) == override
+
+
+def test_discover_saved_games_prefers_active_openbeta_profile(tmp_path, monkeypatch):
+    monkeypatch.delenv("DCS_SAVED_GAMES", raising=False)
+    saved_games = tmp_path / "Saved Games"
+    wrong_release = saved_games / "DCS"
+    openbeta = saved_games / "DCS.openbeta"
+    (wrong_release / "Scripts" / "VAICOMPRO").mkdir(parents=True)
+    (openbeta / "Logs").mkdir(parents=True)
+    (wrong_release / "Scripts" / "Export.lua").write_text("-- VAICOM\n", encoding="utf-8")
+    (wrong_release / "Scripts" / "VAICOMPRO" / "ICAOOverrides.lua").write_text(
+        "-- overrides\n", encoding="utf-8"
+    )
+    (openbeta / "Logs" / "dcs.log").write_text("active DCS profile\n", encoding="utf-8")
+
+    assert _discover_saved_games(tmp_path) == openbeta
