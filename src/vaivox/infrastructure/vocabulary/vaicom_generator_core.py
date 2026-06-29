@@ -15,8 +15,15 @@ import json
 import os
 import re
 import unicodedata
+from collections.abc import Iterable
 from html.parser import HTMLParser
 from pathlib import Path
+
+from vaivox.infrastructure.vocabulary.command_catalog import (
+    COMMAND_CATALOG_FILE,
+    COMMAND_CATALOG_VERSION,
+    CommandCatalogEntry,
+)
 
 DEFAULT_DCS_SAVED_GAMES = Path.home() / "Saved Games" / "DCS"
 DEFAULT_MAX_KEYTERMS = 850
@@ -696,12 +703,33 @@ class _KeywordsHtmlParser(HTMLParser):
     def __init__(self) -> None:
         super().__init__(convert_charrefs=True)
         self.aliases: list[str] = []
+        self.rows: list[tuple[str, str, tuple[str, ...]]] = []
+        self._in_row = False
+        self._current_cell: str | None = None
+        self._cell_parts: list[str] = []
+        self._action = ""
+        self._group = ""
+        self._aliases: list[str] = []
         self._in_alias_cell = False
         self._alias_parts: list[str] | None = None
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
         classes = set((dict(attrs).get("class") or "").split())
-        if tag == "td" and "aliases" in classes:
+        if tag == "tr":
+            self._in_row = True
+            self._current_cell = None
+            self._cell_parts = []
+            self._action = ""
+            self._group = ""
+            self._aliases = []
+        elif tag == "td" and "action" in classes:
+            self._current_cell = "action"
+            self._cell_parts = []
+        elif tag == "td" and "group" in classes:
+            self._current_cell = "group"
+            self._cell_parts = []
+        elif tag == "td" and "aliases" in classes:
+            self._current_cell = "aliases"
             self._in_alias_cell = True
         elif self._in_alias_cell and tag == "span" and "alias-item" in classes:
             self._alias_parts = []
@@ -709,16 +737,29 @@ class _KeywordsHtmlParser(HTMLParser):
     def handle_data(self, data: str) -> None:
         if self._alias_parts is not None:
             self._alias_parts.append(data)
+        elif self._current_cell in {"action", "group"}:
+            self._cell_parts.append(data)
 
     def handle_endtag(self, tag: str) -> None:
         if tag == "span" and self._alias_parts is not None:
             alias = " ".join("".join(self._alias_parts).split())
             if alias:
                 self.aliases.append(alias)
+                self._aliases.append(alias)
             self._alias_parts = None
         elif tag == "td":
+            if self._current_cell == "action":
+                self._action = " ".join("".join(self._cell_parts).split())
+            elif self._current_cell == "group":
+                self._group = " ".join("".join(self._cell_parts).split())
+            self._current_cell = None
+            self._cell_parts = []
             self._in_alias_cell = False
             self._alias_parts = None
+        elif tag == "tr" and self._in_row:
+            if self._aliases:
+                self.rows.append((self._action, self._group, tuple(self._aliases)))
+            self._in_row = False
 
 
 def parse_keywords_html(vaicom_root: Path, terms: list[str]) -> None:
@@ -1079,6 +1120,12 @@ def _split_alternates(command_string: str) -> list[str]:
     return parts
 
 
+_AIRCRAFT_TAG_RE = re.compile(
+    r"\b(?:F/A-\d+[A-Z]*|[A-Z]{1,4}-\d{1,3}[A-Z]*(?:-\d+[A-Z]*)?)\b",
+    re.IGNORECASE,
+)
+
+
 def collect_phrases(vaicom_root: Path, saved_games: Path) -> list[str]:
     """Collect candidate command phrases (whole, not word-split) for the snap index.
 
@@ -1131,22 +1178,99 @@ def _is_command_phrase(phrase: str) -> bool:
     return 2 <= len(words) <= 8 and len(phrase) <= 60
 
 
+def collect_command_catalog_entries(
+    vaicom_root: Path, saved_games: Path
+) -> list[CommandCatalogEntry]:
+    """Collect candidate command phrases with source/group/aircraft metadata.
+
+    The collected phrases intentionally mirror :func:`collect_phrases`; the extra fields
+    are a UI sidecar only and never change what the snapper accepts.
+    """
+    entries: list[CommandCatalogEntry] = []
+
+    profile_paths = [
+        *sorted((vaicom_root / "Profiles").glob("*.vap")),
+        *sorted((vaicom_root / "Export").glob("*.vap")),
+    ]
+    for path in profile_paths:
+        text = path.read_text(encoding="utf-8", errors="ignore")
+        profile_name = _first_xml_value(text, "Name")
+        source_label = path.name
+        for command in re.findall(
+            r"<Command\b.*?</Command>", text, flags=re.IGNORECASE | re.DOTALL
+        ):
+            command_string = _first_xml_value(command, "CommandString")
+            if not command_string:
+                continue
+            category = _first_xml_value(command, "Category")
+            groups = _non_empty((category, profile_name))
+            aircraft = _aircraft_tags((*groups, source_label))
+            for part in _split_alternates(html.unescape(command_string)):
+                entries.append(
+                    CommandCatalogEntry(
+                        phrase=clean_term(part),
+                        groups=groups,
+                        aircraft=aircraft,
+                        sources=(source_label,),
+                    )
+                )
+
+    keywords_path = vaicom_root / "Export" / "keywords.txt"
+    if keywords_path.is_file():
+        text = keywords_path.read_text(encoding="utf-8", errors="ignore")
+        for chunk in re.findall(r"\[([^\[\]]*)\]", text):
+            for part in chunk.split(";"):
+                entries.append(
+                    CommandCatalogEntry(
+                        phrase=clean_term(part),
+                        sources=(keywords_path.name,),
+                    )
+                )
+
+    keywords_html_path = vaicom_root / "Export" / "keywords.html"
+    if keywords_html_path.is_file():
+        text = keywords_html_path.read_text(encoding="utf-8", errors="ignore")
+        parser = _KeywordsHtmlParser()
+        parser.feed(text)
+        for _action, group, aliases in parser.rows:
+            groups = _non_empty((group,))
+            aircraft = _aircraft_tags(groups)
+            for alias in aliases:
+                entries.append(
+                    CommandCatalogEntry(
+                        phrase=clean_term(alias),
+                        groups=groups,
+                        aircraft=aircraft,
+                        sources=(keywords_html_path.name,),
+                    )
+                )
+
+    return entries
+
+
+def generate_command_catalog(
+    vaicom_root: Path, saved_games: Path, max_phrases: int = DEFAULT_MAX_PHRASES
+) -> list[CommandCatalogEntry]:
+    """Build the sorted command catalog sidecar for the UI command browser."""
+    return _dedupe_catalog_entries(
+        entry
+        for entry in collect_command_catalog_entries(vaicom_root, saved_games)
+        if _is_command_phrase(entry.phrase)
+    )[:max_phrases]
+
+
 def generate_phrase_index(
     vaicom_root: Path, saved_games: Path, max_phrases: int = DEFAULT_MAX_PHRASES
 ) -> list[str]:
     """Build the deduped, sorted phrase index of valid command phrases (ADR-0011)."""
-    seen: set[str] = set()
-    index: list[str] = []
-    for phrase in collect_phrases(vaicom_root, saved_games):
-        if not _is_command_phrase(phrase):
-            continue
-        key = phrase.lower()
-        if key in seen:
-            continue
-        seen.add(key)
-        index.append(phrase)
-    index.sort(key=str.lower)
-    return index[:max_phrases]
+    return [
+        entry.phrase
+        for entry in generate_command_catalog(
+            vaicom_root,
+            saved_games,
+            max_phrases=max_phrases,
+        )
+    ]
 
 
 def write_phrase_index(
@@ -1165,6 +1289,94 @@ def write_phrase_index(
     lines.extend(phrases)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def write_command_catalog(
+    path: Path,
+    entries: list[CommandCatalogEntry],
+    vaicom_root: Path,
+    saved_games: Path,
+) -> None:
+    """Write the UI command catalog sidecar next to the flat phrase index."""
+    payload = {
+        "version": COMMAND_CATALOG_VERSION,
+        "source_vaicom_root": str(vaicom_root),
+        "source_saved_games": str(saved_games),
+        "entries": [
+            {
+                "phrase": entry.phrase,
+                "groups": list(entry.groups),
+                "aircraft": list(entry.aircraft),
+                "sources": list(entry.sources),
+            }
+            for entry in entries
+        ],
+    }
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+
+def _first_xml_value(text: str, tag: str) -> str:
+    match = re.search(
+        rf"<{tag}\b[^>]*>(.*?)</{tag}>",
+        text,
+        flags=re.IGNORECASE | re.DOTALL,
+    )
+    if match is None:
+        return ""
+    return clean_term(match.group(1))
+
+
+def _non_empty(values: Iterable[str]) -> tuple[str, ...]:
+    return _unique_strings(value for value in values if value)
+
+
+def _aircraft_tags(values: Iterable[str]) -> tuple[str, ...]:
+    tags: list[str] = []
+    for value in values:
+        for match in _AIRCRAFT_TAG_RE.finditer(value):
+            tags.append(match.group(0).upper())
+    return _unique_strings(tags)
+
+
+def _dedupe_catalog_entries(entries: Iterable[CommandCatalogEntry]) -> list[CommandCatalogEntry]:
+    merged: dict[str, CommandCatalogEntry] = {}
+    order: list[str] = []
+    for entry in entries:
+        phrase = clean_term(entry.phrase)
+        if not phrase:
+            continue
+        key = phrase.casefold()
+        if key not in merged:
+            order.append(key)
+            merged[key] = CommandCatalogEntry(
+                phrase=phrase,
+                groups=_unique_strings(entry.groups),
+                aircraft=_unique_strings(entry.aircraft),
+                sources=_unique_strings(entry.sources),
+            )
+            continue
+        previous = merged[key]
+        merged[key] = CommandCatalogEntry(
+            phrase=previous.phrase,
+            groups=_unique_strings((*previous.groups, *entry.groups)),
+            aircraft=_unique_strings((*previous.aircraft, *entry.aircraft)),
+            sources=_unique_strings((*previous.sources, *entry.sources)),
+        )
+    return sorted((merged[key] for key in order), key=lambda entry: entry.phrase.lower())
+
+
+def _unique_strings(values: Iterable[str]) -> tuple[str, ...]:
+    seen: set[str] = set()
+    unique: list[str] = []
+    for value in values:
+        normalized = " ".join(str(value).split())
+        key = normalized.casefold()
+        if not normalized or key in seen:
+            continue
+        seen.add(key)
+        unique.append(normalized)
+    return tuple(unique)
 
 
 def parse_args() -> argparse.Namespace:
@@ -1190,6 +1402,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--keyterms-output", type=Path, default=None)
     parser.add_argument("--phrase-index-output", type=Path, default=None)
+    parser.add_argument("--command-catalog-output", type=Path, default=None)
     parser.add_argument("--max-terms", type=int, default=DEFAULT_MAX_KEYTERMS)
     parser.add_argument("--max-phrases", type=int, default=DEFAULT_MAX_PHRASES)
     return parser.parse_args()
@@ -1208,16 +1421,20 @@ def main() -> None:
 
     keyterms_output = args.keyterms_output or (args.data_dir / KEYTERMS_FILE)
     phrase_output = args.phrase_index_output or (args.data_dir / PHRASE_INDEX_FILE)
+    catalog_output = args.command_catalog_output or (args.data_dir / COMMAND_CATALOG_FILE)
 
     keyterms = generate_keyterms(vaicom_root, args.saved_games, args.max_terms)
     write_keyterms(keyterms_output, keyterms, vaicom_root, args.saved_games)
 
-    phrases = generate_phrase_index(vaicom_root, args.saved_games, args.max_phrases)
+    catalog = generate_command_catalog(vaicom_root, args.saved_games, args.max_phrases)
+    phrases = [entry.phrase for entry in catalog]
     write_phrase_index(phrase_output, phrases, vaicom_root, args.saved_games)
+    write_command_catalog(catalog_output, catalog, vaicom_root, args.saved_games)
 
     print(f"VAICOM root: {vaicom_root}")
     print(f"Wrote {len(keyterms)} keyterms to {keyterms_output}")
     print(f"Wrote {len(phrases)} command phrases to {phrase_output}")
+    print(f"Wrote {len(catalog)} command metadata entries to {catalog_output}")
 
 
 if __name__ == "__main__":

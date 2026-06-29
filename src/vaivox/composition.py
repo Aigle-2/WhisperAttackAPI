@@ -70,6 +70,10 @@ from vaivox.infrastructure.system_clock import SystemClock
 from vaivox.infrastructure.telemetry.jsonl_reader import JsonlTelemetryReader
 from vaivox.infrastructure.telemetry.jsonl_sink import JsonlTelemetrySink
 from vaivox.infrastructure.telemetry.null_sink import NullTelemetrySink
+from vaivox.infrastructure.vocabulary.command_catalog import (
+    CommandCatalogEntry,
+    load_command_catalog,
+)
 from vaivox.infrastructure.vocabulary.jsonl_repository import JsonlVocabularyRepository
 from vaivox.infrastructure.vocabulary.legacy_files import load_legacy_vocabulary
 from vaivox.infrastructure.vocabulary.migration import migrate_legacy_vocabulary
@@ -129,8 +133,10 @@ class WiredApp:
     stt_keyterms: SttKeyterms
     add_word_mapping: AddWordMapping
     get_core_phrases: Callable[[], tuple[str, ...]]
+    get_core_command_entries: Callable[[], tuple[CommandCatalogEntry, ...]]
     get_mission_phrases: Callable[[], tuple[str, ...]]
     get_mission_display_phrases: Callable[[], tuple[str, ...]]
+    get_current_aircraft: Callable[[], str | None]
     api_server: IntrospectionServer | None = None
     menu_listener: MissionMenuListener | None = None
     hook_installer: DcsHookInstaller | None = None
@@ -319,6 +325,19 @@ def build(
             phrase for phrase in snapper.phrase_index if phrase.strip().lower() not in mission_keys
         )
 
+    def get_core_command_entries() -> tuple[CommandCatalogEntry, ...]:
+        mission_keys = {phrase.strip().casefold() for phrase in get_mission_phrases()}
+        return tuple(
+            entry
+            for entry in load_command_catalog(config.app_data_location, get_core_phrases())
+            if entry.phrase.strip().casefold() not in mission_keys
+        )
+
+    def get_current_aircraft() -> str | None:
+        if menu_listener is None:
+            return None
+        return menu_listener.get_health().current_aircraft
+
     refresh_vocabulary = RefreshVocabulary(generator, reporter, apply_phrase_index)
     mission_log_path = config.get_setting("mission_f10_log_path", "").strip() or None
     mission_max_phrases = config.get_int_setting(
@@ -379,8 +398,10 @@ def build(
         stt_keyterms=stt_keyterms,
         add_word_mapping=add_word_mapping,
         get_core_phrases=get_core_phrases,
+        get_core_command_entries=get_core_command_entries,
         get_mission_phrases=get_mission_phrases,
         get_mission_display_phrases=get_mission_display_phrases,
+        get_current_aircraft=get_current_aircraft,
         api_server=api_server,
         menu_listener=menu_listener,
         hook_installer=hook_installer,

@@ -11,6 +11,7 @@ import os
 from pathlib import Path
 
 from vaivox.infrastructure.vocabulary.vaicom_generator import (
+    COMMAND_CATALOG_FILE,
     KEYTERMS_FILE,
     PHRASE_INDEX_FILE,
     VaicomVocabularyGenerator,
@@ -21,8 +22,12 @@ from vaivox.infrastructure.vocabulary.vaicom_generator import (
 def _write_outputs(data_dir: Path, mtime: float | None = None) -> None:
     (data_dir / KEYTERMS_FILE).write_text("# keyterms\nTexaco\n", encoding="utf-8")
     (data_dir / PHRASE_INDEX_FILE).write_text("# phrases\nTexaco rejoin\n", encoding="utf-8")
+    (data_dir / COMMAND_CATALOG_FILE).write_text(
+        '{"version": 1, "entries": [{"phrase": "Texaco rejoin"}]}\n',
+        encoding="utf-8",
+    )
     if mtime is not None:
-        for name in (KEYTERMS_FILE, PHRASE_INDEX_FILE):
+        for name in (KEYTERMS_FILE, PHRASE_INDEX_FILE, COMMAND_CATALOG_FILE):
             os.utime(data_dir / name, (mtime, mtime))
 
 
@@ -119,8 +124,10 @@ def test_generate_writes_keyterms_and_phrase_index_from_packaged_generator(tmp_p
     assert result.generated is True
     assert (data_dir / KEYTERMS_FILE).is_file()
     assert (data_dir / PHRASE_INDEX_FILE).is_file()
+    assert (data_dir / COMMAND_CATALOG_FILE).is_file()
     assert "Texaco" in (data_dir / KEYTERMS_FILE).read_text(encoding="utf-8")
     assert "Texaco request rejoin" in (data_dir / PHRASE_INDEX_FILE).read_text(encoding="utf-8")
+    assert "Texaco request rejoin" in (data_dir / COMMAND_CATALOG_FILE).read_text(encoding="utf-8")
 
 
 def test_discover_saved_games_honors_env_override(tmp_path, monkeypatch):

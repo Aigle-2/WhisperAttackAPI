@@ -7,7 +7,13 @@ the live search filter. These pin that logic without a UI.
 
 from __future__ import annotations
 
-from vaivox.infrastructure.ui.commands_window import filter_commands, sort_commands
+from vaivox.infrastructure.ui.commands_window import (
+    filter_command_entries,
+    filter_commands,
+    sort_command_entries,
+    sort_commands,
+)
+from vaivox.infrastructure.vocabulary.command_catalog import CommandCatalogEntry
 
 
 def test_sort_commands_orders_case_insensitively_ascending():
@@ -50,3 +56,70 @@ def test_filter_commands_matches_substring_case_insensitively_in_order():
 
 def test_filter_commands_no_match_returns_empty():
     assert filter_commands(["Abort", "RTB"], "zzz") == []
+
+
+def test_sort_command_entries_keeps_metadata_while_deduping():
+    entries = [
+        CommandCatalogEntry("Ground Power Connect", aircraft=("F-4E",)),
+        CommandCatalogEntry("ground power connect", groups=("F-4E AI WSO | Ground Crew",)),
+        "Abort",
+    ]
+
+    sorted_entries = sort_command_entries(entries)
+
+    assert [entry.phrase for entry in sorted_entries] == ["Abort", "Ground Power Connect"]
+    scoped = sorted_entries[1]
+    assert scoped.aircraft == ("F-4E",)
+    assert scoped.groups == ("F-4E AI WSO | Ground Crew",)
+
+
+def test_filter_command_entries_can_show_only_current_aircraft_scope():
+    entries = [
+        CommandCatalogEntry("External Power Off", groups=("AI Comms | Crew",)),
+        CommandCatalogEntry(
+            "Ground Power Connect",
+            groups=("F-4E AI WSO | Ground Crew",),
+            aircraft=("F-4E",),
+        ),
+        CommandCatalogEntry(
+            "Ground Power Disconnect",
+            groups=("F-4E AI WSO | Ground Crew",),
+            aircraft=("F-4E",),
+        ),
+        CommandCatalogEntry("Ground Power On", groups=("AI Comms | Crew",)),
+        CommandCatalogEntry("Radar Scan High", aircraft=("F-14",)),
+    ]
+
+    filtered = filter_command_entries(
+        entries,
+        "power",
+        current_aircraft="F-4E-45MC",
+        include_current=True,
+        include_general=False,
+        include_other=False,
+        scope_filter_enabled=True,
+    )
+
+    assert [entry.phrase for entry in filtered] == [
+        "Ground Power Connect",
+        "Ground Power Disconnect",
+    ]
+
+
+def test_filter_command_entries_can_include_general_commands():
+    entries = [
+        CommandCatalogEntry("Ground Power Connect", aircraft=("F-4E",)),
+        CommandCatalogEntry("Ground Power On"),
+    ]
+
+    filtered = filter_command_entries(
+        entries,
+        "power",
+        current_aircraft="F-4E-45MC",
+        include_current=True,
+        include_general=True,
+        include_other=False,
+        scope_filter_enabled=True,
+    )
+
+    assert [entry.phrase for entry in filtered] == ["Ground Power Connect", "Ground Power On"]

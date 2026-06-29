@@ -11,6 +11,7 @@ import vaivox.infrastructure.vocabulary.vaicom_generator_core as generator
 from vaivox.infrastructure.vocabulary.phrase_index import load_phrase_index
 from vaivox.infrastructure.vocabulary.vaicom_generator_core import (
     discover_vaicom_root,
+    generate_command_catalog,
     generate_keyterms,
     generate_phrase_index,
     write_phrase_index,
@@ -123,6 +124,40 @@ def test_generate_phrase_index_reads_keywords_html_when_txt_is_missing(tmp_path)
     index = generate_phrase_index(root, tmp_path / "saved")
 
     assert "Ground Air Connect Left" in index
+
+
+def test_generate_command_catalog_tags_aircraft_specific_keywords_html_rows(tmp_path):
+    root = tmp_path / "VAICOMPRO"
+    (root / "Export").mkdir(parents=True)
+    (root / "Profiles").mkdir()
+    (root / "Export" / "keywords.html").write_text(
+        """
+        <table>
+          <tr>
+            <td class="action">WSO Ground Connect Power</td>
+            <td class="group"><div>F-4E AI WSO | Ground Crew</div></td>
+            <td class="aliases">
+              <span class="alias-item">Ground Power Connect</span>
+            </td>
+          </tr>
+          <tr>
+            <td class="action">Ground Power On</td>
+            <td class="group"><div>AI Comms | Crew</div></td>
+            <td class="aliases">
+              <span class="alias-item">Ground Power On</span>
+            </td>
+          </tr>
+        </table>
+        """,
+        encoding="utf-8",
+    )
+
+    catalog = generate_command_catalog(root, tmp_path / "saved")
+    by_phrase = {entry.phrase: entry for entry in catalog}
+
+    assert by_phrase["Ground Power Connect"].aircraft == ("F-4E",)
+    assert by_phrase["Ground Power Connect"].groups == ("F-4E AI WSO | Ground Crew",)
+    assert by_phrase["Ground Power On"].aircraft == ()
 
 
 def test_clean_term_unwraps_a_single_bracket_group_but_not_a_multi_slot_phrase():

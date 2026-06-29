@@ -27,15 +27,17 @@ def _panel(tmp_path: Path, content: str = _STOCK) -> Path:
 
 def test_render_hook_includes_port_type_and_markers() -> None:
     lua = render_hook(33493)
-    assert "VAIVOX_F10_HOOK v7" in lua
+    assert "VAIVOX_F10_HOOK v8" in lua
     assert "BEGIN" in lua and "END" in lua
     assert "33493" in lua
     assert "vaivox.f10menu" in lua
     assert "protocol = 2" in lua
     assert "session = session" in lua
     assert "revision = revision" in lua
+    assert "aircraft = aircraft" in lua
     assert "entries = entries" in lua
     assert "path = append_path(path, nil)" in lua
+    assert "LoGetSelfData" in lua
 
 
 def test_render_hook_republishes_an_unchanged_revision_as_a_heartbeat() -> None:

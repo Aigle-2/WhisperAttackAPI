@@ -22,24 +22,29 @@ def _datagram(
     session: str = "dcs-session-1",
     revision: int = 1,
     phase: str = "update",
+    aircraft: str | None = None,
 ) -> bytes:
-    return json.dumps(
-        {
-            "type": "vaivox.f10menu",
-            "protocol": MENU_PROTOCOL_VERSION,
-            "session": session,
-            "revision": revision,
-            "phase": phase,
-            "entries": entries,
-        }
-    ).encode("utf-8")
+    payload = {
+        "type": "vaivox.f10menu",
+        "protocol": MENU_PROTOCOL_VERSION,
+        "session": session,
+        "revision": revision,
+        "phase": phase,
+        "entries": entries,
+    }
+    if aircraft is not None:
+        payload["aircraft"] = aircraft
+    return json.dumps(payload).encode("utf-8")
 
 
 def test_handle_datagram_replaces_the_settled_snapshot() -> None:
     listener = MissionMenuListener(port=0, debounce_seconds=0)
 
-    listener._handle_datagram(_datagram([_entry("FLEX NORTH", 0), _entry("FLEX WEST", 1)]))
+    listener._handle_datagram(
+        _datagram([_entry("FLEX NORTH", 0), _entry("FLEX WEST", 1)], aircraft="F-4E-45MC")
+    )
     assert listener.get_menu() == {"FLEX NORTH": 0, "FLEX WEST": 1}
+    assert listener.get_health().current_aircraft == "F-4E-45MC"
 
     listener._handle_datagram(_datagram([_entry("Repeat last transmission", 0)], revision=2))
     assert listener.get_menu() == {"Repeat last transmission": 0}
@@ -180,11 +185,14 @@ def test_persisted_snapshot_is_diagnostic_only_and_never_restored(tmp_path: Path
     path = tmp_path / "f10_menu.json"
     listener = MissionMenuListener(port=0, persist_path=path, debounce_seconds=0)
 
-    listener._handle_datagram(_datagram([_entry("FLEX NORTH", 2)], revision=7))
+    listener._handle_datagram(
+        _datagram([_entry("FLEX NORTH", 2)], revision=7, aircraft="F-4E-45MC")
+    )
     record = json.loads(path.read_text(encoding="utf-8"))
     assert record["protocol"] == MENU_PROTOCOL_VERSION
     assert record["session"] == "dcs-session-1"
     assert record["revision"] == 7
+    assert record["aircraft"] == "F-4E-45MC"
     assert record["menu"] == {"FLEX NORTH": 2}
 
     restored = MissionMenuListener(port=0, persist_path=path, debounce_seconds=0)

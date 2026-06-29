@@ -51,6 +51,7 @@ class MissionMenuHealth:
     runtime_confirmed: bool
     session_id: str | None
     revision: int | None
+    current_aircraft: str | None
     command_count: int
     ambiguous_labels: tuple[str, ...]
     last_update_unix: float | None
@@ -64,6 +65,7 @@ class _MenuSnapshot:
     session_id: str
     revision: int
     phase: str
+    current_aircraft: str | None
     entries: tuple[MissionMenuEntry, ...]
     ambiguous_labels: tuple[str, ...]
 
@@ -112,6 +114,7 @@ class MissionMenuListener:
         self._ambiguous_labels: tuple[str, ...] = ()
         self._session_id: str | None = None
         self._revision: int | None = None
+        self._current_aircraft: str | None = None
         self._last_update_unix: float | None = None
         self._listener_bound = False
         self._error: str | None = None
@@ -140,6 +143,7 @@ class MissionMenuListener:
                 runtime_confirmed=self._session_id is not None,
                 session_id=self._session_id,
                 revision=self._revision,
+                current_aircraft=self._current_aircraft,
                 command_count=len(self._entries),
                 ambiguous_labels=self._ambiguous_labels,
                 last_update_unix=self._last_update_unix,
@@ -219,12 +223,14 @@ class MissionMenuListener:
             self._ambiguous_labels = ()
             if session_changed:
                 self._revision = None
+                self._current_aircraft = None
             self._session_id = snapshot.session_id
             if immediate:
                 self._pending = None
                 self._entries = snapshot.entries
                 self._menu = snapshot.menu
                 self._revision = snapshot.revision
+                self._current_aircraft = snapshot.current_aircraft
                 self._last_update_unix = time.time()
                 received_at = self._last_update_unix
             else:
@@ -274,6 +280,7 @@ class MissionMenuListener:
             self._ambiguous_labels = snapshot.ambiguous_labels
             self._session_id = snapshot.session_id
             self._revision = snapshot.revision
+            self._current_aircraft = snapshot.current_aircraft
             self._last_update_unix = time.time()
             received_at = self._last_update_unix
         self._persist(snapshot, received_at)
@@ -306,6 +313,7 @@ class MissionMenuListener:
             "session": snapshot.session_id,
             "revision": snapshot.revision,
             "phase": snapshot.phase,
+            "aircraft": snapshot.current_aircraft,
             "received_at": received_at,
             "menu": snapshot.menu,
             "entries": [
@@ -346,17 +354,27 @@ def _parse_snapshot(data: bytes) -> _MenuSnapshot | None:
     session_id = record.get("session")
     revision = record.get("revision")
     phase = record.get("phase")
+    aircraft = record.get("aircraft")
     if not isinstance(session_id, str) or not session_id:
         return None
     if not isinstance(revision, int) or isinstance(revision, bool) or revision < 0:
         return None
     if not isinstance(phase, str):
         return None
+    if aircraft is not None and not isinstance(aircraft, str):
+        return None
     parsed = _coerce_entries(record.get("entries"))
     if parsed is None:
         return None
     entries, ambiguous = parsed
-    return _MenuSnapshot(session_id, revision, phase, entries, ambiguous)
+    return _MenuSnapshot(
+        session_id,
+        revision,
+        phase,
+        aircraft.strip() if isinstance(aircraft, str) and aircraft.strip() else None,
+        entries,
+        ambiguous,
+    )
 
 
 def _coerce_entries(

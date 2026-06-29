@@ -22,6 +22,10 @@ from collections.abc import Callable, Iterable, Mapping, Sequence
 from typing import TYPE_CHECKING, Any
 
 from vaivox.infrastructure.ui.theme import TAG_BLACK, TAG_BLUE
+from vaivox.infrastructure.vocabulary.command_catalog import (
+    CommandCatalogEntry,
+    entry_matches_aircraft,
+)
 
 if TYPE_CHECKING:
     from tkinter import Misc
@@ -31,6 +35,8 @@ if TYPE_CHECKING:
 
 #: How often (ms) each tab re-reads its command source to pick up hot-reloads.
 _POLL_INTERVAL_MS = 1000
+
+CommandSourceEntry = str | CommandCatalogEntry
 
 
 def sort_commands(commands: Iterable[str]) -> list[str]:
@@ -74,16 +80,102 @@ def filter_commands(commands: Sequence[str], query: str) -> list[str]:
     return [command for command in commands if needle in command.lower()]
 
 
+def sort_command_entries(commands: Iterable[CommandSourceEntry]) -> list[CommandCatalogEntry]:
+    """Return command entries de-duplicated and sorted by their display phrase."""
+    entries: list[CommandCatalogEntry] = []
+    for command in commands:
+        if isinstance(command, CommandCatalogEntry):
+            entries.append(command)
+        else:
+            entries.append(CommandCatalogEntry(command))
+    phrases = sort_commands(entry.phrase for entry in entries)
+    by_key: dict[str, CommandCatalogEntry] = {}
+    for entry in entries:
+        key = entry.phrase.strip().casefold()
+        if not key:
+            continue
+        if key not in by_key:
+            by_key[key] = entry
+            continue
+        previous = by_key[key]
+        by_key[key] = CommandCatalogEntry(
+            previous.phrase,
+            groups=_unique_scope_values((*previous.groups, *entry.groups)),
+            aircraft=_unique_scope_values((*previous.aircraft, *entry.aircraft)),
+            sources=_unique_scope_values((*previous.sources, *entry.sources)),
+        )
+    return [by_key[phrase.casefold()] for phrase in phrases]
+
+
+def filter_command_entries(
+    commands: Sequence[CommandCatalogEntry],
+    query: str,
+    *,
+    current_aircraft: str | None = None,
+    include_current: bool = True,
+    include_general: bool = True,
+    include_other: bool = True,
+    scope_filter_enabled: bool = False,
+) -> list[CommandCatalogEntry]:
+    """Return command entries matching text and optional aircraft-scope filters."""
+    needle = query.strip().lower()
+    filtered: list[CommandCatalogEntry] = []
+    for command in commands:
+        if needle and needle not in command.phrase.lower():
+            continue
+        if scope_filter_enabled and not _scope_included(
+            command,
+            current_aircraft=current_aircraft,
+            include_current=include_current,
+            include_general=include_general,
+            include_other=include_other,
+        ):
+            continue
+        filtered.append(command)
+    return filtered
+
+
+def _scope_included(
+    command: CommandCatalogEntry,
+    *,
+    current_aircraft: str | None,
+    include_current: bool,
+    include_general: bool,
+    include_other: bool,
+) -> bool:
+    if not command.aircraft:
+        return include_general
+    if entry_matches_aircraft(command, current_aircraft):
+        return include_current
+    return include_other
+
+
+def _unique_scope_values(values: Iterable[str]) -> tuple[str, ...]:
+    seen: set[str] = set()
+    unique: list[str] = []
+    for value in values:
+        normalized = " ".join(value.split())
+        key = normalized.casefold()
+        if not normalized or key in seen:
+            continue
+        seen.add(key)
+        unique.append(normalized)
+    return tuple(unique)
+
+
 class _CommandsTab:
     """One notebook tab: a live-searchable, alphabetically-sorted command list."""
 
     def __init__(
         self,
         parent: Misc,
-        get_commands: Callable[[], Sequence[str]],
+        get_commands: Callable[[], Sequence[CommandSourceEntry]],
         palette: Mapping[str, str],
         custom_font: Font,
         empty_message: str,
+        *,
+        get_current_aircraft: Callable[[], str | None] | None = None,
+        enable_scope_filters: bool = False,
     ) -> None:
         """Build the search box, count label, and scrolled listbox into ``parent``.
 
@@ -93,6 +185,8 @@ class _CommandsTab:
             palette: The active theme palette (used to colour the non-themed listbox).
             custom_font: The shared UI font.
             empty_message: The count-label text shown when the source is empty.
+            get_current_aircraft: Returns the current DCS aircraft/module name, when known.
+            enable_scope_filters: Whether this tab should show aircraft-scope filters.
         """
         from tkinter import (
             BOTH,
@@ -103,28 +197,64 @@ class _CommandsTab:
             NS,
             NSEW,
             VERTICAL,
+            BooleanVar,
             Listbox,
             Scrollbar,
             StringVar,
             X,
         )
 
-        from ttkbootstrap import Entry, Frame, Label
+        from ttkbootstrap import Checkbutton, Entry, Frame, Label
 
         self._get_commands = get_commands
+        self._get_current_aircraft = get_current_aircraft or (lambda: None)
         self._empty_message = empty_message
-        self._all_commands: list[str] = []
-        self._filtered: list[str] = []
-        self._signature: tuple[str, ...] = ()
+        self._enable_scope_filters = enable_scope_filters
+        self._scope_filter_active = False
+        self._current_aircraft: str | None = None
+        self._all_commands: list[CommandCatalogEntry] = []
+        self._filtered: list[CommandCatalogEntry] = []
+        self._scope_total = 0
+        self._signature: tuple[CommandSourceEntry, ...] = ()
         self._end = END
 
         self._query: Any = StringVar()
+        self._include_current: Any = BooleanVar(value=True)
+        self._include_general: Any = BooleanVar(value=False)
+        self._include_other: Any = BooleanVar(value=False)
         search_frame = Frame(parent)
         search_frame.pack(fill=X, padx=12, pady=(12, 6))
         Label(search_frame, text="Search").pack(side=LEFT, padx=(0, 8))
         entry = Entry(search_frame, textvariable=self._query, font=custom_font)
         entry.pack(side=LEFT, fill=X, expand=True)
         self._entry: Any = entry
+
+        self._scope_widgets: list[Any] = []
+        self._current_scope_check: Any | None = None
+        if enable_scope_filters:
+            scope_frame = Frame(parent)
+            scope_frame.pack(fill=X, padx=12, pady=(0, 6))
+            current_check = Checkbutton(
+                scope_frame,
+                text="Current aircraft",
+                variable=self._include_current,
+                command=self._on_scope_filter_changed,
+            )
+            current_check.pack(side=LEFT, padx=(0, 12))
+            self._current_scope_check = current_check
+            self._scope_widgets.append(current_check)
+            for label, variable in (
+                ("General", self._include_general),
+                ("Other aircraft", self._include_other),
+            ):
+                widget = Checkbutton(
+                    scope_frame,
+                    text=label,
+                    variable=variable,
+                    command=self._on_scope_filter_changed,
+                )
+                widget.pack(side=LEFT, padx=(0, 12))
+                self._scope_widgets.append(widget)
 
         self._count: Any = StringVar(value="")
         Label(parent, textvariable=self._count, bootstyle="secondary").pack(
@@ -174,14 +304,22 @@ class _CommandsTab:
     def refresh(self) -> None:
         """Reload + re-render only when this tab's command set changed."""
         commands = tuple(self._get_commands())
-        if commands == self._signature:
+        current_aircraft = self._get_current_aircraft()
+        if commands == self._signature and current_aircraft == self._current_aircraft:
             return
-        self._signature = commands
-        self._all_commands = sort_commands(commands)
+        if commands != self._signature:
+            self._signature = commands
+            self._all_commands = sort_command_entries(commands)
+        self._current_aircraft = current_aircraft
+        self._update_scope_filters()
         self._apply_filter(preserve=True)
 
     def _on_query_changed(self, *_args: object) -> None:
         """Re-filter the list when the search text changes."""
+        self._apply_filter()
+
+    def _on_scope_filter_changed(self) -> None:
+        """Re-filter the list when a scope checkbox changes."""
         self._apply_filter()
 
     def _apply_filter(self, preserve: bool = False) -> None:
@@ -192,19 +330,60 @@ class _CommandsTab:
                 filter (used on a background refresh so the user's place is not lost).
         """
         previous = self._selected_command() if preserve else None
-        self._filtered = filter_commands(self._all_commands, self._query.get())
+        self._scope_total = len(
+            filter_command_entries(
+                self._all_commands,
+                "",
+                current_aircraft=self._current_aircraft,
+                include_current=bool(self._include_current.get()),
+                include_general=bool(self._include_general.get()),
+                include_other=bool(self._include_other.get()),
+                scope_filter_enabled=self._scope_filter_active,
+            )
+        )
+        self._filtered = filter_command_entries(
+            self._all_commands,
+            self._query.get(),
+            current_aircraft=self._current_aircraft,
+            include_current=bool(self._include_current.get()),
+            include_general=bool(self._include_general.get()),
+            include_other=bool(self._include_other.get()),
+            scope_filter_enabled=self._scope_filter_active,
+        )
         self._listbox.delete(0, self._end)
         for command in self._filtered:
-            self._listbox.insert(self._end, command)
+            self._listbox.insert(self._end, command.phrase)
         self._update_count()
         self._select_command(previous)
 
+    def _update_scope_filters(self) -> None:
+        """Enable scope checkboxes only when catalog metadata and an aircraft are known."""
+        has_scoped_entries = any(command.aircraft for command in self._all_commands)
+        self._scope_filter_active = bool(
+            self._enable_scope_filters and has_scoped_entries and self._current_aircraft
+        )
+        if not self._scope_widgets:
+            return
+        state = "normal" if self._scope_filter_active else "disabled"
+        if self._current_scope_check is not None:
+            label = (
+                f"{self._current_aircraft} only"
+                if self._scope_filter_active
+                else "Current aircraft"
+            )
+            self._current_scope_check.configure(text=label)
+        for widget in self._scope_widgets:
+            widget.configure(state=state)
+
     def _update_count(self) -> None:
         """Refresh the "N commands" summary under the search box."""
-        total = len(self._all_commands)
+        source_total = len(self._all_commands)
+        total = self._scope_total if self._scope_filter_active else source_total
         shown = len(self._filtered)
-        if total == 0:
+        if source_total == 0:
             self._count.set(self._empty_message)
+        elif total == 0:
+            self._count.set("0 commands")
         elif shown == total:
             self._count.set(f"{total} commands")
         else:
@@ -216,10 +395,10 @@ class _CommandsTab:
             return
         index = 0
         if command is not None:
-            try:
-                index = self._filtered.index(command)
-            except ValueError:
-                index = 0
+            for candidate_index, candidate in enumerate(self._filtered):
+                if candidate.phrase == command:
+                    index = candidate_index
+                    break
         self._set_selection(index)
 
     def _set_selection(self, index: int) -> None:
@@ -234,7 +413,7 @@ class _CommandsTab:
         selection = self._listbox.curselection()
         if not selection:
             return None
-        return self._filtered[int(selection[0])]
+        return self._filtered[int(selection[0])].phrase
 
     def _move_selection(self, delta: int) -> None:
         """Shift the selection by ``delta`` rows, clamped to the list bounds."""
@@ -280,8 +459,9 @@ class VaivoxCommands:
     def __init__(
         self,
         root: Window,
-        get_core_commands: Callable[[], Sequence[str]],
+        get_core_commands: Callable[[], Sequence[CommandSourceEntry]],
         get_mission_commands: Callable[[], Sequence[str]],
+        get_current_aircraft: Callable[[], str | None] | None,
         palette: Mapping[str, str],
         on_close: Callable[[], None] | None = None,
     ) -> None:
@@ -291,6 +471,7 @@ class VaivoxCommands:
             root: The parent application window.
             get_core_commands: Returns the live permanent command phrases (Core tab).
             get_mission_commands: Returns the live mission F10 command phrases (F10 tab).
+            get_current_aircraft: Returns the current DCS aircraft/module name, when known.
             palette: The active theme palette (used to colour the non-themed listboxes).
             on_close: Optional callback invoked when the window is closed (so the app can
                 drop its single-instance reference).
@@ -324,14 +505,25 @@ class VaivoxCommands:
         notebook.pack(fill=BOTH, expand=True, padx=12, pady=12)
 
         self._tabs: list[_CommandsTab] = []
-        specs: list[tuple[str, Callable[[], Sequence[str]], str]] = [
+        specs: list[tuple[str, Callable[[], Sequence[CommandSourceEntry]], str]] = [
             ("Core", get_core_commands, "No core commands yet — refresh the VAICOM vocabulary"),
             ("F10", get_mission_commands, "No F10 commands pulled this session"),
         ]
+        scope_filters = {"Core": True}
         for label, get_commands, empty_message in specs:
             page = Frame(notebook)
             notebook.add(page, text=label)
-            self._tabs.append(_CommandsTab(page, get_commands, palette, custom_font, empty_message))
+            self._tabs.append(
+                _CommandsTab(
+                    page,
+                    get_commands,
+                    palette,
+                    custom_font,
+                    empty_message,
+                    get_current_aircraft=get_current_aircraft,
+                    enable_scope_filters=scope_filters.get(label, False),
+                )
+            )
 
         window.protocol("WM_DELETE_WINDOW", self._close)
         if self._tabs:

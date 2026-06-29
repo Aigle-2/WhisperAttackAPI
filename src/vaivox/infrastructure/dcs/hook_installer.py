@@ -25,10 +25,11 @@ from vaivox.infrastructure.dcs.menu_listener import DEFAULT_MENU_PORT
 _LOGGER = logging.getLogger(__name__)
 
 #: Bump when the Lua changes so :meth:`ensure_installed` replaces an older deployed block.
+#: v8 adds the current aircraft/module name to the live snapshot for UI filtering.
 #: v7 periodically re-sends the settled snapshot at the same menu revision so a VAIVOX
 #: process restarted after DCS can establish a fresh live handshake. v6 introduced the scan
 #: of the authoritative ``data.menuOther`` tree that VAICOM itself exports.
-_HOOK_VERSION = "v7"
+_HOOK_VERSION = "v8"
 
 #: Maximum wait for a newly started VAIVOX listener to receive the current DCS snapshot.
 _HEARTBEAT_SECONDS = 5
@@ -83,6 +84,7 @@ local _vaivox_ok, _vaivox_err = base.pcall(function()
   local session = base.tostring({{}})
   local revision = 0
   local entries = {{}}
+  local aircraft = nil
   local heartbeat_seconds = {heartbeat_seconds}
 
   local function monotonic_now()
@@ -101,6 +103,19 @@ local _vaivox_ok, _vaivox_err = base.pcall(function()
     return copied
   end
 
+  local function current_aircraft()
+    if base.Export and base.Export.LoGetSelfData then
+      local ok_self, self_data = base.pcall(base.Export.LoGetSelfData)
+      if ok_self and base.type(self_data) == "table" then
+        for _, key in base.ipairs({{"Name", "name", "TypeName", "typeName"}}) do
+          local value = self_data[key]
+          if base.type(value) == "string" and value ~= "" then return value end
+        end
+      end
+    end
+    return nil
+  end
+
   local last_publish = nil
   local function publish(phase, advance_revision)
     if advance_revision ~= false then revision = revision + 1 end
@@ -111,6 +126,7 @@ local _vaivox_ok, _vaivox_err = base.pcall(function()
         session = session,
         revision = revision,
         phase = phase,
+        aircraft = aircraft,
         entries = entries,
       }})
     end)
@@ -154,16 +170,21 @@ local _vaivox_ok, _vaivox_err = base.pcall(function()
   local last_scan_error = nil
   local function scan_or_heartbeat(now)
     local found = {{}}
+    local observed_aircraft = current_aircraft()
     scan_node(data and data.menuOther, {{}}, found)
-    local ok_fingerprint, fingerprint = base.pcall(function() return JSON:encode(found) end)
+    local ok_fingerprint, fingerprint = base.pcall(function()
+      return JSON:encode({{entries = found, aircraft = observed_aircraft}})
+    end)
     if not ok_fingerprint then base.error(fingerprint) end
     if fingerprint ~= last_fingerprint then
       last_fingerprint = fingerprint
       entries = found
+      aircraft = observed_aircraft
       publish("scan")
       _vaivox_report(
         "snapshot revision=" .. base.tostring(revision) ..
-        " entries=" .. base.tostring(#entries) .. " session=" .. session,
+        " entries=" .. base.tostring(#entries) ..
+        " aircraft=" .. base.tostring(aircraft) .. " session=" .. session,
         false
       )
     elseif now ~= nil and

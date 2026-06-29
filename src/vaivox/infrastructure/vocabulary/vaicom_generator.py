@@ -16,6 +16,7 @@ from pathlib import Path
 
 from vaivox.application.ports import VocabularyGenerationResult
 from vaivox.infrastructure.vocabulary import vaicom_generator_core as generator
+from vaivox.infrastructure.vocabulary.command_catalog import COMMAND_CATALOG_FILE
 
 #: Output file names mirror the packaged generator and the loaders
 #: (:mod:`vaivox.infrastructure.vocabulary.vaicom_keyterms` / ``.phrase_index``).
@@ -57,6 +58,10 @@ class VaicomVocabularyGenerator:
     def _phrase_index_path(self) -> Path:
         return self._data_dir / PHRASE_INDEX_FILE
 
+    @property
+    def _command_catalog_path(self) -> Path:
+        return self._data_dir / COMMAND_CATALOG_FILE
+
     def is_stale(self) -> bool:
         """Whether the generated vocabulary is missing or older than install sources.
 
@@ -65,7 +70,11 @@ class VaicomVocabularyGenerator:
             source file newer than the outputs; ``False`` when up to date or when no
             install can be found to regenerate against.
         """
-        if not self._keyterms_path.is_file() or not self._phrase_index_path.is_file():
+        if (
+            not self._keyterms_path.is_file()
+            or not self._phrase_index_path.is_file()
+            or not self._command_catalog_path.is_file()
+        ):
             return True
         root = self._discover_root()
         if root is None:
@@ -74,7 +83,9 @@ class VaicomVocabularyGenerator:
         if newest_source is None:
             return False
         outputs_mtime = min(
-            self._keyterms_path.stat().st_mtime, self._phrase_index_path.stat().st_mtime
+            self._keyterms_path.stat().st_mtime,
+            self._phrase_index_path.stat().st_mtime,
+            self._command_catalog_path.stat().st_mtime,
         )
         return newest_source > outputs_mtime
 
@@ -92,8 +103,15 @@ class VaicomVocabularyGenerator:
 
         keyterms: list[str] = generator.generate_keyterms(root, self._saved_games)
         generator.write_keyterms(self._keyterms_path, keyterms, root, self._saved_games)
-        phrases: list[str] = generator.generate_phrase_index(root, self._saved_games)
+        catalog = generator.generate_command_catalog(root, self._saved_games)
+        phrases: list[str] = [entry.phrase for entry in catalog]
         generator.write_phrase_index(self._phrase_index_path, phrases, root, self._saved_games)
+        generator.write_command_catalog(
+            self._command_catalog_path,
+            catalog,
+            root,
+            self._saved_games,
+        )
 
         return VocabularyGenerationResult(
             generated=True,

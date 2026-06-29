@@ -224,8 +224,10 @@ class VaivoxApp:
         self.refresh_vocabulary = wired.refresh_vocabulary
         self.refresh_mission_vocabulary = wired.refresh_mission_vocabulary
         self.get_core_phrases = wired.get_core_phrases
+        self.get_core_command_entries = wired.get_core_command_entries
         self.get_mission_phrases = wired.get_mission_phrases
         self.get_mission_display_phrases = wired.get_mission_display_phrases
+        self.get_current_aircraft = wired.get_current_aircraft
         self.reconciliation_vocabulary = wired.reconciliation_vocabulary
         self.stt_keyterms = wired.stt_keyterms
         self.add_word_mapping_use_case = wired.add_word_mapping
@@ -525,8 +527,9 @@ class VaivoxApp:
             return
         self._commands_window = VaivoxCommands(
             self.window,
-            get_core_commands=self.get_core_phrases,
+            get_core_commands=self.get_core_command_entries,
             get_mission_commands=self.get_mission_display_phrases,
+            get_current_aircraft=self.get_current_aircraft,
             palette=self.palette,
             on_close=self._on_commands_closed,
         )
