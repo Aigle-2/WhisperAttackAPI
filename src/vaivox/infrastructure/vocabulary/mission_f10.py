@@ -47,6 +47,23 @@ _F10_ACTIVITY_RE = re.compile(
     r"(?P<identifier>Action\s+[^\r\n]+)",
     re.IGNORECASE,
 )
+_BUILTIN_LABEL_ALIASES = {
+    "request engine start": (
+        "Engine Start",
+        "Request To Start Engines",
+        "Requesting Start",
+    ),
+    "request takeoff": (
+        "Ready at the Hold",
+        "Ready in turn",
+        "Requesting Takeoff Clearance",
+    ),
+    "request taxi to runway": (
+        "Request Taxi for Takeoff",
+        "Request Taxi for Departure",
+        "Request Taxi Clearance",
+    ),
+}
 
 
 @dataclass(frozen=True)
@@ -184,7 +201,7 @@ class VaicomF10MissionVocabulary:
                     item,
                     dispatch_index=entry.action_index,
                     menu_path=entry.path,
-                    semantic_aliases=_semantic_aliases(item.identifier, aliases),
+                    semantic_aliases=_semantic_aliases(item, aliases),
                 )
             )
         for item in items:
@@ -193,7 +210,7 @@ class VaicomF10MissionVocabulary:
             surfaces.append(
                 _surface_from_item(
                     item,
-                    semantic_aliases=_semantic_aliases(item.identifier, aliases),
+                    semantic_aliases=_semantic_aliases(item, aliases),
                     available=False,
                     unavailable_reason="not present in the settled live DCS F10 menu",
                 )
@@ -465,11 +482,22 @@ def _f10_aliases(identifier: str) -> tuple[str, ...]:
 
 
 def _semantic_aliases(
-    identifier: str,
+    item: _F10Item,
     aliases: Mapping[str, tuple[str, ...]],
 ) -> tuple[str, ...]:
-    """Return only aliases joined by exact normalized VAICOM action identifier."""
-    return tuple(aliases.get(" ".join(identifier.split()).casefold(), ()))
+    """Return local VAICOM aliases plus conservative built-ins for known F10 labels."""
+    phrases = (
+        *aliases.get(" ".join(item.identifier.split()).casefold(), ()),
+        *_BUILTIN_LABEL_ALIASES.get(" ".join(item.label.split()).casefold(), ()),
+    )
+    unique: list[str] = []
+    seen: set[str] = set()
+    for phrase in phrases:
+        key = " ".join(phrase.split()).casefold()
+        if key and key not in seen:
+            seen.add(key)
+            unique.append(phrase)
+    return tuple(unique)
 
 
 def _recognition_phrases(surfaces: Sequence[CommandSurface]) -> list[str]:

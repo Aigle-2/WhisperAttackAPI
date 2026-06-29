@@ -1,9 +1,12 @@
 {"raw_stt": "Clearance Lion 6-1 Clearance on request IFR DREAM 7", "expected_label": "DREAM 7", "tags": ["mission_f10", "ai_atc", "real_operator", "numeric_distractors"]}
 {"raw_stt": "Clearance delivery Lion 61 Clearance on request IFR DREAM 7", "expected_label": "DREAM 7", "tags": ["mission_f10", "ai_atc", "real_operator", "numeric_distractors"]}
 {"raw_stt": "Set call sign Chaos", "expected_label": "Chaos", "tags": ["mission_f10", "ai_atc", "real_operator", "anchored_callsign"]}
+{"raw_stt": "Set call sign 13", "expected_label": "1", "tags": ["mission_f10", "ai_atc", "real_operator", "anchored_callsign", "numeric_callsign"]}
 {"raw_stt": "Ground Uzi 6-1 request engine start", "expected_label": "Request Engine Start", "tags": ["mission_f10", "ai_atc", "kneeboard_pattern"]}
 {"raw_stt": "Ground Uzi 61 request to start engines", "expected_label": "Request Engine Start", "tags": ["mission_f10", "ai_atc", "semantic_alias"]}
+{"raw_stt": "Nellis Ground Lion three one request taxi for takeoff", "expected_label": "Request Taxi to Runway", "tags": ["mission_f10", "ai_atc", "real_operator", "semantic_alias"]}
 {"raw_stt": "Requesting takeoff clearance", "expected_label": "Request Takeoff", "tags": ["mission_f10", "ai_atc", "semantic_alias"]}
 {"raw_stt": "Set callsign digit six", "expected_label": "6", "tags": ["mission_f10", "ai_atc", "anchored_callsign", "numeric_distractors"]}
+{"raw_stt": "Sets callsign Chaos", "expected_label": "Chaos", "tags": ["mission_f10", "ai_atc", "real_operator", "anchored_callsign", "stt_inflection"]}
 {"raw_stt": "Yup", "expected_label": "Yup", "tags": ["mission_f10", "ai_atc", "single_token_reply"]}
 {"raw_stt": "Negative", "expected_label": "Negative", "tags": ["mission_f10", "ai_atc", "single_token_reply"]}

@@ -23,7 +23,12 @@ from vaivox.domain.commands.model import (
 from vaivox.domain.reconciliation.snapper import DEFAULT_HIGH, DEFAULT_LOW, DEFAULT_MARGIN
 
 _PUNCTUATION = re.compile(r"[^\w\s]", flags=re.UNICODE)
-_CALLSIGN_PREFIXES = (("set", "call", "sign"), ("set", "callsign"))
+_CALLSIGN_PREFIXES = (
+    ("set", "call", "sign"),
+    ("set", "callsign"),
+    ("sets", "call", "sign"),
+    ("sets", "callsign"),
+)
 _DIGIT_WORDS = {
     "zero": "0",
     "one": "1",
@@ -205,24 +210,20 @@ class CommandSurfaceResolver:
         return None
 
     def _anchored_callsign_matches(self, query: str) -> list[_SurfaceScore]:
-        """Match ``set call sign|callsign <label>`` to an exact nonnumeric F10 label."""
+        """Match ``set call sign|callsign <label>`` to an exact F10 label."""
         remainder = _callsign_remainder(query)
         if remainder is None:
             return []
-        if remainder[:1] in (("digit",), ("digits",)):
-            remainder = remainder[1:]
-        if len(remainder) != 1 and not any(character.isalpha() for character in remainder):
+        requested = _callsign_requested_label(remainder)
+        if requested is None:
             return []
-        requested_label = " ".join(remainder)
-        digit = _digit_token(requested_label)
-        if digit is not None:
-            requested_label = digit
+        requested_label, requires_digit_surface = requested
         return [
             _SurfaceScore(surface, surface.label, 100.0)
             for surface in self._surfaces
             if isinstance(surface.dispatch_target, VaicomF10Action)
             and _normalize(surface.label) == requested_label
-            and (digit is None or _is_callsign_digit_surface(surface))
+            and (not requires_digit_surface or _is_callsign_digit_surface(surface))
         ]
 
     def _embedded_label_matches(self, query: str) -> list[_SurfaceScore]:
@@ -363,11 +364,42 @@ def _callsign_remainder(query: str) -> tuple[str, ...] | None:
     return None
 
 
-def _digit_token(token: str) -> str | None:
-    normalized = _normalize(token)
-    if len(normalized) == 1 and normalized.isdigit():
-        return normalized
-    return _DIGIT_WORDS.get(normalized)
+def _callsign_requested_label(remainder: tuple[str, ...]) -> tuple[str, bool] | None:
+    """Return the live F10 label requested by an anchored callsign phrase.
+
+    AI_ATC's ``Set Integer`` menu exposes only one digit leaf per flight number. Operators
+    still naturally say their full DCS callsign number (for example ``13``); route that to
+    the leading digit leaf while keeping generic embedded digit matching disabled.
+    """
+    if remainder[:1] in (("digit",), ("digits",)):
+        remainder = remainder[1:]
+    if not remainder:
+        return None
+
+    number = _callsign_number_digits(remainder)
+    if number is not None:
+        return number[0], True
+
+    if not any(token.isalpha() for token in remainder):
+        return None
+    return " ".join(remainder), False
+
+
+def _callsign_number_digits(tokens: tuple[str, ...]) -> str | None:
+    digits: list[str] = []
+    for token in tokens:
+        normalized = _normalize(token)
+        if normalized.isdigit() and len(normalized) <= 2:
+            digits.append(normalized)
+            continue
+        digit = _DIGIT_WORDS.get(normalized)
+        if digit is None:
+            return None
+        digits.append(digit)
+    joined = "".join(digits)
+    if 1 <= len(joined) <= 2:
+        return joined
+    return None
 
 
 def _is_callsign_number_token(token: str) -> bool:

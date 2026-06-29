@@ -28,6 +28,11 @@ _SEMANTIC_ALIASES = {
         "Ready in turn",
         "Requesting Takeoff Clearance",
     ),
+    "Request Taxi to Runway": (
+        "Request Taxi for Takeoff",
+        "Request Taxi for Departure",
+        "Request Taxi Clearance",
+    ),
 }
 
 

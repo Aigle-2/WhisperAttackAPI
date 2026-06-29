@@ -57,7 +57,7 @@ example uses **Aspen 1‑1**.
 
 **2. Ground** (275.8)
 - `Ground <CALLSIGN> request engine start`
-- `Ground <CALLSIGN> request taxi to runway`
+- `Ground <CALLSIGN> request taxi to runway` / `request taxi for takeoff`
 - `Ground <CALLSIGN> request taxi to parking` *(after landing)*
 
 **3. Tower** (327.0)
@@ -93,14 +93,18 @@ example uses **Aspen 1‑1**.
 
 VAIVOX accepts the full call; it does not require speaking only the final menu label. It
 loads the user's local VAICOM `Export/keywords.html` and joins each exact `Action ...`
-identifier to its spoken aliases. It then matches an exact, contiguous multi-token label or
-trusted alias inside the reconciled phrase, so a call
+identifier to its spoken aliases, with a small set of conservative AI_ATC aliases for common
+labels such as `Request Taxi to Runway` (`request taxi for takeoff`). It then matches an
+exact, contiguous multi-token label or trusted alias inside the reconciled phrase, so a call
 ending in `IFR DREAM 7` selects `DREAM 7` even when the live menu also contains numeric
 entries such as `1`, `6`, and `7`. A single-token menu item is intentionally selectable only
 as the complete spoken command, preventing incidental callsign digits from dispatching it.
-The explicit forms `Set call sign <CALLSIGN>` and `Set callsign <CALLSIGN>` are the safe
+The explicit forms `Set call sign <CALLSIGN>` and `Set callsign <CALLSIGN>` (including the
+common STT inflection `Sets callsign`) are the safe
 exception: they select a unique exact live label, so `Set call sign Chaos` fires `Chaos`,
-while `Set callsign digit six` fires the numeric leaf under the callsign path. A combined
+while `Set callsign digit six` fires the numeric leaf under the callsign path. AI_ATC's
+`Set Integer` menu exposes only one digit leaf per flight number; if an operator says a
+full DCS callsign number such as `Set call sign 13`, VAIVOX fires the `1` leaf. A combined
 phrase such as `Set callsign Chaos 61` is recognized but deliberately rejected without UDP
 or VoiceAttack fallback: this mission exposes no safe atomic combined action, and its two
 separate callbacks can overwrite the requested prefix.

@@ -369,6 +369,40 @@ def test_live_path_and_local_vaicom_aliases_build_an_active_surface(tmp_path) ->
     assert resolution.matched_alias == "Request To Start Engines"
 
 
+def test_builtin_ai_atc_taxi_alias_resolves_against_the_live_surface(tmp_path) -> None:
+    log = tmp_path / "VAICOMPRO.log"
+    log.write_text(
+        "Mission title: AI ATC Nellis, Menu name: Other\n"
+        "Adding new menu item: Action Request Taxi to Runway\n",
+        encoding="utf-8",
+    )
+    entry = MissionMenuEntry(
+        label="Request Taxi to Runway",
+        action_index=13,
+        path=("AI ATC", "Ground"),
+    )
+    adapter = VaicomF10MissionVocabulary(str(log), live_entries=lambda: (entry,))
+
+    snapshot = adapter.load()
+    [surface] = snapshot.surfaces
+
+    assert surface.semantic_aliases == (
+        "Request Taxi for Takeoff",
+        "Request Taxi for Departure",
+        "Request Taxi Clearance",
+    )
+    assert "Request Taxi for Takeoff" in snapshot.phrases
+
+    resolution = CommandSurfaceResolver(snapshot.surfaces).resolve(
+        "Nellis Ground Lion three one request taxi for takeoff"
+    )
+
+    assert resolution.decision is CommandResolutionDecision.RESOLVED
+    assert resolution.surface is not None
+    assert resolution.surface.label == "Request Taxi to Runway"
+    assert resolution.matched_alias == "Request Taxi for Takeoff"
+
+
 def test_inactive_dynamic_alias_is_rejected_instead_of_falling_through(tmp_path) -> None:
     log = tmp_path / "VAICOMPRO.log"
     log.write_text(

@@ -420,12 +420,15 @@ def test_embedded_f10_label_uses_typed_dispatch_without_voiceattack_fallback():
     assert outcome.dispatch.target_kind == "vaicom_f10_action"
 
 
-def test_anchored_callsign_uses_typed_dispatch_without_voiceattack_fallback():
+@pytest.mark.parametrize("transcript", ["Set call sign Chaos", "Sets callsign Chaos"])
+def test_anchored_callsign_uses_typed_dispatch_without_voiceattack_fallback(
+    transcript,
+):
     command_sink = FakeCommandSink()
     dispatcher = FakeCommandDispatcher(command_sink)
     use_case, _reporter, telemetry = _make_stop(
         FakeRecorder(),
-        FakeSpeechToText(text="Set call sign Chaos"),
+        FakeSpeechToText(text=transcript),
         command_sink=command_sink,
         command_dispatcher=dispatcher,
         surface_matcher=CommandSurfaceResolver([_f10_surface("Chaos", action_index=9)]),
@@ -441,6 +444,29 @@ def test_anchored_callsign_uses_typed_dispatch_without_voiceattack_fallback():
     assert outcome.destination == "vaicom_f10_action"
     assert outcome.resolution is not None
     assert outcome.resolution.label == "Chaos"
+
+
+def test_anchored_callsign_number_uses_typed_dispatch_without_voiceattack_fallback():
+    command_sink = FakeCommandSink()
+    dispatcher = FakeCommandDispatcher(command_sink)
+    use_case, _reporter, telemetry = _make_stop(
+        FakeRecorder(),
+        FakeSpeechToText(text="Set call sign 13"),
+        command_sink=command_sink,
+        command_dispatcher=dispatcher,
+        surface_matcher=CommandSurfaceResolver([_f10_surface("1", action_index=7)]),
+        config=FakeConfig(fuzzy_words=[]),
+    )
+
+    use_case.execute()
+
+    assert command_sink.sent == []
+    assert [action.identifier for action in dispatcher.f10_sent] == ["Action 1"]
+    assert dispatcher.f10_sent[0].action_index == 7
+    outcome = telemetry.outcomes[0]
+    assert outcome.destination == "vaicom_f10_action"
+    assert outcome.resolution is not None
+    assert outcome.resolution.label == "1"
 
 
 def test_combined_callsign_rejection_never_falls_back_or_dispatches():

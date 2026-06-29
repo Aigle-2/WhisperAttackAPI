@@ -60,14 +60,20 @@ dispatch each target through the transport that actually executes it.
   **fire-and-forget** — DCS sends no acknowledgement — so F10 dispatch yields a
   `DispatchOutcome` only, never a `MatchOutcome`.
 - `CommandSurfaceResolver` resolves whole-query exact matches first. It then recognizes the
-  exact anchored grammar `Set call sign|callsign <label>` for a unique nonnumeric live F10
-  label. This safely permits `Set call sign Chaos` without making every incidental
+  exact anchored grammar `Set call sign|callsign <label>` for a unique live F10 callsign
+  label, tolerating the common STT inflection `Sets callsign`, and including AI_ATC's
+  numeric `Set Integer` leaves. A full DCS callsign number such as `Set call sign 13`
+  resolves to the leading `1` leaf because that is the only executable menu action AI_ATC
+  exposes. This safely permits `Set call sign Chaos` without making every incidental
   single-token callsign eligible. Before fuzzy scoring, it may also resolve a live F10
   **label** embedded as a contiguous token sequence in a longer radio call. Only labels of
   at least two normalized tokens participate; the unique most-specific match wins (most
   tokens, then longest normalized label), and equal specificity abstains. Thus `DREAM 7`
   beats the numeric `7` inside a full clearance call, while bare `7` remains available as an
-  exact whole command. Diagnostic aliases are not considered in either special phase.
+  exact whole command. Trusted semantic aliases from the mission vocabulary adapter can
+  participate in embedded matching (for example `request taxi for takeoff` for the live
+  `Request Taxi to Runway` label). Diagnostic aliases are not considered in either special
+  phase.
   Fuzzy mission F10, fuzzy static, and raw fallback keep the existing conservative snap
   thresholds.
 - **ActionIndex sourcing.** The authoritative source is the live DCS menu, delivered by a
@@ -175,8 +181,10 @@ debounce gap, repeated notification, or handle invalidation.
 **Anchored single-token callsign resolution is regression-covered.** Real operator output
 `Set call sign Chaos` previously fell through to VoiceAttack because the generic embedded
 phase correctly excludes single-token F10 labels. The explicit callsign grammar now resolves
-that phrase to the typed `Chaos` surface. Numeric labels, unanchored mentions, trailing
-composite digits (`Chaos 1-1`), and duplicate live labels remain fail-closed.
+that phrase to the typed `Chaos` surface. Numeric Set Integer leaves are accepted only via
+the anchored callsign grammar (`Set callsign digit six`, `Set call sign 13` -> `1`), and
+STT's `Sets callsign Chaos` inflection resolves the same way; unanchored mentions, trailing
+composite name+digits (`Chaos 1-1`), and duplicate live labels remain fail-closed.
 
 ## Action Items
 
@@ -210,5 +218,5 @@ composite digits (`Chaos 1-1`), and duplicate live labels remain fail-closed.
     while requiring single-token menu entries to match the whole utterance.
 17. [x] Re-publish the settled live menu at the same revision every five seconds, allowing a
     VAIVOX restart to reacquire the current DCS session without restoring persisted handles.
-18. [x] Resolve exact anchored `Set call sign|callsign <label>` phrases to a unique
-    nonnumeric live F10 surface without reopening generic single-token embedded matching.
+18. [x] Resolve exact anchored `Set call sign|callsign <label>` phrases to a unique live
+    F10 callsign surface without reopening generic single-token embedded matching.

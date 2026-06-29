@@ -24,7 +24,11 @@ def _voiceattack(label: str) -> CommandSurface:
     )
 
 
-def _f10(label: str, identifier: str | None = None) -> CommandSurface:
+def _f10(
+    label: str,
+    identifier: str | None = None,
+    menu_path: tuple[str, ...] = (),
+) -> CommandSurface:
     identifier = identifier or f"Action {label}"
     return CommandSurface(
         id=f"mission_f10:{identifier.casefold().replace(' ', '-')}",
@@ -37,6 +41,7 @@ def _f10(label: str, identifier: str | None = None) -> CommandSurface:
             label=label,
             command_id=20042,
             action_index=3,
+            menu_path=menu_path,
         ),
     )
 
@@ -135,7 +140,15 @@ def test_bare_digit_still_resolves_as_an_exact_f10_command() -> None:
     assert resolution.surface.label == "7"
 
 
-@pytest.mark.parametrize("query", ["Set call sign Chaos", "Set callsign Chaos"])
+@pytest.mark.parametrize(
+    "query",
+    [
+        "Set call sign Chaos",
+        "Set callsign Chaos",
+        "Sets call sign Chaos",
+        "Sets callsign Chaos",
+    ],
+)
 def test_anchored_callsign_phrase_resolves_a_single_token_f10_label(query: str) -> None:
     resolver = CommandSurfaceResolver(_live_like_f10_menu())
 
@@ -170,6 +183,36 @@ def test_callsign_digit_grammar_resolves_an_exact_numeric_leaf(query: str) -> No
     assert resolution.decision is CommandResolutionDecision.RESOLVED
     assert resolution.surface is not None
     assert resolution.surface.label == "7"
+
+
+@pytest.mark.parametrize(
+    ("query", "expected"),
+    [
+        ("Set call sign 13", "1"),
+        ("Set callsign 1 3", "1"),
+        ("Set callsign one three", "1"),
+        ("Set callsign 61", "6"),
+    ],
+)
+def test_callsign_number_uses_the_ai_atc_set_integer_leaf(
+    query: str,
+    expected: str,
+) -> None:
+    resolver = CommandSurfaceResolver(_live_like_f10_menu())
+
+    resolution = resolver.resolve(query)
+
+    assert resolution.decision is CommandResolutionDecision.RESOLVED
+    assert resolution.surface is not None
+    assert resolution.surface.label == expected
+
+
+def test_callsign_number_does_not_resolve_an_unrelated_numeric_surface() -> None:
+    resolver = CommandSurfaceResolver([_f10("13", menu_path=("Runway",))])
+
+    resolution = resolver.resolve("Set callsign 13")
+
+    assert resolution.decision is not CommandResolutionDecision.RESOLVED
 
 
 @pytest.mark.parametrize("query", ["Set call sign Chaos 1-1", "Set callsign Chaos 11"])
