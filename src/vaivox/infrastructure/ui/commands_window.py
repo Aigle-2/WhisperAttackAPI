@@ -26,6 +26,10 @@ from vaivox.infrastructure.vocabulary.command_catalog import (
     CommandCatalogEntry,
     entry_matches_aircraft,
 )
+from vaivox.infrastructure.voiceattack.dynamic_patterns import (
+    format_voiceattack_pattern,
+    voiceattack_pattern_matches,
+)
 
 if TYPE_CHECKING:
     from tkinter import Misc
@@ -104,7 +108,15 @@ def sort_command_entries(commands: Iterable[CommandSourceEntry]) -> list[Command
             aircraft=_unique_scope_values((*previous.aircraft, *entry.aircraft)),
             sources=_unique_scope_values((*previous.sources, *entry.sources)),
         )
-    return [by_key[phrase.casefold()] for phrase in phrases]
+    return sorted(
+        (by_key[phrase.casefold()] for phrase in phrases),
+        key=lambda entry: display_command_entry(entry).lower(),
+    )
+
+
+def display_command_entry(command: CommandCatalogEntry) -> str:
+    """Return the player-readable command text shown in the Commands window."""
+    return format_voiceattack_pattern(command.phrase)
 
 
 def filter_command_entries(
@@ -121,7 +133,7 @@ def filter_command_entries(
     needle = query.strip().lower()
     filtered: list[CommandCatalogEntry] = []
     for command in commands:
-        if needle and needle not in command.phrase.lower():
+        if needle and not _entry_matches_query(command, query):
             continue
         if scope_filter_enabled and not _scope_included(
             command,
@@ -133,6 +145,15 @@ def filter_command_entries(
             continue
         filtered.append(command)
     return filtered
+
+
+def _entry_matches_query(command: CommandCatalogEntry, query: str) -> bool:
+    needle = query.strip().lower()
+    if not needle:
+        return True
+    raw = command.phrase.lower()
+    display = display_command_entry(command).lower()
+    return needle in raw or needle in display or voiceattack_pattern_matches(command.phrase, query)
 
 
 def _scope_included(
@@ -352,7 +373,7 @@ class _CommandsTab:
         )
         self._listbox.delete(0, self._end)
         for command in self._filtered:
-            self._listbox.insert(self._end, command.phrase)
+            self._listbox.insert(self._end, display_command_entry(command))
         self._update_count()
         self._select_command(previous)
 
@@ -410,10 +431,15 @@ class _CommandsTab:
 
     def _selected_command(self) -> str | None:
         """Return the currently selected command phrase, or ``None``."""
+        entry = self._selected_entry()
+        return None if entry is None else entry.phrase
+
+    def _selected_entry(self) -> CommandCatalogEntry | None:
+        """Return the currently selected command entry, or ``None``."""
         selection = self._listbox.curselection()
         if not selection:
             return None
-        return self._filtered[int(selection[0])].phrase
+        return self._filtered[int(selection[0])]
 
     def _move_selection(self, delta: int) -> None:
         """Shift the selection by ``delta`` rows, clamped to the list bounds."""
@@ -446,10 +472,10 @@ class _CommandsTab:
 
     def _copy_selection(self, _event: object = None) -> str:
         """Copy the selected command to the clipboard (Enter / double-click in the list)."""
-        command = self._selected_command()
+        command = self._selected_entry()
         if command is not None:
             self._listbox.clipboard_clear()
-            self._listbox.clipboard_append(command)
+            self._listbox.clipboard_append(display_command_entry(command))
         return "break"
 
 

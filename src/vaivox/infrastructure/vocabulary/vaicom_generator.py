@@ -10,13 +10,17 @@ the ``vaivox`` package.
 
 from __future__ import annotations
 
+import json
 import os
 from collections.abc import Callable
 from pathlib import Path
 
 from vaivox.application.ports import VocabularyGenerationResult
 from vaivox.infrastructure.vocabulary import vaicom_generator_core as generator
-from vaivox.infrastructure.vocabulary.command_catalog import COMMAND_CATALOG_FILE
+from vaivox.infrastructure.vocabulary.command_catalog import (
+    COMMAND_CATALOG_FILE,
+    COMMAND_CATALOG_VERSION,
+)
 
 #: Output file names mirror the packaged generator and the loaders
 #: (:mod:`vaivox.infrastructure.vocabulary.vaicom_keyterms` / ``.phrase_index``).
@@ -79,6 +83,8 @@ class VaicomVocabularyGenerator:
         root = self._discover_root()
         if root is None:
             return False
+        if not _command_catalog_version_matches(self._command_catalog_path):
+            return True
         newest_source = _newest_source_mtime(root, self._saved_games)
         if newest_source is None:
             return False
@@ -157,6 +163,15 @@ def _newest_source_mtime(root: Path, saved_games: Path) -> float | None:
 
     mtimes = [path.stat().st_mtime for path in sources if path.is_file()]
     return max(mtimes) if mtimes else None
+
+
+def _command_catalog_version_matches(path: Path) -> bool:
+    """Return whether ``path`` was generated with the current catalog schema."""
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return False
+    return isinstance(payload, dict) and payload.get("version") == COMMAND_CATALOG_VERSION
 
 
 def _discover_saved_games(home: Path | None = None) -> Path:

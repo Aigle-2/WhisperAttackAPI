@@ -88,6 +88,9 @@ from vaivox.infrastructure.vocabulary.reconciliation_vocabulary import (
 from vaivox.infrastructure.vocabulary.vaicom_action_aliases import VaicomActionAliasCatalog
 from vaivox.infrastructure.vocabulary.vaicom_generator import VaicomVocabularyGenerator
 from vaivox.infrastructure.voiceattack.dispatcher import TypedCommandDispatcher
+from vaivox.infrastructure.voiceattack.dynamic_patterns import (
+    VoiceAttackDynamicCommandMatcher,
+)
 from vaivox.infrastructure.voiceattack.sink import VoiceAttackCommandSink
 from vaivox.infrastructure.voiceattack.vaicom_f10_sink import UdpVaicomF10ActionSink
 
@@ -245,11 +248,17 @@ def build(
         live_index=live_index,
         live_entries=live_entries,
     )
+
+    def get_current_aircraft() -> str | None:
+        if menu_listener is None:
+            return None
+        return menu_listener.get_health().current_aircraft
+
     command_dispatcher = TypedCommandDispatcher(command_sink, vaicom_f10_sink)
     kneeboard_sink = KneeboardSink(config.get_text_line_length, reporter)
     telemetry = build_telemetry_sink(config)
     snapper = build_phrase_snapper(config, recorder, reporter)
-    surface_resolver = build_command_surface_resolver(config)
+    surface_resolver = build_command_surface_resolver(config, get_current_aircraft)
     add_word_mapping = AddWordMapping(vocabulary_repository, clock)
     # The vocabulary learning loop (ADR-0006): on a confirmed not-matched / snap-abstained
     # VoiceAttack dispatch, derive a learned mapping proposal. Reuses the same repository +
@@ -303,7 +312,7 @@ def build(
         snapper.reload(phrases)
         surface_resolver.reload(
             _merge_command_surfaces(
-                _voiceattack_surfaces(base_phrases),
+                _voiceattack_surfaces(load_command_catalog(config.app_data_location, base_phrases)),
                 get_mission_surfaces(),
             )
         )
@@ -332,11 +341,6 @@ def build(
             for entry in load_command_catalog(config.app_data_location, get_core_phrases())
             if entry.phrase.strip().casefold() not in mission_keys
         )
-
-    def get_current_aircraft() -> str | None:
-        if menu_listener is None:
-            return None
-        return menu_listener.get_health().current_aircraft
 
     refresh_vocabulary = RefreshVocabulary(generator, reporter, apply_phrase_index)
     mission_log_path = config.get_setting("mission_f10_log_path", "").strip() or None
@@ -424,12 +428,14 @@ def _merge_phrase_indexes(base: Sequence[str], mission: Sequence[str]) -> list[s
     return merged
 
 
-def _voiceattack_surfaces(phrases: Sequence[str]) -> list[CommandSurface]:
+def _voiceattack_surfaces(entries: Sequence[CommandCatalogEntry]) -> list[CommandSurface]:
     """Build static VoiceAttack command surfaces from the permanent phrase index."""
     surfaces: list[CommandSurface] = []
     seen: set[str] = set()
-    for phrase in phrases:
-        label = phrase.strip()
+    for entry in entries:
+        if not _is_voiceattack_dispatchable(entry):
+            continue
+        label = entry.phrase.strip()
         if not label:
             continue
         key = label.lower()
@@ -442,11 +448,16 @@ def _voiceattack_surfaces(phrases: Sequence[str]) -> list[CommandSurface]:
                 label=label,
                 aliases=(),
                 source="voiceattack",
-                scope="global",
+                scope=",".join(entry.aircraft) if entry.aircraft else "global",
                 dispatch_target=VoiceAttackCommand(label),
             )
         )
     return surfaces
+
+
+def _is_voiceattack_dispatchable(entry: CommandCatalogEntry) -> bool:
+    """Return whether an entry came from an executable VoiceAttack profile command."""
+    return not entry.sources or any(source.casefold().endswith(".vap") for source in entry.sources)
 
 
 def _merge_command_surfaces(
@@ -561,19 +572,26 @@ ReloadablePhraseSnapper` so a regenerated index can be swapped in at idle withou
     )
 
 
-def build_command_surface_resolver(config: VaivoxConfiguration) -> ReloadableCommandSurfaceResolver:
+def build_command_surface_resolver(
+    config: VaivoxConfiguration,
+    get_current_aircraft: Callable[[], str | None] = lambda: None,
+) -> ReloadableCommandSurfaceResolver:
     """Build the hot-reloadable command-surface resolver from the generated index."""
     phrases = load_phrase_index(config.app_data_location)
+    entries = load_command_catalog(config.app_data_location, phrases)
 
-    def build(index: Sequence[CommandSurface]) -> CommandSurfaceResolver:
+    def build(index: Sequence[CommandSurface]) -> VoiceAttackDynamicCommandMatcher:
         high = config.get_float_setting("snap_high", DEFAULT_HIGH, min_value=0.0, max_value=100.0)
         low = config.get_float_setting("snap_low", DEFAULT_LOW, min_value=0.0, max_value=100.0)
         margin = config.get_float_setting(
             "snap_margin", DEFAULT_MARGIN, min_value=0.0, max_value=100.0
         )
-        return CommandSurfaceResolver(index, high=high, low=low, margin=margin)
+        return VoiceAttackDynamicCommandMatcher(
+            CommandSurfaceResolver(index, high=high, low=low, margin=margin),
+            get_current_aircraft,
+        )
 
-    return ReloadableCommandSurfaceResolver(_voiceattack_surfaces(phrases), build=build)
+    return ReloadableCommandSurfaceResolver(_voiceattack_surfaces(entries), build=build)
 
 
 def load_speech_to_text(

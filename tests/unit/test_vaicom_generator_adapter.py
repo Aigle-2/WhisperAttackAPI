@@ -10,6 +10,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
+from vaivox.infrastructure.vocabulary.command_catalog import COMMAND_CATALOG_VERSION
 from vaivox.infrastructure.vocabulary.vaicom_generator import (
     COMMAND_CATALOG_FILE,
     KEYTERMS_FILE,
@@ -23,7 +24,7 @@ def _write_outputs(data_dir: Path, mtime: float | None = None) -> None:
     (data_dir / KEYTERMS_FILE).write_text("# keyterms\nTexaco\n", encoding="utf-8")
     (data_dir / PHRASE_INDEX_FILE).write_text("# phrases\nTexaco rejoin\n", encoding="utf-8")
     (data_dir / COMMAND_CATALOG_FILE).write_text(
-        '{"version": 1, "entries": [{"phrase": "Texaco rejoin"}]}\n',
+        f'{{"version": {COMMAND_CATALOG_VERSION}, "entries": [{{"phrase": "Texaco rejoin"}}]}}\n',
         encoding="utf-8",
     )
     if mtime is not None:
@@ -84,6 +85,22 @@ def test_stale_when_keywords_html_source_is_newer_than_outputs(tmp_path):
         encoding="utf-8",
     )
     os.utime(keywords_html, (2000.0, 2000.0))
+    generator = VaicomVocabularyGenerator(
+        str(data_dir), saved_games=tmp_path / "sg", discover=lambda: install
+    )
+
+    assert generator.is_stale() is True
+
+
+def test_stale_when_command_catalog_schema_is_old(tmp_path):
+    data_dir = tmp_path / "data"
+    data_dir.mkdir()
+    _write_outputs(data_dir, mtime=3000.0)
+    (data_dir / COMMAND_CATALOG_FILE).write_text(
+        '{"version": 1, "entries": [{"phrase": "Texaco rejoin"}]}\n',
+        encoding="utf-8",
+    )
+    install = _make_install(tmp_path / "install", vap_mtime=2000.0)
     generator = VaicomVocabularyGenerator(
         str(data_dir), saved_games=tmp_path / "sg", discover=lambda: install
     )

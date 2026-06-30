@@ -1175,6 +1175,8 @@ def _is_command_phrase(phrase: str) -> bool:
     kept (they document the command's arguments) and count toward the word/length budget.
     """
     words = phrase.split()
+    if "[" in phrase and "]" in phrase:
+        return 2 <= len(words) <= 160 and len(phrase) <= 1200
     return 2 <= len(words) <= 8 and len(phrase) <= 60
 
 

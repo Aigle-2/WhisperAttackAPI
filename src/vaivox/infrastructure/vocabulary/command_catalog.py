@@ -18,7 +18,7 @@ from pathlib import Path
 _LOGGER = logging.getLogger(__name__)
 
 COMMAND_CATALOG_FILE = "command_catalog.json"
-COMMAND_CATALOG_VERSION = 1
+COMMAND_CATALOG_VERSION = 2
 
 
 @dataclass(frozen=True)

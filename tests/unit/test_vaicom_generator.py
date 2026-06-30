@@ -102,6 +102,27 @@ def test_generate_phrase_index_does_not_fragment_bracketed_alternation(tmp_path)
     assert not any(phrase.startswith("]") or phrase.endswith("[") for phrase in index)
 
 
+def test_generate_phrase_index_keeps_long_dynamic_voiceattack_patterns(tmp_path):
+    root = tmp_path / "VAICOMPRO"
+    (root / "Export").mkdir(parents=True)
+    (root / "Profiles").mkdir()
+    (root / "Export" / "keywords.txt").write_text("", encoding="utf-8")
+    pattern = (
+        "[WSO; Wizzo; Boots;] [Set; Select] TACAN [channel] "
+        "[zero;0;1] [0..9] [0..9] [X-ray; Yankee]"
+    )
+    (root / "Profiles" / "f4.vap").write_text(
+        f"<Command><CommandString>{pattern}</CommandString><Category>F-4E WSO</Category></Command>",
+        encoding="utf-8",
+    )
+
+    index = generate_phrase_index(root, tmp_path / "saved")
+    catalog = generate_command_catalog(root, tmp_path / "saved")
+
+    assert pattern in index
+    assert {entry.phrase: entry for entry in catalog}[pattern].aircraft == ("F-4E",)
+
+
 def test_generate_phrase_index_reads_keywords_html_when_txt_is_missing(tmp_path):
     root = tmp_path / "VAICOMPRO"
     (root / "Export").mkdir(parents=True)

@@ -38,6 +38,9 @@ from vaivox.domain.vocabulary.model import (
     VocabularyEntry,
     VocabularyKind,
 )
+from vaivox.infrastructure.voiceattack.dynamic_patterns import (
+    VoiceAttackDynamicCommandMatcher,
+)
 
 FUZZY_WORDS = ["Kobuleti", "Senaki", "Krymsk", "Texaco"]
 _STAMP_TIME = datetime(2026, 6, 18, 12, 0, 0)
@@ -567,6 +570,43 @@ def test_static_surface_dispatches_to_voiceattack_command():
     assert telemetry.outcomes[0].match == MatchOutcome(
         matched=True, resolved_command="Kobuleti tower"
     )
+
+
+def test_dynamic_voiceattack_pattern_dispatches_concrete_profile_phrase():
+    command_sink = FakeCommandSink(
+        MatchOutcome(matched=True, resolved_command="Set TACAN channel 0 1 2 X-ray")
+    )
+    pattern = (
+        "[WSO; Wizzo; Boots;] [Set; Select] TACAN [channel] "
+        "[zero;0;1] [0..9] [0..9] [X-ray; Yankee]"
+    )
+    surface = CommandSurface(
+        id="voiceattack:f4-tacan",
+        label=pattern,
+        aliases=(),
+        source="voiceattack",
+        scope="F-4E",
+        dispatch_target=VoiceAttackCommand(pattern),
+    )
+    matcher = VoiceAttackDynamicCommandMatcher(
+        CommandSurfaceResolver([surface]),
+        lambda: "F-4E-45MC",
+    )
+    use_case, _reporter, telemetry = _make_stop(
+        FakeRecorder(),
+        FakeSpeechToText(text="Tune TACAN one two"),
+        command_sink=command_sink,
+        surface_matcher=matcher,
+        config=FakeConfig(fuzzy_words=[]),
+    )
+
+    use_case.execute()
+
+    assert command_sink.sent == ["Set TACAN channel 0 1 2 X-ray"]
+    outcome = telemetry.outcomes[0]
+    assert outcome.sent_text == "Set TACAN channel 0 1 2 X-ray"
+    assert outcome.resolution is not None
+    assert outcome.resolution.target_kind == "voiceattack"
 
 
 def test_kneeboard_note_is_never_snapped():

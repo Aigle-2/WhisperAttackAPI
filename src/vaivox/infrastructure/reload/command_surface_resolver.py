@@ -4,9 +4,20 @@ from __future__ import annotations
 
 from collections.abc import Callable, Sequence
 from threading import Lock
+from typing import Protocol
 
 from vaivox.domain.commands.model import CommandResolution, CommandSurface
-from vaivox.domain.commands.resolver import CommandSurfaceResolver
+
+
+class _ResolverSnapshot(Protocol):
+    """Frozen command-surface resolver snapshot."""
+
+    @property
+    def surfaces(self) -> tuple[CommandSurface, ...]:
+        """The command surfaces this snapshot resolves against."""
+
+    def resolve(self, text: str) -> CommandResolution:
+        """Resolve ``text`` to a command surface, or abstain/raw."""
 
 
 class ReloadableCommandSurfaceResolver:
@@ -15,7 +26,7 @@ class ReloadableCommandSurfaceResolver:
     def __init__(
         self,
         surfaces: Sequence[CommandSurface],
-        build: Callable[[Sequence[CommandSurface]], CommandSurfaceResolver],
+        build: Callable[[Sequence[CommandSurface]], _ResolverSnapshot],
     ) -> None:
         """Build the initial resolver and remember the builder for reloads."""
         self._build = build

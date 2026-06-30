@@ -5,10 +5,12 @@ from __future__ import annotations
 from vaivox.composition import (
     _merge_phrase_indexes,
     _mission_keyterms_from_phrases,
+    _voiceattack_surfaces,
     build_phrase_snapper,
 )
 from vaivox.domain.reconciliation.snapper import SnapDecision
 from vaivox.infrastructure.config.settings import VaivoxConfiguration
+from vaivox.infrastructure.vocabulary.command_catalog import CommandCatalogEntry
 from vaivox.infrastructure.vocabulary.phrase_index import PHRASE_INDEX_FILE
 
 
@@ -58,3 +60,19 @@ def test_phrase_index_merge_keeps_permanent_and_mission_entries_distinct() -> No
 
 def test_mission_keyterms_include_action_and_raw_menu_phrase() -> None:
     assert _mission_keyterms_from_phrases(["Action CHECK IN"]) == ["Action CHECK IN", "CHECK IN"]
+
+
+def test_voiceattack_surfaces_ignore_keyword_only_aliases() -> None:
+    surfaces = _voiceattack_surfaces(
+        [
+            CommandCatalogEntry("Tune TACAN", sources=("keywords.html",)),
+            CommandCatalogEntry(
+                "[Set; Select] TACAN [channel] [0..9]",
+                aircraft=("F-4E",),
+                sources=("VAICOM F-4E WSO.vap",),
+            ),
+        ]
+    )
+
+    assert [surface.label for surface in surfaces] == ["[Set; Select] TACAN [channel] [0..9]"]
+    assert surfaces[0].scope == "F-4E"
