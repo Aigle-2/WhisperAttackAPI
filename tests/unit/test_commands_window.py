@@ -126,6 +126,82 @@ def test_filter_command_entries_can_include_general_commands():
     assert [entry.phrase for entry in filtered] == ["Ground Power Connect", "Ground Power On"]
 
 
+def test_filter_command_entries_can_show_only_profile_commands():
+    entries = [
+        CommandCatalogEntry(
+            "[WSO; Wizzo; Boots;] [Set; Select] TACAN [channel] "
+            "[zero;0;1] [0..9] [0..9] [X-ray; Yankee]",
+            aircraft=("F-4E",),
+            sources=("VAICOM F-4E WSO.vap",),
+        ),
+        CommandCatalogEntry(
+            "TACAN Air refuel",
+            aircraft=("F-4E",),
+            sources=("keywords.txt", "keywords.html"),
+        ),
+    ]
+
+    filtered = filter_command_entries(
+        entries,
+        "taca",
+        include_profile=True,
+        include_keywords=False,
+        source_filter_enabled=True,
+    )
+
+    assert [display_command_entry(entry) for entry in filtered] == [
+        "Set/Select TACAN channel <000-199> X-ray/Yankee"
+    ]
+
+
+def test_filter_command_entries_can_show_only_keyword_actions():
+    entries = [
+        CommandCatalogEntry(
+            "[WSO; Wizzo; Boots;] [Set; Select] TACAN [channel] "
+            "[zero;0;1] [0..9] [0..9] [X-ray; Yankee]",
+            aircraft=("F-4E",),
+            sources=("VAICOM F-4E WSO.vap",),
+        ),
+        CommandCatalogEntry(
+            "TACAN Air refuel",
+            aircraft=("F-4E",),
+            sources=("keywords.txt", "keywords.html"),
+        ),
+    ]
+
+    filtered = filter_command_entries(
+        entries,
+        "taca",
+        include_profile=False,
+        include_keywords=True,
+        source_filter_enabled=True,
+    )
+
+    assert [entry.phrase for entry in filtered] == ["TACAN Air refuel"]
+
+
+def test_filter_command_entries_keeps_dual_source_commands_in_either_source_mode():
+    entry = CommandCatalogEntry(
+        "Ground Power On",
+        sources=("VAICOM PRO for DCS World.vap", "keywords.html"),
+    )
+
+    assert filter_command_entries(
+        [entry],
+        "power",
+        include_profile=True,
+        include_keywords=False,
+        source_filter_enabled=True,
+    ) == [entry]
+    assert filter_command_entries(
+        [entry],
+        "power",
+        include_profile=False,
+        include_keywords=True,
+        source_filter_enabled=True,
+    ) == [entry]
+
+
 def test_display_command_entry_humanizes_dynamic_voiceattack_pattern():
     entry = CommandCatalogEntry(
         "[WSO; Wizzo; Boots;] [Set; Select] TACAN [channel] "

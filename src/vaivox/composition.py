@@ -335,11 +335,9 @@ def build(
         )
 
     def get_core_command_entries() -> tuple[CommandCatalogEntry, ...]:
-        mission_keys = {phrase.strip().casefold() for phrase in get_mission_phrases()}
-        return tuple(
-            entry
-            for entry in load_command_catalog(config.app_data_location, get_core_phrases())
-            if entry.phrase.strip().casefold() not in mission_keys
+        return _core_command_entries(
+            load_command_catalog(config.app_data_location, get_core_phrases()),
+            get_mission_phrases(),
         )
 
     refresh_vocabulary = RefreshVocabulary(generator, reporter, apply_phrase_index)
@@ -453,6 +451,15 @@ def _voiceattack_surfaces(entries: Sequence[CommandCatalogEntry]) -> list[Comman
             )
         )
     return surfaces
+
+
+def _core_command_entries(
+    entries: Sequence[CommandCatalogEntry],
+    mission_phrases: Sequence[str],
+) -> tuple[CommandCatalogEntry, ...]:
+    """Return permanent speakable command entries, excluding the live mission overlay."""
+    mission_keys = {phrase.strip().casefold() for phrase in mission_phrases}
+    return tuple(entry for entry in entries if entry.phrase.strip().casefold() not in mission_keys)
 
 
 def _is_voiceattack_dispatchable(entry: CommandCatalogEntry) -> bool:

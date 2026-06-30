@@ -128,8 +128,11 @@ def filter_command_entries(
     include_general: bool = True,
     include_other: bool = True,
     scope_filter_enabled: bool = False,
+    include_profile: bool = True,
+    include_keywords: bool = True,
+    source_filter_enabled: bool = False,
 ) -> list[CommandCatalogEntry]:
-    """Return command entries matching text and optional aircraft-scope filters."""
+    """Return command entries matching text plus optional aircraft/source filters."""
     needle = query.strip().lower()
     filtered: list[CommandCatalogEntry] = []
     for command in commands:
@@ -141,6 +144,12 @@ def filter_command_entries(
             include_current=include_current,
             include_general=include_general,
             include_other=include_other,
+        ):
+            continue
+        if source_filter_enabled and not _source_included(
+            command,
+            include_profile=include_profile,
+            include_keywords=include_keywords,
         ):
             continue
         filtered.append(command)
@@ -171,6 +180,28 @@ def _scope_included(
     return include_other
 
 
+def _source_included(
+    command: CommandCatalogEntry,
+    *,
+    include_profile: bool,
+    include_keywords: bool,
+) -> bool:
+    return (include_profile and _is_profile_command_source(command)) or (
+        include_keywords and _is_keyword_command_source(command)
+    )
+
+
+def _is_profile_command_source(command: CommandCatalogEntry) -> bool:
+    return not command.sources or any(
+        source.casefold().endswith(".vap") for source in command.sources
+    )
+
+
+def _is_keyword_command_source(command: CommandCatalogEntry) -> bool:
+    keyword_sources = {"keywords.txt", "keywords.html"}
+    return any(source.casefold() in keyword_sources for source in command.sources)
+
+
 def _unique_scope_values(values: Iterable[str]) -> tuple[str, ...]:
     seen: set[str] = set()
     unique: list[str] = []
@@ -197,6 +228,7 @@ class _CommandsTab:
         *,
         get_current_aircraft: Callable[[], str | None] | None = None,
         enable_scope_filters: bool = False,
+        enable_source_filters: bool = False,
     ) -> None:
         """Build the search box, count label, and scrolled listbox into ``parent``.
 
@@ -208,6 +240,7 @@ class _CommandsTab:
             empty_message: The count-label text shown when the source is empty.
             get_current_aircraft: Returns the current DCS aircraft/module name, when known.
             enable_scope_filters: Whether this tab should show aircraft-scope filters.
+            enable_source_filters: Whether this tab should show profile/keyword filters.
         """
         from tkinter import (
             BOTH,
@@ -231,7 +264,9 @@ class _CommandsTab:
         self._get_current_aircraft = get_current_aircraft or (lambda: None)
         self._empty_message = empty_message
         self._enable_scope_filters = enable_scope_filters
+        self._enable_source_filters = enable_source_filters
         self._scope_filter_active = False
+        self._source_filter_active = False
         self._current_aircraft: str | None = None
         self._all_commands: list[CommandCatalogEntry] = []
         self._filtered: list[CommandCatalogEntry] = []
@@ -243,6 +278,8 @@ class _CommandsTab:
         self._include_current: Any = BooleanVar(value=True)
         self._include_general: Any = BooleanVar(value=False)
         self._include_other: Any = BooleanVar(value=False)
+        self._include_profile: Any = BooleanVar(value=True)
+        self._include_keywords: Any = BooleanVar(value=True)
         search_frame = Frame(parent)
         search_frame.pack(fill=X, padx=12, pady=(12, 6))
         Label(search_frame, text="Search").pack(side=LEFT, padx=(0, 8))
@@ -276,6 +313,23 @@ class _CommandsTab:
                 )
                 widget.pack(side=LEFT, padx=(0, 12))
                 self._scope_widgets.append(widget)
+
+        self._source_widgets: list[Any] = []
+        if enable_source_filters:
+            source_frame = Frame(parent)
+            source_frame.pack(fill=X, padx=12, pady=(0, 6))
+            for label, variable in (
+                ("Profile commands", self._include_profile),
+                ("VAICOM keyword actions", self._include_keywords),
+            ):
+                widget = Checkbutton(
+                    source_frame,
+                    text=label,
+                    variable=variable,
+                    command=self._on_source_filter_changed,
+                )
+                widget.pack(side=LEFT, padx=(0, 12))
+                self._source_widgets.append(widget)
 
         self._count: Any = StringVar(value="")
         Label(parent, textvariable=self._count, bootstyle="secondary").pack(
@@ -333,6 +387,7 @@ class _CommandsTab:
             self._all_commands = sort_command_entries(commands)
         self._current_aircraft = current_aircraft
         self._update_scope_filters()
+        self._update_source_filters()
         self._apply_filter(preserve=True)
 
     def _on_query_changed(self, *_args: object) -> None:
@@ -341,6 +396,10 @@ class _CommandsTab:
 
     def _on_scope_filter_changed(self) -> None:
         """Re-filter the list when a scope checkbox changes."""
+        self._apply_filter()
+
+    def _on_source_filter_changed(self) -> None:
+        """Re-filter the list when a source checkbox changes."""
         self._apply_filter()
 
     def _apply_filter(self, preserve: bool = False) -> None:
@@ -360,6 +419,9 @@ class _CommandsTab:
                 include_general=bool(self._include_general.get()),
                 include_other=bool(self._include_other.get()),
                 scope_filter_enabled=self._scope_filter_active,
+                include_profile=bool(self._include_profile.get()),
+                include_keywords=bool(self._include_keywords.get()),
+                source_filter_enabled=self._source_filter_active,
             )
         )
         self._filtered = filter_command_entries(
@@ -370,6 +432,9 @@ class _CommandsTab:
             include_general=bool(self._include_general.get()),
             include_other=bool(self._include_other.get()),
             scope_filter_enabled=self._scope_filter_active,
+            include_profile=bool(self._include_profile.get()),
+            include_keywords=bool(self._include_keywords.get()),
+            source_filter_enabled=self._source_filter_active,
         )
         self._listbox.delete(0, self._end)
         for command in self._filtered:
@@ -394,6 +459,17 @@ class _CommandsTab:
             )
             self._current_scope_check.configure(text=label)
         for widget in self._scope_widgets:
+            widget.configure(state=state)
+
+    def _update_source_filters(self) -> None:
+        """Enable source checkboxes only when catalog source metadata is present."""
+        self._source_filter_active = bool(
+            self._enable_source_filters and any(command.sources for command in self._all_commands)
+        )
+        if not self._source_widgets:
+            return
+        state = "normal" if self._source_filter_active else "disabled"
+        for widget in self._source_widgets:
             widget.configure(state=state)
 
     def _update_count(self) -> None:
@@ -536,6 +612,7 @@ class VaivoxCommands:
             ("F10", get_mission_commands, "No F10 commands pulled this session"),
         ]
         scope_filters = {"Core": True}
+        source_filters = {"Core": True}
         for label, get_commands, empty_message in specs:
             page = Frame(notebook)
             notebook.add(page, text=label)
@@ -548,6 +625,7 @@ class VaivoxCommands:
                     empty_message,
                     get_current_aircraft=get_current_aircraft,
                     enable_scope_filters=scope_filters.get(label, False),
+                    enable_source_filters=source_filters.get(label, False),
                 )
             )
 

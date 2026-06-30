@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from vaivox.composition import (
+    _core_command_entries,
     _merge_phrase_indexes,
     _mission_keyterms_from_phrases,
     _voiceattack_surfaces,
@@ -10,6 +11,11 @@ from vaivox.composition import (
 )
 from vaivox.domain.reconciliation.snapper import SnapDecision
 from vaivox.infrastructure.config.settings import VaivoxConfiguration
+from vaivox.infrastructure.ui.commands_window import (
+    display_command_entry,
+    filter_command_entries,
+    sort_command_entries,
+)
 from vaivox.infrastructure.vocabulary.command_catalog import CommandCatalogEntry
 from vaivox.infrastructure.vocabulary.phrase_index import PHRASE_INDEX_FILE
 
@@ -76,3 +82,56 @@ def test_voiceattack_surfaces_ignore_keyword_only_aliases() -> None:
 
     assert [surface.label for surface in surfaces] == ["[Set; Select] TACAN [channel] [0..9]"]
     assert surfaces[0].scope == "F-4E"
+
+
+def test_core_command_entries_keep_keyword_only_snap_phrases() -> None:
+    entries = [
+        CommandCatalogEntry(
+            "Ground Power Connect",
+            aircraft=("F-4E",),
+            sources=("keywords.txt", "keywords.html"),
+        ),
+        CommandCatalogEntry(
+            "Ground Power Disconnect",
+            aircraft=("F-4E",),
+            sources=("keywords.txt", "keywords.html"),
+        ),
+        CommandCatalogEntry("Action CHECK IN", sources=("VAICOM PRO for DCS World.vap",)),
+    ]
+
+    core_entries = _core_command_entries(entries, mission_phrases=("Action CHECK IN",))
+
+    assert [entry.phrase for entry in core_entries] == [
+        "Ground Power Connect",
+        "Ground Power Disconnect",
+    ]
+
+
+def test_core_commands_window_data_keeps_f4_ground_power_without_tk() -> None:
+    entries = [
+        CommandCatalogEntry("External Power On"),
+        CommandCatalogEntry("Ground Power Connect", aircraft=("F-4E",), sources=("keywords.html",)),
+        CommandCatalogEntry(
+            "Ground Power Disconnect",
+            aircraft=("F-4E",),
+            sources=("keywords.txt", "keywords.html"),
+        ),
+        CommandCatalogEntry("Ground Power On", sources=("VAICOM PRO for DCS World.vap",)),
+        CommandCatalogEntry("Radar Scan High", aircraft=("F-14",), sources=("keywords.html",)),
+    ]
+
+    displayable = _core_command_entries(entries, mission_phrases=())
+    visible = filter_command_entries(
+        sort_command_entries(displayable),
+        "power",
+        current_aircraft="F-4E-45MC",
+        include_current=True,
+        include_general=False,
+        include_other=False,
+        scope_filter_enabled=True,
+    )
+
+    assert [display_command_entry(entry) for entry in visible] == [
+        "Ground Power Connect",
+        "Ground Power Disconnect",
+    ]
