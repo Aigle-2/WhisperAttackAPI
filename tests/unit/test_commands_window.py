@@ -8,6 +8,7 @@ the live search filter. These pin that logic without a UI.
 from __future__ import annotations
 
 from vaivox.infrastructure.ui.commands_window import (
+    aircraft_scope_options,
     display_command_entry,
     filter_command_entries,
     filter_commands,
@@ -124,6 +125,40 @@ def test_filter_command_entries_can_include_general_commands():
     )
 
     assert [entry.phrase for entry in filtered] == ["Ground Power Connect", "Ground Power On"]
+
+
+def test_aircraft_scope_options_are_dynamic_with_current_aircraft_first():
+    entries = [
+        CommandCatalogEntry("Apache command", aircraft=("AH-64D",)),
+        CommandCatalogEntry("Phantom command", aircraft=("F-4E",)),
+        CommandCatalogEntry("Hind command", aircraft=("MI-24P",)),
+    ]
+
+    options = aircraft_scope_options(entries, current_aircraft="MI-24P")
+
+    assert options == ("MI-24P", "AH-64D", "F-4E")
+
+
+def test_filter_command_entries_can_include_specific_other_aircraft_scope():
+    entries = [
+        CommandCatalogEntry("Ground Power Connect", aircraft=("F-4E",)),
+        CommandCatalogEntry("George Target List", aircraft=("AH-64D",)),
+        CommandCatalogEntry("Petrovich Search", aircraft=("MI-24P",)),
+        CommandCatalogEntry("Ground Power On"),
+    ]
+
+    filtered = filter_command_entries(
+        entries,
+        "",
+        current_aircraft="F-4E-45MC",
+        include_current=False,
+        include_general=False,
+        include_other=False,
+        included_aircraft=("AH-64D",),
+        scope_filter_enabled=True,
+    )
+
+    assert [entry.phrase for entry in filtered] == ["George Target List"]
 
 
 def test_filter_command_entries_can_show_only_profile_commands():

@@ -181,6 +181,39 @@ def test_generate_command_catalog_tags_aircraft_specific_keywords_html_rows(tmp_
     assert by_phrase["Ground Power On"].aircraft == ()
 
 
+def test_generate_command_catalog_tags_apache_and_hind_groups(tmp_path):
+    root = tmp_path / "VAICOMPRO"
+    (root / "Export").mkdir(parents=True)
+    (root / "Profiles").mkdir()
+    (root / "Export" / "keywords.html").write_text(
+        """
+        <table>
+          <tr>
+            <td class="action">George Target List</td>
+            <td class="group"><div>AH-64D AI George</div></td>
+            <td class="aliases">
+              <span class="alias-item">George Target List</span>
+            </td>
+          </tr>
+          <tr>
+            <td class="action">Petrovich Search</td>
+            <td class="group"><div>Mi-24P AI Petrovich</div></td>
+            <td class="aliases">
+              <span class="alias-item">Petrovich Search</span>
+            </td>
+          </tr>
+        </table>
+        """,
+        encoding="utf-8",
+    )
+
+    catalog = generate_command_catalog(root, tmp_path / "saved")
+    by_phrase = {entry.phrase: entry for entry in catalog}
+
+    assert by_phrase["George Target List"].aircraft == ("AH-64D",)
+    assert by_phrase["Petrovich Search"].aircraft == ("MI-24P",)
+
+
 def test_clean_term_unwraps_a_single_bracket_group_but_not_a_multi_slot_phrase():
     assert generator.clean_term("[Channel]") == "Channel"
     assert generator.clean_term("[Radio] [Channel] [1..18]") == "[Radio] [Channel] [1..18]"

@@ -39,6 +39,7 @@ if TYPE_CHECKING:
 
 #: How often (ms) each tab re-reads its command source to pick up hot-reloads.
 _POLL_INTERVAL_MS = 1000
+_SCOPE_FILTER_COLUMNS = 3
 
 CommandSourceEntry = str | CommandCatalogEntry
 
@@ -119,6 +120,15 @@ def display_command_entry(command: CommandCatalogEntry) -> str:
     return format_voiceattack_pattern(command.phrase)
 
 
+def aircraft_scope_options(
+    commands: Iterable[CommandCatalogEntry],
+    current_aircraft: str | None = None,
+) -> tuple[str, ...]:
+    """Return catalog aircraft tags with the current-aircraft match first."""
+    tags = _unique_scope_values(tag for command in commands for tag in command.aircraft)
+    return tuple(sorted(tags, key=lambda tag: _aircraft_scope_sort_key(tag, current_aircraft)))
+
+
 def filter_command_entries(
     commands: Sequence[CommandCatalogEntry],
     query: str,
@@ -127,6 +137,7 @@ def filter_command_entries(
     include_current: bool = True,
     include_general: bool = True,
     include_other: bool = True,
+    included_aircraft: Sequence[str] = (),
     scope_filter_enabled: bool = False,
     include_profile: bool = True,
     include_keywords: bool = True,
@@ -144,6 +155,7 @@ def filter_command_entries(
             include_current=include_current,
             include_general=include_general,
             include_other=include_other,
+            included_aircraft=included_aircraft,
         ):
             continue
         if source_filter_enabled and not _source_included(
@@ -172,12 +184,25 @@ def _scope_included(
     include_current: bool,
     include_general: bool,
     include_other: bool,
+    included_aircraft: Sequence[str],
 ) -> bool:
     if not command.aircraft:
         return include_general
-    if entry_matches_aircraft(command, current_aircraft):
-        return include_current
-    return include_other
+    matches_current = entry_matches_aircraft(command, current_aircraft)
+    if include_current and matches_current:
+        return True
+    if any(entry_matches_aircraft(command, aircraft) for aircraft in included_aircraft):
+        return True
+    return include_other and not matches_current
+
+
+def _aircraft_scope_sort_key(tag: str, current_aircraft: str | None) -> tuple[int, str]:
+    current_rank = 0 if _aircraft_tag_matches(tag, current_aircraft) else 1
+    return (current_rank, tag.casefold())
+
+
+def _aircraft_tag_matches(tag: str, current_aircraft: str | None) -> bool:
+    return entry_matches_aircraft(CommandCatalogEntry(tag, aircraft=(tag,)), current_aircraft)
 
 
 def _source_included(
@@ -277,7 +302,8 @@ class _CommandsTab:
         self._query: Any = StringVar()
         self._include_current: Any = BooleanVar(value=True)
         self._include_general: Any = BooleanVar(value=False)
-        self._include_other: Any = BooleanVar(value=False)
+        self._aircraft_filter_vars: dict[str, Any] = {}
+        self._aircraft_filter_widgets: dict[str, Any] = {}
         self._include_profile: Any = BooleanVar(value=True)
         self._include_keywords: Any = BooleanVar(value=True)
         search_frame = Frame(parent)
@@ -288,31 +314,30 @@ class _CommandsTab:
         self._entry: Any = entry
 
         self._scope_widgets: list[Any] = []
+        self._scope_frame: Any | None = None
         self._current_scope_check: Any | None = None
+        self._general_scope_check: Any | None = None
         if enable_scope_filters:
             scope_frame = Frame(parent)
             scope_frame.pack(fill=X, padx=12, pady=(0, 6))
+            self._scope_frame = scope_frame
             current_check = Checkbutton(
                 scope_frame,
                 text="Current aircraft",
                 variable=self._include_current,
                 command=self._on_scope_filter_changed,
             )
-            current_check.pack(side=LEFT, padx=(0, 12))
             self._current_scope_check = current_check
             self._scope_widgets.append(current_check)
-            for label, variable in (
-                ("General", self._include_general),
-                ("Other aircraft", self._include_other),
-            ):
-                widget = Checkbutton(
-                    scope_frame,
-                    text=label,
-                    variable=variable,
-                    command=self._on_scope_filter_changed,
-                )
-                widget.pack(side=LEFT, padx=(0, 12))
-                self._scope_widgets.append(widget)
+            general_check = Checkbutton(
+                scope_frame,
+                text="General",
+                variable=self._include_general,
+                command=self._on_scope_filter_changed,
+            )
+            self._general_scope_check = general_check
+            self._scope_widgets.append(general_check)
+            self._layout_scope_widgets()
 
         self._source_widgets: list[Any] = []
         if enable_source_filters:
@@ -417,7 +442,8 @@ class _CommandsTab:
                 current_aircraft=self._current_aircraft,
                 include_current=bool(self._include_current.get()),
                 include_general=bool(self._include_general.get()),
-                include_other=bool(self._include_other.get()),
+                include_other=False,
+                included_aircraft=self._selected_aircraft_filters(),
                 scope_filter_enabled=self._scope_filter_active,
                 include_profile=bool(self._include_profile.get()),
                 include_keywords=bool(self._include_keywords.get()),
@@ -430,7 +456,8 @@ class _CommandsTab:
             current_aircraft=self._current_aircraft,
             include_current=bool(self._include_current.get()),
             include_general=bool(self._include_general.get()),
-            include_other=bool(self._include_other.get()),
+            include_other=False,
+            included_aircraft=self._selected_aircraft_filters(),
             scope_filter_enabled=self._scope_filter_active,
             include_profile=bool(self._include_profile.get()),
             include_keywords=bool(self._include_keywords.get()),
@@ -448,6 +475,7 @@ class _CommandsTab:
         self._scope_filter_active = bool(
             self._enable_scope_filters and has_scoped_entries and self._current_aircraft
         )
+        self._sync_aircraft_scope_widgets()
         if not self._scope_widgets:
             return
         state = "normal" if self._scope_filter_active else "disabled"
@@ -460,6 +488,62 @@ class _CommandsTab:
             self._current_scope_check.configure(text=label)
         for widget in self._scope_widgets:
             widget.configure(state=state)
+
+    def _sync_aircraft_scope_widgets(self) -> None:
+        """Rebuild the dynamic aircraft checkboxes from catalog aircraft tags."""
+        from tkinter import BooleanVar
+
+        from ttkbootstrap import Checkbutton
+
+        if self._scope_frame is None:
+            return
+        options = tuple(
+            tag
+            for tag in aircraft_scope_options(self._all_commands, self._current_aircraft)
+            if not _aircraft_tag_matches(tag, self._current_aircraft)
+        )
+        for tag in tuple(self._aircraft_filter_widgets):
+            if tag in options:
+                continue
+            self._aircraft_filter_widgets.pop(tag).destroy()
+            self._aircraft_filter_vars.pop(tag, None)
+        for tag in options:
+            if tag in self._aircraft_filter_widgets:
+                continue
+            variable = BooleanVar(value=False)
+            widget = Checkbutton(
+                self._scope_frame,
+                text=tag,
+                variable=variable,
+                command=self._on_scope_filter_changed,
+            )
+            self._aircraft_filter_vars[tag] = variable
+            self._aircraft_filter_widgets[tag] = widget
+        self._scope_widgets = [
+            widget
+            for widget in (self._current_scope_check, self._general_scope_check)
+            if widget is not None
+        ]
+        self._scope_widgets.extend(self._aircraft_filter_widgets[tag] for tag in options)
+        self._layout_scope_widgets()
+
+    def _layout_scope_widgets(self) -> None:
+        """Place scope filters in stable rows so many aircraft tags do not overflow."""
+        for index, widget in enumerate(self._scope_widgets):
+            widget.grid_forget()
+            widget.grid(
+                row=index // _SCOPE_FILTER_COLUMNS,
+                column=index % _SCOPE_FILTER_COLUMNS,
+                sticky="w",
+                padx=(0, 12),
+                pady=(0, 4),
+            )
+
+    def _selected_aircraft_filters(self) -> tuple[str, ...]:
+        """Return the dynamic aircraft tags currently checked by the user."""
+        return tuple(
+            tag for tag, variable in self._aircraft_filter_vars.items() if bool(variable.get())
+        )
 
     def _update_source_filters(self) -> None:
         """Enable source checkboxes only when catalog source metadata is present."""
